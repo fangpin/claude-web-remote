@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import {
   createSession,
   deleteSession,
@@ -28,6 +28,7 @@ export default function App() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isListLoading, setIsListLoading] = useState(false);
+  const skipNextListRefresh = useRef(false);
 
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeId) ?? null,
@@ -35,6 +36,10 @@ export default function App() {
   );
 
   useEffect(() => {
+    if (skipNextListRefresh.current) {
+      skipNextListRefresh.current = false;
+      return;
+    }
     let cancelled = false;
     setIsListLoading(true);
     setSessions([]);
@@ -59,19 +64,21 @@ export default function App() {
   }, [listMode]);
 
   useEffect(() => {
-    if (!activeId || listMode === 'deleted') return;
-    const afterId = events[activeId]?.at(-1)?.id ?? 0;
-    const socket = new WebSocket(eventsUrl(activeId, afterId));
+    if (!activeSession || listMode === 'deleted') return;
+    if (activeSession.status !== 'running' && activeSession.status !== 'starting') return;
+    const sessionId = activeSession.id;
+    const afterId = events[sessionId]?.at(-1)?.id ?? 0;
+    const socket = new WebSocket(eventsUrl(sessionId, afterId));
     socket.onmessage = (message) => {
       const event = JSON.parse(message.data) as UiEvent;
       setEvents((current) => ({
         ...current,
-        [activeId]: [...(current[activeId] ?? []), event]
+        [sessionId]: [...(current[sessionId] ?? []), event]
       }));
     };
     socket.onclose = () => undefined;
     return () => socket.close();
-  }, [activeId, listMode]);
+  }, [activeSession?.id, activeSession?.status, activeSession?.updatedAt, listMode]);
 
   async function onCreateSession(event: FormEvent) {
     event.preventDefault();
@@ -82,7 +89,13 @@ export default function App() {
         name: name.trim() || undefined,
         permissionMode
       });
-      setSessions((current) => [created, ...current]);
+      if (listMode === 'deleted') {
+        skipNextListRefresh.current = true;
+        setListMode('active');
+        setSessions([created]);
+      } else {
+        setSessions((current) => [created, ...current]);
+      }
       setActiveId(created.id);
       setCwd('');
       setName('');

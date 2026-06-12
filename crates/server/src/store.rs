@@ -86,8 +86,37 @@ impl EventStore {
 
     pub async fn load_meta(&self, session_id: Uuid) -> AppResult<SessionMeta> {
         let _guard = self.write_lock.lock().await;
-        let content = fs::read(self.session_dir(session_id).join("meta.json")).await?;
-        Ok(serde_json::from_slice(&content)?)
+        self.load_meta_unlocked(session_id).await
+    }
+
+    pub async fn update_meta<F>(&self, session_id: Uuid, update: F) -> AppResult<SessionMeta>
+    where
+        F: FnOnce(&mut SessionMeta) -> AppResult<()>,
+    {
+        let _guard = self.write_lock.lock().await;
+        let mut meta = self.load_meta_unlocked(session_id).await?;
+        update(&mut meta)?;
+        let dir = self.ensure_session_dir(meta.id).await?;
+        let content = serde_json::to_vec_pretty(&meta)?;
+        fs::write(dir.join("meta.json"), content).await?;
+        Ok(meta)
+    }
+
+    pub async fn update_claude_session_id(
+        &self,
+        session_id: Uuid,
+        claude_session_id: String,
+    ) -> AppResult<()> {
+        self.update_meta(session_id, |meta| {
+            if meta.claude_session_id.as_deref() == Some(claude_session_id.as_str()) {
+                return Ok(());
+            }
+            meta.claude_session_id = Some(claude_session_id);
+            meta.updated_at = Utc::now();
+            Ok(())
+        })
+        .await?;
+        Ok(())
     }
 
     pub async fn list_meta(&self, filter: SessionListFilter) -> AppResult<Vec<SessionMeta>> {
@@ -125,12 +154,47 @@ impl EventStore {
             .await
     }
 
+    pub async fn append_event_with_next_id(&self, event: &mut UiEvent) -> AppResult<()> {
+        let _guard = self.write_lock.lock().await;
+        event.id = self.next_event_id_unlocked(event.session_id).await?;
+        let line = serde_json::to_string(event)?;
+        self.append_line_unlocked(event.session_id, "events.jsonl", &line)
+            .await
+    }
+
     pub async fn next_event_id(&self, session_id: Uuid) -> AppResult<u64> {
-        let events = self.load_events_after(session_id, 0).await?;
-        Ok(events.iter().map(|event| event.id).max().unwrap_or(0) + 1)
+        let _guard = self.write_lock.lock().await;
+        self.next_event_id_unlocked(session_id).await
     }
 
     pub async fn load_events_after(
+        &self,
+        session_id: Uuid,
+        after_id: u64,
+    ) -> AppResult<Vec<UiEvent>> {
+        let _guard = self.write_lock.lock().await;
+        self.load_events_after_unlocked(session_id, after_id).await
+    }
+
+    pub async fn append_raw_stdout(&self, session_id: Uuid, line: &str) -> AppResult<()> {
+        self.append_line(session_id, "raw-stdout.jsonl", line).await
+    }
+
+    pub async fn append_stderr(&self, session_id: Uuid, line: &str) -> AppResult<()> {
+        self.append_line(session_id, "stderr.log", line).await
+    }
+
+    async fn load_meta_unlocked(&self, session_id: Uuid) -> AppResult<SessionMeta> {
+        let content = fs::read(self.session_dir(session_id).join("meta.json")).await?;
+        Ok(serde_json::from_slice(&content)?)
+    }
+
+    async fn next_event_id_unlocked(&self, session_id: Uuid) -> AppResult<u64> {
+        let events = self.load_events_after_unlocked(session_id, 0).await?;
+        Ok(events.iter().map(|event| event.id).max().unwrap_or(0) + 1)
+    }
+
+    async fn load_events_after_unlocked(
         &self,
         session_id: Uuid,
         after_id: u64,
@@ -151,16 +215,17 @@ impl EventStore {
         Ok(events)
     }
 
-    pub async fn append_raw_stdout(&self, session_id: Uuid, line: &str) -> AppResult<()> {
-        self.append_line(session_id, "raw-stdout.jsonl", line).await
-    }
-
-    pub async fn append_stderr(&self, session_id: Uuid, line: &str) -> AppResult<()> {
-        self.append_line(session_id, "stderr.log", line).await
-    }
-
     async fn append_line(&self, session_id: Uuid, file_name: &str, line: &str) -> AppResult<()> {
         let _guard = self.write_lock.lock().await;
+        self.append_line_unlocked(session_id, file_name, line).await
+    }
+
+    async fn append_line_unlocked(
+        &self,
+        session_id: Uuid,
+        file_name: &str,
+        line: &str,
+    ) -> AppResult<()> {
         let dir = self.session_dir(session_id);
         if !fs::try_exists(&dir).await? {
             return Err(AppError::NotFound(format!("session {session_id}")));
@@ -343,6 +408,37 @@ mod tests {
             listed.iter().map(|meta| meta.id).collect::<Vec<_>>(),
             vec![id]
         );
+    }
+
+    #[tokio::test]
+    async fn updates_claude_session_id_without_overwriting_lifecycle_changes() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = EventStore::new(temp.path()).await.unwrap();
+        let id = Uuid::new_v4();
+        let now = Utc::now();
+        let meta = SessionMeta {
+            id,
+            name: Some("lifecycle".to_string()),
+            cwd: PathBuf::from("/tmp/lifecycle"),
+            permission_mode: "acceptEdits".to_string(),
+            status: SessionStatus::Stopped,
+            claude_session_id: None,
+            deleted_at: Some(now),
+            created_at: now,
+            updated_at: now,
+        };
+        store.save_meta(&meta).await.unwrap();
+
+        store
+            .update_claude_session_id(id, "claude-session".to_string())
+            .await
+            .unwrap();
+
+        let loaded = store.load_meta(id).await.unwrap();
+        assert_eq!(loaded.status, SessionStatus::Stopped);
+        assert_eq!(loaded.deleted_at, Some(now));
+        assert_eq!(loaded.claude_session_id, Some("claude-session".to_string()));
+        assert!(loaded.updated_at >= now);
     }
 
     #[tokio::test]

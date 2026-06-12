@@ -145,6 +145,22 @@ describe('App', () => {
     expect((await screen.findAllByText('New Repo')).length).toBeGreaterThan(0);
   });
 
+  it('switches to active mode when creating from deleted mode', async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Deleted' }));
+    expect(await screen.findByRole('heading', { name: 'Deleted Repo' })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Working directory'), { target: { value: '/repo/two' } });
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'New Repo' } });
+    fireEvent.click(screen.getByText('Create session'));
+
+    expect(await screen.findByRole('heading', { name: 'New Repo' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Active' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Deleted' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByRole('button', { name: /Deleted Repo/ })).not.toBeInTheDocument();
+  });
+
   it('shows create session errors', async () => {
     render(<App />);
 
@@ -275,9 +291,12 @@ describe('App', () => {
     render(<App />);
 
     fireEvent.click(await screen.findByRole('button', { name: /Stopped Repo/ }));
+    const socketsBeforeResume = FakeWebSocket.instances.length;
     fireEvent.click(await screen.findByRole('button', { name: 'Resume' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s2/resume', expect.objectContaining({ method: 'POST' })));
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBe(socketsBeforeResume + 1));
+    expect(FakeWebSocket.instances.at(-1)?.url).toContain('/api/sessions/s2/events?afterId=0');
     expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Restart' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();

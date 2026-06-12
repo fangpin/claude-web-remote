@@ -120,14 +120,8 @@ impl SessionManager {
 
     pub async fn send_input(&self, session_id: Uuid, text: String) -> AppResult<()> {
         let _meta = self.load_active_meta(session_id).await?;
-        let event_id = self.store.next_event_id(session_id).await?;
-        let event = UiEvent::new(
-            event_id,
-            session_id,
-            EventKind::User,
-            json!({ "text": text }),
-        );
-        self.store.append_event(&event).await?;
+        let mut event = UiEvent::new(0, session_id, EventKind::User, json!({ "text": text }));
+        self.store.append_event_with_next_id(&mut event).await?;
 
         let (process, tx) = {
             let running = self.running.lock().await;
@@ -163,31 +157,40 @@ impl SessionManager {
     }
 
     pub async fn delete_session(&self, session_id: Uuid) -> AppResult<SessionInfo> {
-        let mut meta = self.load_active_meta(session_id).await?;
-        if self.running.lock().await.contains_key(&session_id) {
-            self.stop_running_process(session_id).await?;
-            self.update_status(session_id, SessionStatus::Stopped)
-                .await?;
-            meta = self.store.load_meta(session_id).await?;
-        }
-        let now = Utc::now();
-        meta.deleted_at = Some(now);
-        meta.status = SessionStatus::Stopped;
-        meta.updated_at = now;
-        self.store.save_meta(&meta).await?;
+        let _meta = self.load_active_meta(session_id).await?;
+        self.stop_running_process(session_id).await?;
+        let meta = self
+            .store
+            .update_meta(session_id, |meta| {
+                if meta.deleted_at.is_some() {
+                    return Err(AppError::InvalidRequest(format!(
+                        "session {session_id} is deleted; restore it before continuing"
+                    )));
+                }
+                let now = Utc::now();
+                meta.deleted_at = Some(now);
+                meta.status = SessionStatus::Stopped;
+                meta.updated_at = now;
+                Ok(())
+            })
+            .await?;
         Ok(SessionInfo::from(meta))
     }
 
     pub async fn restore_session(&self, session_id: Uuid) -> AppResult<SessionInfo> {
-        let mut meta = self.store.load_meta(session_id).await?;
-        if meta.deleted_at.is_none() {
-            return Err(AppError::InvalidRequest(format!(
-                "session {session_id} is not deleted"
-            )));
-        }
-        meta.deleted_at = None;
-        meta.updated_at = Utc::now();
-        self.store.save_meta(&meta).await?;
+        let meta = self
+            .store
+            .update_meta(session_id, |meta| {
+                if meta.deleted_at.is_none() {
+                    return Err(AppError::InvalidRequest(format!(
+                        "session {session_id} is not deleted"
+                    )));
+                }
+                meta.deleted_at = None;
+                meta.updated_at = Utc::now();
+                Ok(())
+            })
+            .await?;
         Ok(SessionInfo::from(meta))
     }
 
@@ -228,6 +231,14 @@ impl SessionManager {
         Ok(())
     }
 
+    async fn broadcast_event(&self, session_id: Uuid, event: UiEvent) -> AppResult<()> {
+        let running = self.running.lock().await;
+        if let Some(session) = running.get(&session_id) {
+            let _ = session.tx.send(event);
+        }
+        Ok(())
+    }
+
     async fn reserve_starting(&self, session_id: Uuid) -> AppResult<()> {
         let mut starting = self.starting.lock().await;
         let running = self.running.lock().await;
@@ -253,17 +264,32 @@ impl SessionManager {
         self.start_or_resume(meta).await
     }
 
-    async fn start_or_resume(&self, meta: SessionMeta) -> AppResult<SessionInfo> {
+    async fn start_or_resume(&self, mut meta: SessionMeta) -> AppResult<SessionInfo> {
         let resume = meta.claude_session_id.clone();
+        meta = self
+            .store
+            .update_meta(meta.id, |latest| {
+                if latest.deleted_at.is_some() {
+                    return Err(AppError::InvalidRequest(format!(
+                        "session {} is deleted; restore it before continuing",
+                        latest.id
+                    )));
+                }
+                latest.status = SessionStatus::Starting;
+                latest.updated_at = Utc::now();
+                Ok(())
+            })
+            .await?;
+
         if resume.is_none() {
-            let event_id = self.store.next_event_id(meta.id).await?;
-            let event = UiEvent::new(
-                event_id,
+            let mut event = UiEvent::new(
+                0,
                 meta.id,
                 EventKind::System,
                 json!({ "message": "no claude session id found; started fresh" }),
             );
-            self.store.append_event(&event).await?;
+            self.store.append_event_with_next_id(&mut event).await?;
+            let _ = self.broadcast_event(meta.id, event).await;
         }
         self.start_process(meta, resume).await
     }
@@ -273,6 +299,7 @@ impl SessionManager {
         mut meta: SessionMeta,
         resume_session_id: Option<String>,
     ) -> AppResult<SessionInfo> {
+        let starting_event_id = self.store.next_event_id(meta.id).await?;
         let (process, mut rx) = ClaudeProcess::spawn(
             meta.id,
             ClaudeProcessConfig {
@@ -280,13 +307,32 @@ impl SessionManager {
                 cwd: meta.cwd.clone(),
                 permission_mode: meta.permission_mode.clone(),
                 resume_session_id,
+                starting_event_id,
             },
         )
         .await?;
 
-        meta.status = SessionStatus::Running;
-        meta.updated_at = Utc::now();
-        self.store.save_meta(&meta).await?;
+        meta = match self
+            .store
+            .update_meta(meta.id, |latest| {
+                if latest.deleted_at.is_some() || latest.status == SessionStatus::Stopped {
+                    return Err(AppError::InvalidRequest(format!(
+                        "session {} start was cancelled",
+                        latest.id
+                    )));
+                }
+                latest.status = SessionStatus::Running;
+                latest.updated_at = Utc::now();
+                Ok(())
+            })
+            .await
+        {
+            Ok(meta) => meta,
+            Err(error) => {
+                let _ = process.kill().await;
+                return Err(error);
+            }
+        };
 
         let (tx, _) = broadcast::channel(256);
         self.running.lock().await.insert(
@@ -308,17 +354,12 @@ impl SessionManager {
                     }
                     ProcessEvent::StderrLine(line) => {
                         let _ = store.append_stderr(session_id, &line).await;
-                        let event_id = store.next_event_id(session_id).await.unwrap_or(1);
-                        let ui_event = UiEvent::new(
-                            event_id,
-                            session_id,
-                            EventKind::Error,
-                            json!({ "line": line }),
-                        );
-                        let _ = store.append_event(&ui_event).await;
+                        let mut ui_event =
+                            UiEvent::new(0, session_id, EventKind::Error, json!({ "line": line }));
+                        let _ = store.append_event_with_next_id(&mut ui_event).await;
                         let _ = tx.send(ui_event);
                     }
-                    ProcessEvent::UiEvent(ui_event) => {
+                    ProcessEvent::UiEvent(mut ui_event) => {
                         if let Some(claude_session_id) =
                             extract_claude_session_id(&ui_event.payload)
                         {
@@ -329,26 +370,27 @@ impl SessionManager {
                             )
                             .await;
                         }
-                        let _ = store.append_event(&ui_event).await;
+                        let _ = store.append_event_with_next_id(&mut ui_event).await;
                         let _ = tx.send(ui_event);
                     }
                     ProcessEvent::Exited(_) => {
                         let _ = running.lock().await.remove(&session_id);
-                        if let Ok(mut meta) = store.load_meta(session_id).await
-                            && meta.status != SessionStatus::Stopped
-                        {
-                            meta.status = SessionStatus::Exited;
-                            meta.updated_at = Utc::now();
-                            let _ = store.save_meta(&meta).await;
-                        }
-                        let event_id = store.next_event_id(session_id).await.unwrap_or(1);
-                        let ui_event = UiEvent::new(
-                            event_id,
+                        let _ = store
+                            .update_meta(session_id, |meta| {
+                                if meta.status != SessionStatus::Stopped {
+                                    meta.status = SessionStatus::Exited;
+                                    meta.updated_at = Utc::now();
+                                }
+                                Ok(())
+                            })
+                            .await;
+                        let mut ui_event = UiEvent::new(
+                            0,
                             session_id,
                             EventKind::System,
                             json!({ "status": "exited" }),
                         );
-                        let _ = store.append_event(&ui_event).await;
+                        let _ = store.append_event_with_next_id(&mut ui_event).await;
                         let _ = tx.send(ui_event);
                     }
                 }
@@ -363,20 +405,20 @@ impl SessionManager {
         session_id: Uuid,
         claude_session_id: String,
     ) -> AppResult<()> {
-        let mut meta = store.load_meta(session_id).await?;
-        if meta.claude_session_id.as_deref() == Some(claude_session_id.as_str()) {
-            return Ok(());
-        }
-        meta.claude_session_id = Some(claude_session_id);
-        meta.updated_at = Utc::now();
-        store.save_meta(&meta).await
+        store
+            .update_claude_session_id(session_id, claude_session_id)
+            .await
     }
 
     async fn update_status(&self, session_id: Uuid, status: SessionStatus) -> AppResult<()> {
-        let mut meta = self.store.load_meta(session_id).await?;
-        meta.status = status;
-        meta.updated_at = Utc::now();
-        self.store.save_meta(&meta).await
+        self.store
+            .update_meta(session_id, |meta| {
+                meta.status = status;
+                meta.updated_at = Utc::now();
+                Ok(())
+            })
+            .await?;
+        Ok(())
     }
 }
 
@@ -437,6 +479,21 @@ done
         permissions.set_mode(0o755);
         fs::set_permissions(&path, permissions).unwrap();
         path
+    }
+
+    async fn wait_for_status(
+        store: &EventStore,
+        session_id: Uuid,
+        status: SessionStatus,
+    ) -> SessionMeta {
+        for _ in 0..50 {
+            let meta = store.load_meta(session_id).await.unwrap();
+            if meta.status == status {
+                return meta;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        store.load_meta(session_id).await.unwrap()
     }
 
     #[tokio::test]
@@ -572,6 +629,47 @@ done
     }
 
     #[tokio::test]
+    async fn restart_process_events_continue_after_existing_events() {
+        let temp = tempfile::tempdir().unwrap();
+        let bin = fake_claude(temp.path());
+        let store = EventStore::new(temp.path().join("data")).await.unwrap();
+        let manager = SessionManager::new(
+            store.clone(),
+            vec![bin.to_string_lossy().to_string()],
+            "acceptEdits".to_string(),
+        );
+
+        let session = manager
+            .create_session(CreateSessionRequest {
+                cwd: temp.path().to_path_buf(),
+                name: None,
+                permission_mode: None,
+            })
+            .await
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        manager.stop_session(session.id).await.unwrap();
+        let before_resume_max_id = store
+            .load_events_after(session.id, 0)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|event| event.id)
+            .max()
+            .unwrap();
+
+        manager.resume_session(session.id).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+        let events = store
+            .load_events_after(session.id, before_resume_max_id)
+            .await
+            .unwrap();
+        assert!(events.iter().any(|event| event.kind == EventKind::System));
+        assert!(events.iter().all(|event| event.id > before_resume_max_id));
+    }
+
+    #[tokio::test]
     async fn restart_without_session_id_records_system_event() {
         let temp = tempfile::tempdir().unwrap();
         let bin = fake_claude(temp.path());
@@ -590,6 +688,7 @@ done
             })
             .await
             .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
 
         let mut meta = store.load_meta(session.id).await.unwrap();
         meta.claude_session_id = None;
@@ -639,6 +738,40 @@ done
                 .iter()
                 .any(|event| event.kind == EventKind::Assistant)
         );
+    }
+
+    #[tokio::test]
+    async fn runtime_user_and_process_event_ids_do_not_collide() {
+        let temp = tempfile::tempdir().unwrap();
+        let bin = fake_claude(temp.path());
+        let store = EventStore::new(temp.path().join("data")).await.unwrap();
+        let manager = SessionManager::new(
+            store.clone(),
+            vec![bin.to_string_lossy().to_string()],
+            "acceptEdits".to_string(),
+        );
+
+        let session = manager
+            .create_session(CreateSessionRequest {
+                cwd: temp.path().to_path_buf(),
+                name: None,
+                permission_mode: None,
+            })
+            .await
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+        manager
+            .send_input(session.id, "hello".to_string())
+            .await
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+        let events = store.load_events_after(session.id, 0).await.unwrap();
+        let mut ids = HashSet::new();
+        for event in events {
+            assert!(ids.insert(event.id), "duplicate event id {}", event.id);
+        }
     }
 
     #[tokio::test]
@@ -826,6 +959,110 @@ done
         assert_eq!(successes, 1);
         assert_eq!(invalid_requests, 1);
         manager.stop_session(session.id).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn delete_during_starting_reservation_prevents_late_running_resurrection() {
+        let temp = tempfile::tempdir().unwrap();
+        let wrapper = temp.path().join("slow-wrapper.sh");
+        fs::write(
+            &wrapper,
+            "#!/usr/bin/env bash\nprintf '{\"type\":\"system\",\"session_id\":\"slow-session\"}\\n'\nwhile IFS= read -r line; do sleep 10; done\n",
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&wrapper).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&wrapper, permissions).unwrap();
+        let busy_executable = fs::OpenOptions::new().write(true).open(&wrapper).unwrap();
+        let store = EventStore::new(temp.path().join("data")).await.unwrap();
+        let manager = SessionManager::new(
+            store.clone(),
+            vec![wrapper.to_string_lossy().to_string()],
+            "acceptEdits".to_string(),
+        );
+        let session_id = Uuid::new_v4();
+        let now = Utc::now();
+        store
+            .save_meta(&SessionMeta {
+                id: session_id,
+                name: Some("slow".to_string()),
+                cwd: temp.path().to_path_buf(),
+                permission_mode: "acceptEdits".to_string(),
+                status: SessionStatus::Stopped,
+                claude_session_id: Some("resume-me".to_string()),
+                deleted_at: None,
+                created_at: now,
+                updated_at: now,
+            })
+            .await
+            .unwrap();
+
+        let resume_manager = manager.clone();
+        let resume = tokio::spawn(async move { resume_manager.resume_session(session_id).await });
+        let starting = wait_for_status(&store, session_id, SessionStatus::Starting).await;
+        assert_eq!(starting.status, SessionStatus::Starting);
+
+        let deleted = manager.delete_session(session_id).await.unwrap();
+        drop(busy_executable);
+        let resume_result = resume.await.unwrap();
+        let final_meta = store.load_meta(session_id).await.unwrap();
+
+        assert!(deleted.deleted_at.is_some());
+        assert!(matches!(resume_result, Err(AppError::InvalidRequest(_))));
+        assert!(final_meta.deleted_at.is_some());
+        assert_eq!(final_meta.status, SessionStatus::Stopped);
+        assert!(manager.subscribe(session_id).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn stop_during_starting_reservation_prevents_late_running_resurrection() {
+        let temp = tempfile::tempdir().unwrap();
+        let wrapper = temp.path().join("slow-wrapper.sh");
+        fs::write(
+            &wrapper,
+            "#!/usr/bin/env bash\nprintf '{\"type\":\"system\",\"session_id\":\"slow-session\"}\\n'\nwhile IFS= read -r line; do sleep 10; done\n",
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&wrapper).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&wrapper, permissions).unwrap();
+        let busy_executable = fs::OpenOptions::new().write(true).open(&wrapper).unwrap();
+        let store = EventStore::new(temp.path().join("data")).await.unwrap();
+        let manager = SessionManager::new(
+            store.clone(),
+            vec![wrapper.to_string_lossy().to_string()],
+            "acceptEdits".to_string(),
+        );
+        let session_id = Uuid::new_v4();
+        let now = Utc::now();
+        store
+            .save_meta(&SessionMeta {
+                id: session_id,
+                name: Some("slow".to_string()),
+                cwd: temp.path().to_path_buf(),
+                permission_mode: "acceptEdits".to_string(),
+                status: SessionStatus::Stopped,
+                claude_session_id: Some("resume-me".to_string()),
+                deleted_at: None,
+                created_at: now,
+                updated_at: now,
+            })
+            .await
+            .unwrap();
+
+        let resume_manager = manager.clone();
+        let resume = tokio::spawn(async move { resume_manager.resume_session(session_id).await });
+        let starting = wait_for_status(&store, session_id, SessionStatus::Starting).await;
+        assert_eq!(starting.status, SessionStatus::Starting);
+
+        manager.stop_session(session_id).await.unwrap();
+        drop(busy_executable);
+        let resume_result = resume.await.unwrap();
+        let final_meta = store.load_meta(session_id).await.unwrap();
+
+        assert!(matches!(resume_result, Err(AppError::InvalidRequest(_))));
+        assert_eq!(final_meta.status, SessionStatus::Stopped);
+        assert!(manager.subscribe(session_id).await.is_err());
     }
 
     #[tokio::test]
