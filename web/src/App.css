@@ -727,3 +727,64 @@ button.danger:hover {
     grid-template-columns: 1fr;
   }
 }
+
+.view-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.view-switch button {
+  border-color: #334155;
+  background: #1e293b;
+}
+
+.view-switch button.active {
+  border-color: #93c5fd;
+  background: #1d4ed8;
+}
+
+.config-panel {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  padding: 20px;
+}
+
+.config-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.config-header h2,
+.config-header p {
+  margin: 0;
+}
+
+.config-header p {
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.notice,
+.success {
+  margin: 0;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 10px;
+  background: #111827;
+}
+
+.success {
+  border-color: #22c55e;
+  color: #bbf7d0;
+}
+
+.config-form {
+  display: grid;
+  gap: 12px;
+  max-width: 720px;
+}

@@ -234,6 +234,27 @@ beforeEach(() => {
     if (url === '/api/sessions/s3?permanent=true' && init?.method === 'DELETE') {
       return jsonResponse({ ok: true });
     }
+    if (url === '/api/config' && !init) {
+      return new Response(JSON.stringify({
+        path: '/home/user/.claude-remote-web/config.toml',
+        exists: false,
+        current: {
+          bind: '127.0.0.1:8787',
+          dataDir: '/home/user/.claude-remote-web',
+          launcher: ['claude'],
+          webDir: null,
+          defaultPermissionMode: 'acceptEdits'
+        },
+        file: {
+          bind: '127.0.0.1:8787',
+          dataDir: '/home/user/.claude-remote-web',
+          launcher: ['claude'],
+          webDir: null,
+          defaultPermissionMode: 'acceptEdits'
+        },
+        restartRequired: false
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
     if (url.endsWith('/input')) {
       return jsonResponse({ ok: true });
     }
@@ -671,5 +692,13 @@ describe('App', () => {
 
     expect(activeButton).toHaveAttribute('aria-pressed', 'false');
     expect(deletedButton).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('opens the config view from the sidebar', async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByText('Config'));
+
+    expect(await screen.findByText('Daemon config')).toBeInTheDocument();
   });
 });

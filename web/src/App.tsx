@@ -14,6 +14,7 @@ import {
   stopAndRemoveWorktree,
   stopSession
 } from './api';
+import ConfigView from './ConfigView';
 import ConversationBlockList from './ConversationBlockList';
 import { buildConversationBlocks } from './conversationBlocks';
 import TasksPanel from './TasksPanel';
@@ -24,11 +25,13 @@ import './App.css';
 const emptyTaskGroups: TaskGroups = { background: [], finished: [] };
 const EVENT_RENDER_LIMIT = 80;
 type SessionListMode = 'active' | 'deleted';
+type AppView = 'sessions' | 'config';
 
 export default function App() {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [listMode, setListMode] = useState<SessionListMode>('active');
+  const [view, setView] = useState<AppView>('sessions');
   const [events, setEvents] = useState<Record<string, UiEvent[]>>({});
   const [cwd, setCwd] = useState('');
   const [name, setName] = useState('');
@@ -504,6 +507,12 @@ export default function App() {
           <h1>Claude Remote Web</h1>
           <p>Remote Claude sessions</p>
         </div>
+        <nav className="view-switch" aria-label="Primary views">
+          <button type="button" className={view === 'sessions' ? 'active' : ''} onClick={() => setView('sessions')}>Sessions</button>
+          <button type="button" className={view === 'config' ? 'active' : ''} onClick={() => setView('config')}>Config</button>
+        </nav>
+        {view === 'sessions' && (
+          <>
         <form className="new-session" onSubmit={onCreateSession}>
           <h2>New session</h2>
           <label>
@@ -574,7 +583,14 @@ export default function App() {
           ))}
         </section>
         <TasksPanel title="Tasks" tasks={tasks} error={taskError} onSelectTask={onSelectTask} />
+          </>
+        )}
       </aside>
+      {view === 'config' ? (
+        <section className="conversation">
+          <ConfigView />
+        </section>
+      ) : (
       <section className="conversation">
         {error && <p role="alert" className="error">{error}</p>}
         {activeSession ? (
@@ -658,6 +674,7 @@ export default function App() {
           <div className="empty-state">Create or select a session.</div>
         )}
       </section>
+      )}
     </main>
   );
 }

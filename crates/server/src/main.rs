@@ -1,7 +1,9 @@
 use anyhow::Context;
 use axum::serve;
 use clap::Parser;
-use claude_remote_web_server::{AppState, Config, EventStore, SessionManager, build_router};
+use claude_remote_web_server::{
+    AppState, Config, ConfigStore, EventStore, SessionManager, build_router,
+};
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
 
@@ -13,6 +15,7 @@ async fn main() -> anyhow::Result<()> {
 
     let cli = Config::parse();
     let check = cli.check;
+    let config_path = cli.target_config_path();
     let config = cli.resolve().await?;
 
     if check {
@@ -42,7 +45,12 @@ async fn main() -> anyhow::Result<()> {
         config.worktree.clone(),
     );
     manager.restore_active_sessions().await?;
-    let state = AppState { manager, store };
+    let config_store = ConfigStore::new(config_path, config.clone());
+    let state = AppState {
+        manager,
+        store,
+        config: config_store,
+    };
     let app = build_router(state, config.web_dir.clone());
     let listener = TcpListener::bind(config.bind).await?;
     let bound_addr = startup_usage_bind(&listener)?;

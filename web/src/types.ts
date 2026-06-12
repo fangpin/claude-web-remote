@@ -60,3 +60,19 @@ export type TaskGroups = {
   background: TaskInfo[];
   finished: TaskInfo[];
 };
+
+export type ConfigValues = {
+  bind: string;
+  dataDir: string;
+  launcher: string[];
+  webDir?: string | null;
+  defaultPermissionMode: string;
+};
+
+export type ManagedConfig = {
+  path: string;
+  exists: boolean;
+  current: ConfigValues;
+  file: ConfigValues;
+  restartRequired: boolean;
+};

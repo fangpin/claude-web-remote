@@ -1,6 +1,6 @@
 use crate::{
-    AppError, AppResult, CreateSessionRequest, EventStore, SessionListFilter, SessionManager,
-    embedded_assets,
+    AppError, AppResult, ConfigStore, ConfigValues, CreateSessionRequest, EventStore,
+    SessionListFilter, SessionManager, embedded_assets,
 };
 use axum::{
     Json, Router,
@@ -10,18 +10,19 @@ use axum::{
     },
     http::StatusCode,
     response::IntoResponse,
-    routing::{get, post},
+    routing::{get, post, put},
 };
 use serde::Deserialize;
 use serde_json::json;
 use std::path::PathBuf;
-use tower_http::{cors::CorsLayer, services::ServeDir};
+use tower_http::services::ServeDir;
 use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct AppState {
     pub manager: SessionManager,
     pub store: EventStore,
+    pub config: ConfigStore,
 }
 
 #[derive(Debug, Deserialize)]
@@ -65,9 +66,9 @@ pub fn build_router(state: AppState, web_dir: Option<PathBuf>) -> Router {
         .route("/sessions/{id}/resume", post(resume_session))
         .route("/sessions/{id}/restore", post(restore_session))
         .route("/sessions/{id}/events", get(events_ws))
+        .route("/config", get(get_config).merge(put(update_config)))
         .fallback(api_not_found)
-        .with_state(state)
-        .layer(CorsLayer::permissive());
+        .with_state(state);
 
     let app = Router::new().nest("/api", api);
 
@@ -197,6 +198,17 @@ async fn events_ws(
     })
 }
 
+async fn get_config(State(state): State<AppState>) -> AppResult<Json<serde_json::Value>> {
+    Ok(Json(json!(state.config.get().await?)))
+}
+
+async fn update_config(
+    State(state): State<AppState>,
+    Json(request): Json<ConfigValues>,
+) -> AppResult<Json<serde_json::Value>> {
+    Ok(Json(json!(state.config.save(request).await?)))
+}
+
 async fn handle_events_socket(
     state: AppState,
     session_id: Uuid,
@@ -295,7 +307,26 @@ done
                 base_ref: crate::WorktreeBaseRef::Head,
             },
         );
-        AppState { manager, store }
+        let config = ConfigStore::new(
+            temp.path().join("config.toml"),
+            crate::ResolvedConfig {
+                bind: "127.0.0.1:0".parse().unwrap(),
+                data_dir: temp.path().join("data"),
+                launcher: vec![bin.to_string_lossy().to_string()],
+                web_dir: None,
+                default_permission_mode: "acceptEdits".to_string(),
+                worktree: crate::WorktreeConfig {
+                    worktrees_dir: None,
+                    branch_prefix: "pin".to_string(),
+                    base_ref: crate::WorktreeBaseRef::Head,
+                },
+            },
+        );
+        AppState {
+            manager,
+            store,
+            config,
+        }
     }
 
     async fn read_websocket_json_message(uri: &str) -> Value {

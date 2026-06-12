@@ -1,8 +1,8 @@
 use axum::Router;
 use chrono::Utc;
 use claude_remote_web_server::{
-    AppState, EventKind, EventStore, SessionManager, SessionMeta, SessionStatus, UiEvent,
-    build_router,
+    AppState, ConfigStore, EventKind, EventStore, ResolvedConfig, SessionManager, SessionMeta,
+    SessionStatus, UiEvent, WorktreeBaseRef, WorktreeConfig, build_router,
 };
 use futures::StreamExt;
 use serde_json::{Value, json};
@@ -93,18 +93,53 @@ async fn spawn_app_with_web_dir(
     launcher: Vec<String>,
     web_dir: Option<PathBuf>,
 ) -> SocketAddr {
-    let store = EventStore::new(temp.path().join("data")).await.unwrap();
+    spawn_app_with_config_and_web_dir(temp, launcher, temp.path().join("config.toml"), web_dir)
+        .await
+}
+
+async fn spawn_app_with_config(
+    temp: &tempfile::TempDir,
+    launcher: Vec<String>,
+    config_path: PathBuf,
+) -> SocketAddr {
+    spawn_app_with_config_and_web_dir(temp, launcher, config_path, None).await
+}
+
+async fn spawn_app_with_config_and_web_dir(
+    temp: &tempfile::TempDir,
+    launcher: Vec<String>,
+    config_path: PathBuf,
+    web_dir: Option<PathBuf>,
+) -> SocketAddr {
+    let data_dir = temp.path().join("data");
+    let store = EventStore::new(&data_dir).await.unwrap();
+    let worktree = WorktreeConfig {
+        worktrees_dir: None,
+        branch_prefix: "pin".to_string(),
+        base_ref: WorktreeBaseRef::Head,
+    };
     let manager = SessionManager::new(
         store.clone(),
-        launcher,
+        launcher.clone(),
         "acceptEdits".to_string(),
-        claude_remote_web_server::WorktreeConfig {
-            worktrees_dir: None,
-            branch_prefix: "pin".to_string(),
-            base_ref: claude_remote_web_server::WorktreeBaseRef::Head,
+        worktree.clone(),
+    );
+    let config = ConfigStore::new(
+        config_path,
+        ResolvedConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            data_dir,
+            launcher,
+            web_dir: web_dir.clone(),
+            default_permission_mode: "acceptEdits".to_string(),
+            worktree,
         },
     );
-    let state = AppState { manager, store };
+    let state = AppState {
+        manager,
+        store,
+        config,
+    };
     let app: Router = build_router(state, web_dir);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -125,7 +160,26 @@ async fn spawn_app_with_store(store: EventStore) -> SocketAddr {
             base_ref: claude_remote_web_server::WorktreeBaseRef::Head,
         },
     );
-    let state = AppState { manager, store };
+    let config = ConfigStore::new(
+        PathBuf::from("config.toml"),
+        ResolvedConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            data_dir: PathBuf::from("data"),
+            launcher: vec!["claude".to_string()],
+            web_dir: None,
+            default_permission_mode: "acceptEdits".to_string(),
+            worktree: WorktreeConfig {
+                worktrees_dir: None,
+                branch_prefix: "pin".to_string(),
+                base_ref: WorktreeBaseRef::Head,
+            },
+        },
+    );
+    let state = AppState {
+        manager,
+        store,
+        config,
+    };
     let app: Router = build_router(state, None);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -520,4 +574,118 @@ async fn frontend_paths_still_use_embedded_assets() {
 
     assert!(content_type.starts_with("text/html"));
     assert!(body.contains("Claude Remote Web"));
+}
+
+#[tokio::test]
+async fn config_api_get_returns_current_values_for_missing_file() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("missing").join("config.toml");
+    let addr = spawn_app_with_config(&temp, vec!["claude".to_string()], config_path.clone()).await;
+    let client = reqwest::Client::new();
+
+    let response: Value = client
+        .get(format!("http://{addr}/api/config"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(response["path"], json!(config_path.to_string_lossy()));
+    assert_eq!(response["exists"], false);
+    assert_eq!(response["restartRequired"], false);
+    assert_eq!(response["file"]["bind"], "127.0.0.1:0");
+    assert_eq!(response["file"]["launcher"], json!(["claude"]));
+}
+
+#[tokio::test]
+async fn config_api_get_requires_restart_when_file_differs_from_current() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.toml");
+    fs::write(&config_path, r#"launcher = ["ttadk", "claude"]"#).unwrap();
+    let addr = spawn_app_with_config(&temp, vec!["claude".to_string()], config_path).await;
+    let client = reqwest::Client::new();
+
+    let response: Value = client
+        .get(format!("http://{addr}/api/config"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(response["current"]["launcher"], json!(["claude"]));
+    assert_eq!(response["file"]["launcher"], json!(["ttadk", "claude"]));
+    assert_eq!(response["restartRequired"], true);
+}
+
+#[tokio::test]
+async fn config_api_put_writes_normalized_config() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("nested").join("config.toml");
+    let addr = spawn_app_with_config(&temp, vec!["claude".to_string()], config_path.clone()).await;
+    let client = reqwest::Client::new();
+
+    let response: Value = client
+        .put(format!("http://{addr}/api/config"))
+        .json(&json!({
+            "bind": "127.0.0.1:8789",
+            "dataDir": "/tmp/claude-remote-web-test",
+            "launcher": ["ttadk", "claude", "-a"],
+            "webDir": "/tmp/claude-remote-web-dist",
+            "defaultPermissionMode": "auto"
+        }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(response["restartRequired"], true);
+    assert_eq!(
+        response["file"]["launcher"],
+        json!(["ttadk", "claude", "-a"])
+    );
+    let written = fs::read_to_string(config_path).unwrap();
+    assert!(written.contains("bind = \"127.0.0.1:8789\""));
+    assert!(written.contains("launcher = [\"ttadk\", \"claude\", \"-a\"]"));
+    assert!(written.contains("default_permission_mode = \"auto\""));
+}
+
+#[tokio::test]
+async fn config_api_put_rejects_invalid_values() {
+    let temp = tempfile::tempdir().unwrap();
+    let addr = spawn_app(&temp, vec!["claude".to_string()]).await;
+    let client = reqwest::Client::new();
+
+    let response = client
+        .put(format!("http://{addr}/api/config"))
+        .json(&json!({
+            "bind": "bad-bind",
+            "dataDir": "/tmp/claude-remote-web-test",
+            "launcher": ["claude"],
+            "webDir": null,
+            "defaultPermissionMode": "acceptEdits"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+    let response: Value = response.json().await.unwrap();
+
+    assert!(
+        response["error"]
+            .as_str()
+            .unwrap()
+            .contains("invalid bind address")
+    );
 }

@@ -1,4 +1,4 @@
-import type { CreateSessionInput, SessionInfo, TaskGroups } from './types';
+import type { ConfigValues, CreateSessionInput, ManagedConfig, SessionInfo, TaskGroups } from './types';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const requestInit: RequestInit | undefined = init
@@ -40,6 +40,17 @@ export async function listSessionTasks(sessionId: string): Promise<TaskGroups> {
 export async function createSession(input: CreateSessionInput): Promise<SessionInfo> {
   return request<SessionInfo>('/api/sessions', {
     method: 'POST',
+    body: JSON.stringify(input)
+  });
+}
+
+export async function getConfig(): Promise<ManagedConfig> {
+  return request<ManagedConfig>('/api/config');
+}
+
+export async function updateConfig(input: ConfigValues): Promise<ManagedConfig> {
+  return request<ManagedConfig>('/api/config', {
+    method: 'PUT',
     body: JSON.stringify(input)
   });
 }

@@ -10,7 +10,9 @@ pub mod task;
 pub mod worktree;
 
 pub use api::{AppState, build_router};
-pub use config::{Config, WorktreeBaseRef, WorktreeConfig};
+pub use config::{
+    Config, ConfigStore, ConfigValues, ResolvedConfig, WorktreeBaseRef, WorktreeConfig,
+};
 pub use error::{AppError, AppResult};
 pub use event::{EventKind, UiEvent, extract_claude_session_id, normalize_claude_stdout};
 pub use process::{ClaudeProcess, ClaudeProcessConfig, ProcessEvent};
