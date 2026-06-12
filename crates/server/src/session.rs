@@ -94,10 +94,16 @@ impl SessionManager {
         } else {
             None
         };
-        let session_cwd = worktree
-            .as_ref()
-            .map(|worktree| worktree.worktree_cwd.clone())
-            .unwrap_or_else(|| cwd.clone());
+        let session_cwd = match worktree.as_ref() {
+            Some(worktree) => match worktree_session_cwd(&cwd, worktree).await {
+                Ok(session_cwd) => session_cwd,
+                Err(err) => {
+                    let _ = self.worktree_manager.remove(worktree).await;
+                    return Err(err);
+                }
+            },
+            None => cwd.clone(),
+        };
 
         let now = Utc::now();
         let meta = SessionMeta {
@@ -113,8 +119,26 @@ impl SessionManager {
             created_at: now,
             updated_at: now,
         };
-        self.store.save_meta(&meta).await?;
-        self.start_process(meta, None).await
+        if let Err(err) = self.store.save_meta(&meta).await {
+            if let Some(worktree) = meta.worktree.as_ref() {
+                let _ = self.worktree_manager.remove(worktree).await;
+            }
+            return Err(err);
+        }
+
+        match self.start_process(meta.clone(), None).await {
+            Ok(info) => Ok(info),
+            Err(err) => {
+                if let Some(worktree) = meta.worktree.as_ref() {
+                    let _ = self.worktree_manager.remove(worktree).await;
+                }
+                let mut failed_meta = meta;
+                failed_meta.status = SessionStatus::Failed;
+                failed_meta.updated_at = Utc::now();
+                let _ = self.store.save_meta(&failed_meta).await;
+                Err(err)
+            }
+        }
     }
 
     pub async fn list_sessions(&self) -> AppResult<Vec<SessionInfo>> {
@@ -298,6 +322,17 @@ impl SessionManager {
     }
 }
 
+async fn worktree_session_cwd(
+    requested_cwd: &std::path::Path,
+    worktree: &WorktreeMeta,
+) -> AppResult<PathBuf> {
+    let requested_cwd = tokio::fs::canonicalize(requested_cwd).await?;
+    let relative_cwd = requested_cwd
+        .strip_prefix(&worktree.source_cwd)
+        .map_err(|_| AppError::InvalidRequest("cwd is not inside source repository".to_string()))?;
+    Ok(worktree.worktree_cwd.join(relative_cwd))
+}
+
 fn expand_home(path: PathBuf) -> PathBuf {
     let Some(path_str) = path.to_str() else {
         return path;
@@ -357,27 +392,28 @@ done
         path
     }
 
+    fn git(root: &std::path::Path, args: &[&str]) {
+        let output = std::process::Command::new("git")
+            .current_dir(root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
     async fn init_repo(root: &std::path::Path) {
         fs::create_dir_all(root).unwrap();
-        let run = |args: &[&str]| {
-            let output = std::process::Command::new("git")
-                .current_dir(root)
-                .args(args)
-                .output()
-                .unwrap();
-            assert!(
-                output.status.success(),
-                "git {:?} failed: {}",
-                args,
-                String::from_utf8_lossy(&output.stderr)
-            );
-        };
-        run(&["init", "-b", "master"]);
-        run(&["config", "user.email", "test@example.com"]);
-        run(&["config", "user.name", "Test User"]);
+        git(root, &["init", "-b", "master"]);
+        git(root, &["config", "user.email", "test@example.com"]);
+        git(root, &["config", "user.name", "Test User"]);
         fs::write(root.join("README.md"), "hello\n").unwrap();
-        run(&["add", "README.md"]);
-        run(&["commit", "-m", "initial"]);
+        git(root, &["add", "README.md"]);
+        git(root, &["commit", "-m", "initial"]);
     }
 
     #[tokio::test]
@@ -413,6 +449,90 @@ done
         assert_eq!(created.cwd, worktree.worktree_cwd);
         assert!(created.cwd.exists());
         assert!(worktree.branch.starts_with("pin/"));
+    }
+
+    #[tokio::test]
+    async fn worktree_session_preserves_requested_repo_subdirectory_as_cwd() {
+        let temp = tempfile::tempdir().unwrap();
+        let repo = temp.path().join("repo");
+        init_repo(&repo).await;
+        fs::create_dir_all(repo.join("packages/api")).unwrap();
+        fs::write(repo.join("packages/api/lib.rs"), "pub fn api() {}\n").unwrap();
+        git(&repo, &["add", "packages/api/lib.rs"]);
+        git(&repo, &["commit", "-m", "add api package"]);
+        let requested_cwd = repo.join("packages/api");
+        let bin = fake_claude(temp.path());
+        let store = EventStore::new(temp.path().join("data")).await.unwrap();
+        let manager = SessionManager::new(
+            store,
+            vec![bin.to_string_lossy().to_string()],
+            "acceptEdits".to_string(),
+            crate::WorktreeConfig {
+                worktrees_dir: None,
+                branch_prefix: "pin".to_string(),
+                base_ref: crate::WorktreeBaseRef::Head,
+            },
+        );
+
+        let created = manager
+            .create_session(CreateSessionRequest {
+                cwd: requested_cwd,
+                name: None,
+                permission_mode: None,
+                worktree: Some(WorktreeRequest { enabled: true }),
+            })
+            .await
+            .unwrap();
+
+        let worktree = created.worktree.as_ref().unwrap();
+        assert_eq!(worktree.source_cwd, repo.canonicalize().unwrap());
+        assert_eq!(created.cwd, worktree.worktree_cwd.join("packages/api"));
+        assert!(created.cwd.exists());
+    }
+
+    #[tokio::test]
+    async fn failed_worktree_session_start_removes_worktree_and_marks_failed() {
+        let temp = tempfile::tempdir().unwrap();
+        let repo = temp.path().join("repo");
+        init_repo(&repo).await;
+        let store = EventStore::new(temp.path().join("data")).await.unwrap();
+        let manager = SessionManager::new(
+            store.clone(),
+            vec![
+                temp.path()
+                    .join("missing-claude")
+                    .to_string_lossy()
+                    .to_string(),
+            ],
+            "acceptEdits".to_string(),
+            crate::WorktreeConfig {
+                worktrees_dir: None,
+                branch_prefix: "pin".to_string(),
+                base_ref: crate::WorktreeBaseRef::Head,
+            },
+        );
+
+        let result = manager
+            .create_session(CreateSessionRequest {
+                cwd: repo.clone(),
+                name: None,
+                permission_mode: None,
+                worktree: Some(WorktreeRequest { enabled: true }),
+            })
+            .await;
+
+        assert!(result.is_err());
+        let sessions = store.list_meta().await.unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].status, SessionStatus::Failed);
+        let output = std::process::Command::new("git")
+            .current_dir(&repo)
+            .args(["worktree", "list", "--porcelain"])
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let worktrees = String::from_utf8_lossy(&output.stdout);
+        assert!(!worktrees.contains(".claude/worktrees"));
     }
 
     #[tokio::test]

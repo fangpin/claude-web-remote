@@ -16,9 +16,10 @@ fn fake_claude(dir: &Path) -> PathBuf {
     fs::write(
         &path,
         r#"#!/usr/bin/env bash
+set -euo pipefail
 printf '{"type":"system","session_id":"fake-session"}\n'
 while IFS= read -r line; do
-  printf '{"type":"assistant","message":"ack:%s"}\n' "$line"
+  python3 -c 'import json,sys; msg=json.loads(sys.argv[1]); text=msg["message"]["content"][0]["text"]; print(json.dumps({"type":"assistant","message":f"ack:{text}"}))' "$line"
 done
 "#,
     )
@@ -107,16 +108,19 @@ async fn creates_session_accepts_input_and_streams_events() {
         .error_for_status()
         .unwrap();
 
-    let mut saw_ack = false;
-    for _ in 0..5 {
-        if let Some(Ok(message)) = ws.next().await {
-            let text = message.into_text().unwrap();
-            if text.contains("ack:hello") {
-                saw_ack = true;
-                break;
+    let saw_ack = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        for _ in 0..5 {
+            if let Some(Ok(message)) = ws.next().await {
+                let text = message.into_text().unwrap();
+                if text.contains("ack:hello") {
+                    return true;
+                }
             }
         }
-    }
+        false
+    })
+    .await
+    .unwrap_or(false);
 
     assert!(saw_ack);
 }
