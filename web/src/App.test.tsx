@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 
@@ -11,7 +11,27 @@ const sessions = [
     status: 'running',
     claudeSessionId: null,
     createdAt: '2026-06-11T00:00:00Z',
-    updatedAt: '2026-06-11T00:00:00Z'
+    updatedAt: '2026-06-11T02:00:00Z'
+  },
+  {
+    id: 's2',
+    name: 'Repo Two',
+    cwd: '/repo/two',
+    permissionMode: 'acceptEdits',
+    status: 'stopped',
+    claudeSessionId: null,
+    createdAt: '2026-06-11T00:00:00Z',
+    updatedAt: '2026-06-11T01:00:00Z'
+  },
+  {
+    id: 's3',
+    name: 'Repo One Old',
+    cwd: '/repo/one',
+    permissionMode: 'acceptEdits',
+    status: 'stopped',
+    claudeSessionId: null,
+    createdAt: '2026-06-10T00:00:00Z',
+    updatedAt: '2026-06-10T00:00:00Z'
   }
 ];
 
@@ -44,7 +64,7 @@ beforeEach(() => {
       if (body.cwd === '~') {
         return new Response(JSON.stringify({ error: 'invalid request: cwd does not exist: ~' }), { status: 400, headers: { 'content-type': 'application/json' } });
       }
-      return new Response(JSON.stringify({ ...sessions[0], id: 's2', name: 'New Repo', cwd: '/repo/two' }), { status: 200, headers: { 'content-type': 'application/json' } });
+      return new Response(JSON.stringify({ ...sessions[0], id: 's4', name: body.name ?? 'New Repo', cwd: body.cwd }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
     if (url.endsWith('/input')) {
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -94,6 +114,44 @@ describe('App', () => {
     fireEvent.click(screen.getByText('Create session'));
 
     expect(await screen.findByText('invalid request: cwd does not exist: ~')).toBeInTheDocument();
+  });
+
+  it('shows recent working directory suggestions and fills the input', async () => {
+    render(<App />);
+
+    const suggestions = await screen.findByLabelText('Recent working directories');
+    expect(within(suggestions).getByText('/repo/one')).toBeInTheDocument();
+    expect(within(suggestions).getByText('/repo/two')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use /repo/two' }));
+
+    expect(screen.getByLabelText('Working directory')).toHaveValue('/repo/two');
+  });
+
+  it('sends worktree enabled when the switch is selected', async () => {
+    render(<App />);
+
+    fireEvent.change(await screen.findByLabelText('Working directory'), { target: { value: '/repo/two' } });
+    fireEvent.click(screen.getByLabelText('Use git worktree'));
+    fireEvent.click(screen.getByText('Create session'));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions', expect.objectContaining({ method: 'POST' })));
+    const createCall = fetchMock.mock.calls.find(([url, init]) => url === '/api/sessions' && init?.method === 'POST');
+    expect(JSON.parse(String(createCall?.[1]?.body))).toMatchObject({
+      cwd: '/repo/two',
+      worktree: { enabled: true }
+    });
+  });
+
+  it('omits worktree when the switch is not selected', async () => {
+    render(<App />);
+
+    fireEvent.change(await screen.findByLabelText('Working directory'), { target: { value: '/repo/two' } });
+    fireEvent.click(screen.getByText('Create session'));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions', expect.objectContaining({ method: 'POST' })));
+    const createCall = fetchMock.mock.calls.find(([url, init]) => url === '/api/sessions' && init?.method === 'POST');
+    expect(JSON.parse(String(createCall?.[1]?.body)).worktree).toBeUndefined();
   });
 
   it('sends user input to the active session', async () => {

@@ -54,6 +54,37 @@ label {
   font-size: 13px;
 }
 
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.checkbox-label input {
+  width: auto;
+}
+
+.directory-suggestions {
+  display: grid;
+  gap: 6px;
+}
+
+.directory-suggestions span {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.directory-suggestions button {
+  overflow: hidden;
+  border-color: #334155;
+  color: #cbd5e1;
+  background: #0f172a;
+  font-size: 12px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 input,
 select,
 textarea {

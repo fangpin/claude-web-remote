@@ -11,6 +11,7 @@ export default function App() {
   const [cwd, setCwd] = useState('');
   const [name, setName] = useState('');
   const [permissionMode, setPermissionMode] = useState('acceptEdits');
+  const [useWorktree, setUseWorktree] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -18,6 +19,19 @@ export default function App() {
     () => sessions.find((session) => session.id === activeId) ?? null,
     [sessions, activeId]
   );
+
+  const recentDirectories = useMemo(() => {
+    const seen = new Set<string>();
+    return [...sessions]
+      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+      .filter((session) => {
+        if (seen.has(session.cwd)) return false;
+        seen.add(session.cwd);
+        return true;
+      })
+      .slice(0, 5)
+      .map((session) => session.cwd);
+  }, [sessions]);
 
   useEffect(() => {
     listSessions()
@@ -50,12 +64,14 @@ export default function App() {
       const created = await createSession({
         cwd,
         name: name.trim() || undefined,
-        permissionMode
+        permissionMode,
+        worktree: useWorktree ? { enabled: true } : undefined
       });
       setSessions((current) => [created, ...current]);
       setActiveId(created.id);
       setCwd('');
       setName('');
+      setUseWorktree(false);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -89,6 +105,20 @@ export default function App() {
           <label>
             Working directory
             <input value={cwd} onChange={(event) => setCwd(event.target.value)} placeholder="/data00/home/user/repos/project" required />
+          </label>
+          {recentDirectories.length > 0 && (
+            <div className="directory-suggestions" aria-label="Recent working directories">
+              <span>Recent</span>
+              {recentDirectories.map((directory) => (
+                <button key={directory} type="button" onClick={() => setCwd(directory)} aria-label={`Use ${directory}`}>
+                  {directory}
+                </button>
+              ))}
+            </div>
+          )}
+          <label className="checkbox-label">
+            <input type="checkbox" checked={useWorktree} onChange={(event) => setUseWorktree(event.target.checked)} />
+            Use git worktree
           </label>
           <label>
             Name
