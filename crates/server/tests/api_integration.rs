@@ -52,6 +52,31 @@ done
     path
 }
 
+async fn git(dir: &Path, args: &[&str]) {
+    let output = tokio::process::Command::new("git")
+        .current_dir(dir)
+        .args(args)
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git {:?} failed: {}",
+        args,
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+async fn init_repo(root: &Path) {
+    fs::create_dir_all(root).unwrap();
+    git(root, &["init", "-b", "master"]).await;
+    git(root, &["config", "user.email", "test@example.com"]).await;
+    git(root, &["config", "user.name", "Test User"]).await;
+    fs::write(root.join("README.md"), "hello\n").unwrap();
+    git(root, &["add", "README.md"]).await;
+    git(root, &["commit", "-m", "initial"]).await;
+}
+
 async fn spawn_app(temp: &tempfile::TempDir, launcher: Vec<String>) -> SocketAddr {
     let store = EventStore::new(temp.path().join("data")).await.unwrap();
     let manager = SessionManager::new(
@@ -123,6 +148,43 @@ async fn creates_session_accepts_input_and_streams_events() {
     .unwrap_or(false);
 
     assert!(saw_ack);
+}
+
+#[tokio::test]
+async fn stop_and_remove_worktree_endpoint_removes_worktree() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    init_repo(&repo).await;
+    let bin = fake_claude(temp.path());
+    let addr = spawn_app(&temp, vec![bin.to_string_lossy().to_string()]).await;
+    let client = reqwest::Client::new();
+
+    let created: Value = client
+        .post(format!("http://{addr}/api/sessions"))
+        .json(&json!({ "cwd": repo, "worktree": { "enabled": true } }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let session_id = created["id"].as_str().unwrap();
+    let worktree_cwd = PathBuf::from(created["worktree"]["worktreeCwd"].as_str().unwrap());
+    assert!(worktree_cwd.exists());
+
+    client
+        .post(format!(
+            "http://{addr}/api/sessions/{session_id}/stop-and-remove-worktree"
+        ))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+
+    assert!(!worktree_cwd.exists());
 }
 
 #[tokio::test]

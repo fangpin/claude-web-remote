@@ -187,6 +187,25 @@ impl SessionManager {
         self.update_status(session_id, SessionStatus::Stopped).await
     }
 
+    pub async fn stop_and_remove_worktree(&self, session_id: Uuid) -> AppResult<()> {
+        let _ = self.stop_session(session_id).await;
+        let mut meta = self.store.load_meta(session_id).await?;
+        let worktree = meta.worktree.clone().ok_or_else(|| {
+            AppError::InvalidRequest("session has no app-created worktree".to_string())
+        })?;
+        if !worktree.created_by_claude_remote_web {
+            return Err(AppError::InvalidRequest(
+                "session has no app-created worktree".to_string(),
+            ));
+        }
+        self.worktree_manager.remove(&worktree).await?;
+        meta.status = SessionStatus::Stopped;
+        meta.cwd = worktree.source_cwd;
+        meta.worktree = None;
+        meta.updated_at = Utc::now();
+        self.store.save_meta(&meta).await
+    }
+
     pub async fn restart_session(&self, session_id: Uuid) -> AppResult<SessionInfo> {
         let _ = self.stop_session(session_id).await;
         let meta = self.store.load_meta(session_id).await?;
@@ -593,6 +612,79 @@ done
         assert!(output.status.success());
         let worktrees = String::from_utf8_lossy(&output.stdout);
         assert!(!worktrees.contains(".claude/worktrees"));
+    }
+
+    #[tokio::test]
+    async fn stop_and_remove_rejects_sessions_without_app_worktree() {
+        let temp = tempfile::tempdir().unwrap();
+        let bin = fake_claude(temp.path());
+        let store = EventStore::new(temp.path().join("data")).await.unwrap();
+        let manager = SessionManager::new(
+            store,
+            vec![bin.to_string_lossy().to_string()],
+            "acceptEdits".to_string(),
+            crate::WorktreeConfig {
+                worktrees_dir: None,
+                branch_prefix: "pin".to_string(),
+                base_ref: crate::WorktreeBaseRef::Head,
+            },
+        );
+        let session = manager
+            .create_session(CreateSessionRequest {
+                cwd: temp.path().to_path_buf(),
+                name: None,
+                permission_mode: None,
+                worktree: None,
+            })
+            .await
+            .unwrap();
+
+        let err = manager
+            .stop_and_remove_worktree(session.id)
+            .await
+            .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("session has no app-created worktree")
+        );
+    }
+
+    #[tokio::test]
+    async fn stop_and_remove_deletes_clean_worktree() {
+        let temp = tempfile::tempdir().unwrap();
+        let repo = temp.path().join("repo");
+        init_repo(&repo).await;
+        let bin = fake_claude(temp.path());
+        let store = EventStore::new(temp.path().join("data")).await.unwrap();
+        let manager = SessionManager::new(
+            store.clone(),
+            vec![bin.to_string_lossy().to_string()],
+            "acceptEdits".to_string(),
+            crate::WorktreeConfig {
+                worktrees_dir: None,
+                branch_prefix: "pin".to_string(),
+                base_ref: crate::WorktreeBaseRef::Head,
+            },
+        );
+        let session = manager
+            .create_session(CreateSessionRequest {
+                cwd: repo.clone(),
+                name: None,
+                permission_mode: None,
+                worktree: Some(WorktreeRequest { enabled: true }),
+            })
+            .await
+            .unwrap();
+        let worktree_path = session.worktree.as_ref().unwrap().worktree_cwd.clone();
+
+        manager.stop_and_remove_worktree(session.id).await.unwrap();
+
+        assert!(!worktree_path.exists());
+        let loaded = store.load_meta(session.id).await.unwrap();
+        assert_eq!(loaded.status, SessionStatus::Stopped);
+        assert_eq!(loaded.cwd, repo.canonicalize().unwrap());
+        assert_eq!(loaded.worktree, None);
     }
 
     #[tokio::test]

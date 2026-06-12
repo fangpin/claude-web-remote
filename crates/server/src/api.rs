@@ -38,6 +38,10 @@ pub fn build_router(state: AppState, web_dir: Option<PathBuf>) -> Router {
         .route("/api/sessions/{id}", get(get_session))
         .route("/api/sessions/{id}/input", post(send_input))
         .route("/api/sessions/{id}/stop", post(stop_session))
+        .route(
+            "/api/sessions/{id}/stop-and-remove-worktree",
+            post(stop_and_remove_worktree),
+        )
         .route("/api/sessions/{id}/restart", post(restart_session))
         .route("/api/sessions/{id}/events", get(events_ws))
         .with_state(state)
@@ -87,6 +91,14 @@ async fn stop_session(
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
     state.manager.stop_session(id).await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn stop_and_remove_worktree(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<serde_json::Value>> {
+    state.manager.stop_and_remove_worktree(id).await?;
     Ok(Json(json!({ "ok": true })))
 }
 
