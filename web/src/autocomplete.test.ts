@@ -45,4 +45,40 @@ describe('autocomplete helpers', () => {
       cursor: 6
     });
   });
+
+  it('includes expanded Claude slash commands', () => {
+    expect(CLAUDE_COMMANDS.map((command) => command.name)).toEqual(expect.arrayContaining([
+      '/add-dir',
+      '/agents',
+      '/bug',
+      '/config',
+      '/context',
+      '/export',
+      '/help',
+      '/init',
+      '/install-github-app',
+      '/memory',
+      '/mcp',
+      '/model',
+      '/permissions',
+      '/pr-comments',
+      '/reload-skills',
+      '/review',
+      '/status',
+      '/terminal-setup',
+      '/vim'
+    ]));
+  });
+
+  it('keeps command names unique and sorted', () => {
+    const names = CLAUDE_COMMANDS.map((command) => command.name);
+
+    expect(new Set(names).size).toBe(names.length);
+    expect(names).toEqual([...names].sort((left, right) => left.localeCompare(right)));
+  });
+
+  it('returns multiple sorted matches for broader prefixes', () => {
+    expect(getCommandSuggestions('/m').map((command) => command.name)).toEqual(['/mcp', '/memory', '/migrate-installer', '/model']);
+    expect(getCommandSuggestions('/re').map((command) => command.name)).toEqual(['/release-notes', '/reload-skills', '/resume', '/review']);
+  });
 });

@@ -10,18 +10,35 @@ export type SlashCommandToken = {
 };
 
 export const CLAUDE_COMMANDS: ClaudeCommand[] = [
-  { name: '/help', description: 'Show Claude Code help' },
+  { name: '/add-dir', description: 'Add another working directory to the session' },
+  { name: '/agents', description: 'Manage or use configured agents' },
+  { name: '/bug', description: 'Report a Claude Code bug' },
   { name: '/clear', description: 'Clear the current conversation view' },
   { name: '/compact', description: 'Compact conversation context' },
+  { name: '/config', description: 'Open Claude Code configuration' },
+  { name: '/context', description: 'Inspect current context usage' },
   { name: '/cost', description: 'Show usage and cost information' },
   { name: '/doctor', description: 'Check Claude Code installation health' },
   { name: '/exit', description: 'Exit the current Claude session' },
-  { name: '/logout', description: 'Sign out of Claude Code' },
+  { name: '/export', description: 'Export the current conversation' },
+  { name: '/help', description: 'Show Claude Code help' },
+  { name: '/init', description: 'Create or update project guidance for Claude' },
+  { name: '/install-github-app', description: 'Install the Claude GitHub app' },
   { name: '/login', description: 'Sign in to Claude Code' },
+  { name: '/logout', description: 'Sign out of Claude Code' },
+  { name: '/mcp', description: 'Manage MCP server connections' },
+  { name: '/memory', description: 'Manage Claude memory' },
+  { name: '/migrate-installer', description: 'Migrate Claude Code installer setup' },
   { name: '/model', description: 'Choose or show the active model' },
   { name: '/permissions', description: 'Review permission settings' },
+  { name: '/pr-comments', description: 'View or work through pull request comments' },
+  { name: '/release-notes', description: 'Show Claude Code release notes' },
+  { name: '/reload-skills', description: 'Reload available Claude skills' },
   { name: '/resume', description: 'Resume a previous Claude conversation' },
-  { name: '/status', description: 'Show current Claude Code status' }
+  { name: '/review', description: 'Review code changes' },
+  { name: '/status', description: 'Show current Claude Code status' },
+  { name: '/terminal-setup', description: 'Configure terminal integration' },
+  { name: '/vim', description: 'Toggle or configure Vim mode' }
 ];
 
 const TOKEN_BOUNDARY = /\s/;
