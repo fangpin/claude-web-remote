@@ -239,6 +239,7 @@ describe('App', () => {
 
     expect((await screen.findAllByText('Repo One')).length).toBeGreaterThan(0);
     expect(screen.getAllByText('/repo/one').length).toBeGreaterThan(0);
+    expect(screen.getByText('Remote Claude session')).toBeInTheDocument();
 
     await waitFor(() => expect(FakeWebSocket.instances.length).toBe(1));
     FakeWebSocket.instances[0].emit({

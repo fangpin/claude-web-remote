@@ -1,7 +1,9 @@
 :root {
-  color: #e8edf2;
-  background: #101316;
+  color: #202124;
+  background: #f6f7f8;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
 }
 
 * {
@@ -29,40 +31,71 @@ button {
   grid-template-columns: minmax(320px, 380px) minmax(0, 1fr);
   height: 100vh;
   min-height: 0;
-  background: #101316;
+  background: #f6f7f8;
 }
 
 .sidebar {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   min-height: 0;
-  border-right: 1px solid #273449;
-  background: #171b20;
+  border-right: 1px solid #dedede;
+  background: #ffffff;
 }
 
-.sidebar h1 {
-  margin: 0;
-  border-bottom: 1px solid #29313a;
+.brand {
+  border-bottom: 1px solid #e4e4e4;
   padding: 18px 20px;
-  color: #f4f7f9;
+}
+
+.brand h1,
+.brand p,
+.new-session h2,
+.sessions h2,
+.conversation-header h2,
+.conversation-header p {
+  margin: 0;
+}
+
+.brand h1 {
+  color: #202124;
   font-size: 18px;
   font-weight: 700;
   letter-spacing: 0;
 }
 
+.brand p {
+  margin-top: 3px;
+  color: #6f7378;
+  font-size: 13px;
+}
+
+.muted {
+  color: #6f7378;
+  font-size: 13px;
+}
+
 .new-session {
   display: grid;
-  gap: 12px;
-  border-bottom: 1px solid #29313a;
+  gap: 10px;
+  border-bottom: 1px solid #e4e4e4;
   padding: 16px 20px 18px;
-  background: #1d2228;
+  background: #fbfbfb;
+}
+
+.new-session h2,
+.sessions h2 {
+  color: #6f7378;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
 }
 
 label {
   display: grid;
   gap: 6px;
-  color: #b8c2cc;
+  color: #3f4246;
   font-size: 13px;
+  font-weight: 560;
 }
 
 .checkbox-label {
@@ -81,14 +114,14 @@ label {
 }
 
 .directory-suggestions span {
-  color: #94a3b8;
+  color: #6f7378;
   font-size: 12px;
 }
 
 .directory-suggestions button {
-  border-color: #334155;
-  color: #cbd5e1;
-  background: #0f172a;
+  border-color: #d7d7d7;
+  color: #3f4246;
+  background: #ffffff;
   font-size: 12px;
   text-align: left;
   overflow-wrap: anywhere;
@@ -98,38 +131,50 @@ input,
 select,
 textarea {
   width: 100%;
-  border: 1px solid #3a444f;
+  border: 1px solid #d7d7d7;
   border-radius: 8px;
-  color: #edf2f7;
-  background: #11161b;
-  padding: 10px;
+  color: #202124;
+  background: #ffffff;
+  padding: 10px 11px;
 }
 
 input:focus,
 select:focus,
 textarea:focus {
-  border-color: #26a69a;
-  outline: 2px solid rgba(38, 166, 154, 0.25);
+  border-color: #d97757;
+  outline: 2px solid rgba(217, 119, 87, 0.24);
   outline-offset: 0;
 }
 
 button {
-  border: 1px solid #22786f;
+  border: 1px solid #d2d2d2;
   border-radius: 8px;
-  color: #ecfffb;
-  background: #17645d;
+  color: #202124;
+  background: #ffffff;
   padding: 10px 12px;
   font-weight: 650;
 }
 
 button:hover {
-  background: #1f7a71;
+  background: #f0f1f2;
+}
+
+.primary-action,
+.send-button {
+  border-color: #202124;
+  color: #ffffff;
+  background: #202124;
+}
+
+.primary-action:hover,
+.send-button:hover {
+  background: #383b3f;
 }
 
 .sessions {
   display: grid;
   align-content: start;
-  gap: 10px;
+  gap: 9px;
   min-height: 0;
   overflow: auto;
   padding: 16px 16px 20px;
@@ -139,17 +184,17 @@ button:hover {
   display: grid;
   gap: 6px;
   width: 100%;
-  border-color: #303943;
+  border-color: #e0e0e0;
   border-radius: 8px;
   text-align: left;
-  color: #eef3f7;
-  background: #20262d;
+  color: #202124;
+  background: #ffffff;
   padding: 12px;
 }
 
 .session.active {
-  border-color: #26a69a;
-  background: #17322f;
+  border-color: #d97757;
+  background: #fff7f3;
 }
 
 .session strong {
@@ -159,7 +204,7 @@ button:hover {
 
 .session-path,
 .session em {
-  color: #aeb8c2;
+  color: #6f7378;
   font-size: 12px;
 }
 
@@ -168,12 +213,33 @@ button:hover {
   overflow-wrap: anywhere;
 }
 
+.status {
+  justify-self: start;
+  border-radius: 999px;
+  padding: 2px 7px;
+  color: #4d5359;
+  background: #eceff1;
+  font-style: normal;
+  font-weight: 650;
+}
+
+.status-running,
+.status-starting {
+  color: #176b4d;
+  background: #e3f4ec;
+}
+
+.status-failed {
+  color: #a13a2b;
+  background: #fde9e4;
+}
+
 .conversation {
   display: grid;
   grid-template-rows: auto auto 1fr auto;
   min-width: 0;
   min-height: 0;
-  background: #12161a;
+  background: #f6f7f8;
 }
 
 .conversation-header {
@@ -181,9 +247,9 @@ button:hover {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  border-bottom: 1px solid #29313a;
+  border-bottom: 1px solid #dedede;
   padding: 16px 20px;
-  background: #171b20;
+  background: rgba(255, 255, 255, 0.94);
 }
 
 .conversation-header h2,
@@ -193,14 +259,23 @@ button:hover {
 
 .conversation-header p {
   margin-top: 4px;
-  color: #aeb8c2;
+  color: #6f7378;
   font-size: 13px;
   overflow-wrap: anywhere;
 }
 
 .conversation-header h2 {
-  color: #f4f7f9;
+  color: #202124;
   font-size: 17px;
+}
+
+.eyebrow {
+  display: block;
+  margin-bottom: 4px;
+  color: #d16643;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
 }
 
 .worktree-meta {
@@ -211,10 +286,10 @@ button:hover {
 }
 
 .worktree-meta span {
-  border: 1px solid #334155;
+  border: 1px solid #dedede;
   border-radius: 999px;
-  color: #cbd5e1;
-  background: #0f172a;
+  color: #4d5359;
+  background: #f6f7f8;
   padding: 4px 8px;
   font-size: 12px;
 }
@@ -233,10 +308,10 @@ button:hover {
 
 .event-limit-note {
   align-self: center;
-  border: 1px solid #5f5131;
+  border: 1px solid #ead8b7;
   border-radius: 999px;
-  color: #f4d28b;
-  background: #262112;
+  color: #7a541d;
+  background: #fff8e8;
   padding: 6px 12px;
   font-size: 12px;
 }
@@ -248,9 +323,9 @@ button:hover {
 }
 
 .conversation-block {
-  border: 1px solid #303943;
+  border: 1px solid #e0e0e0;
   border-radius: 8px;
-  background: #1b2026;
+  background: #ffffff;
   padding: 12px 14px;
 }
 
@@ -263,9 +338,10 @@ button:hover {
 .message-block.user {
   margin-left: auto;
   max-width: min(760px, 85%);
-  border-color: #2563eb;
-  background: #1e3a8a;
+  border-color: #e0e0e0;
+  background: #ffffff;
   padding: 12px 14px;
+  box-shadow: 0 1px 2px rgba(32, 33, 36, 0.08);
 }
 
 .message-block.assistant {
@@ -274,10 +350,10 @@ button:hover {
 
 .message-block.system {
   max-width: 920px;
-  border-left: 3px solid #64748b;
-  background: rgba(30, 41, 59, 0.5);
+  border-left: 3px solid #9aa0a6;
+  background: #f2f3f4;
   padding: 10px 12px;
-  color: #cbd5e1;
+  color: #3f4246;
 }
 
 .block-header {
@@ -290,16 +366,16 @@ button:hover {
 
 .block-header span:first-child,
 .block-section h4 {
-  color: #5ed0c4;
+  color: #d16643;
   font-size: 12px;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0;
   margin: 0;
   text-transform: uppercase;
 }
 
 .block-header span:not(:first-child) {
-  color: #aeb8c2;
+  color: #6f7378;
   font-size: 12px;
   font-style: normal;
 }
@@ -319,62 +395,68 @@ button:hover {
   overflow: auto;
   margin: 0;
   border-radius: 8px;
-  background: rgba(15, 23, 42, 0.8);
+  background: #f2f3f4;
   padding: 10px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  color: #202124;
 }
 
 .message-text {
+  background: transparent;
+  padding: 0;
+  font-family: inherit;
+  font-size: 15px;
   line-height: 1.6;
 }
 
 .tool-block,
 .task-block {
-  border-color: #475569;
-  background: #0f172a;
+  border-color: #dedede;
+  background: #ffffff;
 }
 
 .tool-block.running,
 .task-block.running {
-  border-color: #f59e0b;
+  border-color: #d89b37;
 }
 
 .tool-block.completed {
-  border-color: #22c55e;
+  border-color: #5fb685;
 }
 
 .task-block {
-  border-left: 4px solid #8b5cf6;
+  border-left: 4px solid #8d79c6;
 }
 
 .task-block.pending {
-  border-left-color: #8b5cf6;
+  border-left-color: #8d79c6;
 }
 
 .task-block.running {
-  border-left-color: #f59e0b;
+  border-left-color: #d89b37;
 }
 
 .task-block.completed {
-  border-left-color: #22c55e;
+  border-left-color: #5fb685;
 }
 
 .task-block.failed,
 .tool-block.failed,
 .error-block {
-  border-color: #ef4444;
+  border-color: #efb4a8;
+  background: #fff1ee;
 }
 
 .task-block p,
 .error-block p {
   margin: 0;
-  color: #dbeafe;
+  color: #3f4246;
 }
 
 .output-path pre {
   overflow-wrap: anywhere;
-  color: #bfdbfe;
+  color: #3f4246;
 }
 
 .raw-block {
@@ -387,14 +469,14 @@ button:hover {
 
 .raw-event-details summary {
   cursor: pointer;
-  color: #94a3b8;
+  color: #6f7378;
   font-size: 12px;
 }
 
 .raw-event-details pre {
   margin-top: 8px;
   max-height: 360px;
-  color: #cbd5e1;
+  color: #34383c;
 }
 
 .composer {
@@ -402,8 +484,8 @@ button:hover {
   grid-template-columns: 1fr auto;
   align-items: end;
   gap: 12px;
-  border-top: 1px solid #29313a;
-  background: #171b20;
+  border-top: 1px solid #dedede;
+  background: rgba(255, 255, 255, 0.95);
   padding: 16px 20px;
 }
 
@@ -420,10 +502,10 @@ button:hover {
   display: grid;
   max-height: 220px;
   overflow: auto;
-  border: 1px solid #334155;
+  border: 1px solid #d7d7d7;
   border-radius: 10px;
-  background: #111827;
-  box-shadow: 0 16px 32px rgb(0 0 0 / 0.35);
+  background: #ffffff;
+  box-shadow: 0 16px 32px rgb(32 33 36 / 0.18);
 }
 
 .autocomplete-option {
@@ -434,17 +516,17 @@ button:hover {
   border-radius: 0;
   padding: 10px 12px;
   text-align: left;
-  color: #e5e7eb;
+  color: #202124;
   background: transparent;
 }
 
 .autocomplete-option.active,
 .autocomplete-option:hover {
-  background: #1d4ed8;
+  background: #fff7f3;
 }
 
 .autocomplete-option span {
-  color: #cbd5e1;
+  color: #6f7378;
   font-size: 12px;
 }
 
@@ -454,10 +536,10 @@ button:hover {
 }
 
 .error {
-  border: 1px solid #8a4a4a;
+  border: 1px solid #efb4a8;
   border-radius: 8px;
-  color: #ffd6d6;
-  background: #261b1c;
+  color: #a13a2b;
+  background: #fff1ee;
   padding: 10px 12px;
 }
 
@@ -466,17 +548,17 @@ button:hover {
   gap: 12px;
   min-height: 0;
   overflow: auto;
-  border-top: 1px solid #29313a;
+  border-top: 1px solid #e4e4e4;
   padding: 14px 16px;
-  background: #171b20;
+  background: #ffffff;
 }
 
 .tasks-panel.compact {
   margin: 0;
   border-top: 0;
-  border-bottom: 1px solid #29313a;
+  border-bottom: 1px solid #dedede;
   padding: 12px 20px;
-  background: #171b20;
+  background: #ffffff;
 }
 
 .tasks-panel h3,
@@ -496,7 +578,7 @@ button:hover {
 }
 
 .task-section h4 {
-  color: #93c5fd;
+  color: #d16643;
   font-size: 12px;
   text-transform: uppercase;
 }
@@ -510,27 +592,27 @@ button:hover {
   display: grid;
   gap: 4px;
   width: 100%;
-  border-color: #303943;
+  border-color: #e0e0e0;
   border-radius: 8px;
   text-align: left;
-  color: #e5e7eb;
-  background: #20262d;
+  color: #202124;
+  background: #ffffff;
 }
 
 .task-card.background {
-  border-color: #60a5fa;
+  border-color: #6f9fd8;
 }
 
 .task-card.completed {
-  border-color: #22c55e;
+  border-color: #5fb685;
 }
 
 .task-card.failed {
-  border-color: #ef4444;
+  border-color: #efb4a8;
 }
 
 .task-card.interrupted {
-  border-color: #f59e0b;
+  border-color: #d89b37;
 }
 
 .task-card-title {
@@ -541,22 +623,22 @@ button:hover {
 .task-card-meta,
 .task-card-summary,
 .task-empty {
-  color: #cbd5e1;
+  color: #6f7378;
   font-size: 12px;
   overflow-wrap: anywhere;
 }
 
 .task-error {
-  color: #fecaca;
+  color: #a13a2b;
   font-size: 12px;
 }
 
 .task-limit-note {
   margin: 0;
-  border: 1px solid #5f5131;
+  border: 1px solid #ead8b7;
   border-radius: 999px;
-  color: #f4d28b;
-  background: #262112;
+  color: #7a541d;
+  background: #fff8e8;
   padding: 5px 9px;
   font-size: 12px;
 }
@@ -569,7 +651,7 @@ button:hover {
 .empty-state {
   align-self: center;
   justify-self: center;
-  color: #aeb8c2;
+  color: #6f7378;
 }
 
 @media (max-width: 820px) {
@@ -586,7 +668,7 @@ button:hover {
 
   .sidebar {
     border-right: 0;
-    border-bottom: 1px solid #29313a;
+    border-bottom: 1px solid #dedede;
   }
 
   .conversation {

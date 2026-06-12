@@ -313,8 +313,12 @@ export default function App() {
   return (
     <main className="app-shell">
       <aside className="sidebar">
-        <h1>Claude Remote Web</h1>
+        <div className="brand">
+          <h1>Claude Remote Web</h1>
+          <p>Remote Claude sessions</p>
+        </div>
         <form className="new-session" onSubmit={onCreateSession}>
+          <h2>New session</h2>
           <label>
             Working directory
             <input value={cwd} onChange={(event) => setCwd(event.target.value)} placeholder="/data00/home/user/repos/project" required />
@@ -345,10 +349,11 @@ export default function App() {
               <option value="default">default</option>
             </select>
           </label>
-          <button type="submit">Create session</button>
+          <button className="primary-action" type="submit">Create session</button>
         </form>
         <section className="sessions">
-          {sessions.length === 0 && <p>No sessions yet.</p>}
+          <h2>Sessions</h2>
+          {sessions.length === 0 && <p className="muted">No sessions yet.</p>}
           {sessions.map((session) => (
             <button
               key={session.id}
@@ -358,7 +363,7 @@ export default function App() {
               <strong>{session.name || session.cwd}</strong>
               <span className="session-path" title={session.cwd}>{session.cwd}</span>
               {session.worktree && <span className="session-path" title={session.worktree.branch}>{session.worktree.branch}</span>}
-              <em>{session.status}</em>
+              <em className={`status status-${session.status}`}>{session.status}</em>
             </button>
           ))}
         </section>
@@ -370,6 +375,7 @@ export default function App() {
           <>
             <header className="conversation-header">
               <div>
+                <span className="eyebrow">Remote Claude session</span>
                 <h2>{activeSession.name || activeSession.cwd}</h2>
                 <p title={activeSession.cwd}>{activeSession.cwd}</p>
                 {activeSession.worktree && (
@@ -415,6 +421,7 @@ export default function App() {
                   <textarea
                     ref={messageInputRef}
                     value={message}
+                    placeholder="Ask Claude to inspect, edit, test, or explain..."
                     onChange={(event) => {
                       setMessage(event.target.value);
                       refreshAutocomplete(event.target.value, event.target.selectionStart);
@@ -443,7 +450,7 @@ export default function App() {
                   </div>
                 )}
               </div>
-              <button type="submit">Send</button>
+              <button className="send-button" type="submit">Send</button>
             </form>
           </>
         ) : (
