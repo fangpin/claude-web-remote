@@ -85,11 +85,13 @@ impl EventStore {
     }
 
     pub async fn load_meta(&self, session_id: Uuid) -> AppResult<SessionMeta> {
+        let _guard = self.write_lock.lock().await;
         let content = fs::read(self.session_dir(session_id).join("meta.json")).await?;
         Ok(serde_json::from_slice(&content)?)
     }
 
     pub async fn list_meta(&self, filter: SessionListFilter) -> AppResult<Vec<SessionMeta>> {
+        let _guard = self.write_lock.lock().await;
         let mut entries = fs::read_dir(self.root.join("sessions")).await?;
         let mut sessions: Vec<SessionMeta> = Vec::new();
 
@@ -187,6 +189,7 @@ mod tests {
     use super::*;
     use crate::EventKind;
     use serde_json::json;
+    use std::time::Duration;
 
     #[tokio::test]
     async fn saves_and_loads_session_meta() {
@@ -290,6 +293,55 @@ mod tests {
         assert_eq!(
             all.iter().map(|meta| meta.id).collect::<Vec<_>>(),
             vec![deleted.id, active.id]
+        );
+    }
+
+    #[tokio::test]
+    async fn metadata_reads_wait_for_in_progress_meta_writes() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = EventStore::new(temp.path()).await.unwrap();
+        let id = Uuid::new_v4();
+        let now = Utc::now();
+        let meta = SessionMeta {
+            id,
+            name: Some("race".to_string()),
+            cwd: PathBuf::from("/tmp/race"),
+            permission_mode: "acceptEdits".to_string(),
+            status: SessionStatus::Stopped,
+            claude_session_id: None,
+            deleted_at: None,
+            created_at: now,
+            updated_at: now,
+        };
+        store.save_meta(&meta).await.unwrap();
+
+        let write_guard = store.write_lock.lock().await;
+        let dir = store.ensure_session_dir(id).await.unwrap();
+        fs::write(dir.join("meta.json"), b"{").await.unwrap();
+
+        let load_store = store.clone();
+        let load = tokio::spawn(async move { load_store.load_meta(id).await });
+        let list_store = store.clone();
+        let list = tokio::spawn(async move { list_store.list_meta(SessionListFilter::All).await });
+
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        assert!(!load.is_finished());
+        assert!(!list.is_finished());
+
+        fs::write(
+            dir.join("meta.json"),
+            serde_json::to_vec_pretty(&meta).unwrap(),
+        )
+        .await
+        .unwrap();
+        drop(write_guard);
+
+        let loaded = load.await.unwrap().unwrap();
+        let listed = list.await.unwrap().unwrap();
+        assert_eq!(loaded.id, id);
+        assert_eq!(
+            listed.iter().map(|meta| meta.id).collect::<Vec<_>>(),
+            vec![id]
         );
     }
 

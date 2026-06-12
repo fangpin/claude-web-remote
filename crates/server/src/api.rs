@@ -172,25 +172,40 @@ async fn handle_events_socket(
     after_id: u64,
     mut socket: WebSocket,
 ) {
-    if let Ok(events) = state.manager.events_after(session_id, after_id).await {
-        for event in events {
-            if let Ok(text) = serde_json::to_string(&event)
-                && socket.send(Message::Text(text.into())).await.is_err()
-            {
-                return;
+    match state.manager.events_after(session_id, after_id).await {
+        Ok(events) => {
+            for event in events {
+                if let Ok(text) = serde_json::to_string(&event)
+                    && socket.send(Message::Text(text.into())).await.is_err()
+                {
+                    return;
+                }
             }
+        }
+        Err(err) => {
+            let _ = socket
+                .send(Message::Text(
+                    json!({"kind":"error","payload":{"message":err.to_string()}})
+                        .to_string()
+                        .into(),
+                ))
+                .await;
+            return;
         }
     }
 
-    let Ok(mut rx) = state.manager.subscribe(session_id).await else {
-        let _ = socket
-            .send(Message::Text(
-                json!({"kind":"error","payload":{"message":"session is not running"}})
-                    .to_string()
-                    .into(),
-            ))
-            .await;
-        return;
+    let mut rx = match state.manager.subscribe(session_id).await {
+        Ok(rx) => rx,
+        Err(err) => {
+            let _ = socket
+                .send(Message::Text(
+                    json!({"kind":"error","payload":{"message":err.to_string()}})
+                        .to_string()
+                        .into(),
+                ))
+                .await;
+            return;
+        }
     };
 
     while let Ok(event) = rx.recv().await {
@@ -209,7 +224,11 @@ mod tests {
         body::Body,
         http::{Request, StatusCode},
     };
-    use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf};
+    use futures::StreamExt;
+    use serde_json::Value;
+    use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf, time::Duration};
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::{connect_async, tungstenite::Message as TungsteniteMessage};
     use tower::ServiceExt;
 
     fn fake_claude(dir: &std::path::Path) -> PathBuf {
@@ -241,6 +260,19 @@ done
             "acceptEdits".to_string(),
         );
         AppState { manager, store }
+    }
+
+    async fn read_websocket_json_message(uri: &str) -> Value {
+        let (mut websocket, _) = connect_async(uri).await.unwrap();
+        let message = tokio::time::timeout(Duration::from_secs(2), websocket.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        match message {
+            TungsteniteMessage::Text(text) => serde_json::from_str(&text).unwrap(),
+            other => panic!("expected websocket text message, got {other:?}"),
+        }
     }
 
     #[tokio::test]
@@ -325,6 +357,74 @@ done
         )
         .unwrap();
         assert_eq!(all_body["sessions"].as_array().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn websocket_deleted_session_sends_deleted_error_text() {
+        let temp = tempfile::tempdir().unwrap();
+        let state = test_state(&temp).await;
+        let session = state
+            .manager
+            .create_session(CreateSessionRequest {
+                cwd: temp.path().to_path_buf(),
+                name: Some("deleted-websocket".to_string()),
+                permission_mode: None,
+            })
+            .await
+            .unwrap();
+        state.manager.delete_session(session.id).await.unwrap();
+        let app = build_router(state, None);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let message =
+            read_websocket_json_message(&format!("ws://{addr}/api/sessions/{}/events", session.id))
+                .await;
+
+        server.abort();
+        assert_eq!(message["kind"], "error");
+        assert!(
+            message["payload"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("is deleted; restore it before continuing")
+        );
+    }
+
+    #[tokio::test]
+    async fn websocket_stopped_session_sends_subscribe_error_text() {
+        let temp = tempfile::tempdir().unwrap();
+        let state = test_state(&temp).await;
+        let session = state
+            .manager
+            .create_session(CreateSessionRequest {
+                cwd: temp.path().to_path_buf(),
+                name: Some("stopped-websocket".to_string()),
+                permission_mode: None,
+            })
+            .await
+            .unwrap();
+        state.manager.stop_session(session.id).await.unwrap();
+        let app = build_router(state, None);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let message = read_websocket_json_message(&format!(
+            "ws://{addr}/api/sessions/{}/events?afterId=999",
+            session.id
+        ))
+        .await;
+
+        server.abort();
+        assert_eq!(message["kind"], "error");
+        assert!(
+            message["payload"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("not found: running session")
+        );
     }
 
     #[tokio::test]
