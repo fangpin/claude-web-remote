@@ -42,7 +42,8 @@ pub struct ResolvedConfig {
 
 #[derive(Debug, Clone, Deserialize, Default)]
 struct FileConfig {
-    bind: Option<SocketAddr>,
+    #[serde(rename = "bind")]
+    _bind: Option<SocketAddr>,
     data_dir: Option<PathBuf>,
     claude_bin: Option<PathBuf>,
     launcher: Option<Vec<String>>,
@@ -57,8 +58,7 @@ impl Config {
         Ok(ResolvedConfig {
             bind: self
                 .bind
-                .or(file_config.bind)
-                .unwrap_or_else(|| "127.0.0.1:8787".parse().expect("valid default bind")),
+                .unwrap_or_else(|| "127.0.0.1:0".parse().expect("valid default bind")),
             data_dir: self
                 .data_dir
                 .clone()
@@ -175,10 +175,7 @@ mod tests {
 
         let resolved = config.resolve().await.unwrap();
 
-        assert_eq!(
-            resolved.bind,
-            "127.0.0.1:8787".parse::<SocketAddr>().unwrap()
-        );
+        assert_eq!(resolved.bind, "127.0.0.1:0".parse::<SocketAddr>().unwrap());
         assert_eq!(resolved.launcher, vec!["claude".to_string()]);
         assert_eq!(resolved.default_permission_mode, "acceptEdits");
         assert!(resolved.data_dir.ends_with(".claude-remote-web"));
@@ -186,7 +183,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn loads_explicit_config_file_and_expands_home_paths() {
+    async fn ignores_config_file_bind_and_expands_home_paths() {
         let temp = tempfile::tempdir().unwrap();
         let config_path = temp.path().join("config.toml");
         fs::write(
@@ -214,10 +211,7 @@ default_permission_mode = "auto"
         let resolved = config.resolve().await.unwrap();
         let home = std::env::var_os("HOME").map(PathBuf::from).unwrap();
 
-        assert_eq!(
-            resolved.bind,
-            "127.0.0.1:9999".parse::<SocketAddr>().unwrap()
-        );
+        assert_eq!(resolved.bind, "127.0.0.1:0".parse::<SocketAddr>().unwrap());
         assert_eq!(resolved.data_dir, home.join("custom-data"));
         assert_eq!(
             resolved.launcher,

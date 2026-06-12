@@ -20,7 +20,8 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState { manager, store };
     let app = build_router(state, config.web_dir.clone());
     let listener = TcpListener::bind(config.bind).await?;
+    let bind = listener.local_addr()?;
 
-    tracing::info!(bind = %config.bind, data_dir = %config.data_dir.display(), "serving claude remote web");
+    tracing::info!(bind = %bind, data_dir = %config.data_dir.display(), "serving claude remote web");
     serve(listener, app).await.context("server failed")
 }
