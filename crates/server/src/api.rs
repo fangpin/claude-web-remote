@@ -1,4 +1,7 @@
-use crate::{AppError, AppResult, CreateSessionRequest, EventStore, SessionManager};
+use crate::{
+    AppError, AppResult, ConfigStore, ConfigValues, CreateSessionRequest, EventStore,
+    SessionManager,
+};
 use axum::{
     Json, Router,
     extract::{
@@ -6,7 +9,7 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
     response::IntoResponse,
-    routing::{get, post},
+    routing::{get, post, put},
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -18,6 +21,7 @@ use uuid::Uuid;
 pub struct AppState {
     pub manager: SessionManager,
     pub store: EventStore,
+    pub config: ConfigStore,
 }
 
 #[derive(Debug, Deserialize)]
@@ -40,6 +44,7 @@ pub fn build_router(state: AppState, web_dir: Option<PathBuf>) -> Router {
         .route("/api/sessions/{id}/stop", post(stop_session))
         .route("/api/sessions/{id}/restart", post(restart_session))
         .route("/api/sessions/{id}/events", get(events_ws))
+        .route("/api/config", get(get_config).merge(put(update_config)))
         .with_state(state)
         .layer(CorsLayer::permissive());
 
@@ -106,6 +111,17 @@ async fn events_ws(
     ws.on_upgrade(move |socket| async move {
         handle_events_socket(state, id, query.after_id.unwrap_or(0), socket).await;
     })
+}
+
+async fn get_config(State(state): State<AppState>) -> AppResult<Json<serde_json::Value>> {
+    Ok(Json(json!(state.config.get().await?)))
+}
+
+async fn update_config(
+    State(state): State<AppState>,
+    Json(request): Json<ConfigValues>,
+) -> AppResult<Json<serde_json::Value>> {
+    Ok(Json(json!(state.config.save(request).await?)))
 }
 
 async fn handle_events_socket(
