@@ -109,6 +109,7 @@ Keep `claude_bin` backward compatibility unless intentionally removing legacy co
 - Restart should use persisted Claude session id when available.
 - If no Claude session id is available, restart fresh and record a system event.
 - Bind to `127.0.0.1` by default.
+- After every change, review whether `README.md` and `CLAUDE.md` need updates, make needed updates, and mention the result in the final summary.
 
 ## Testing expectations
 

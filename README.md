@@ -116,17 +116,21 @@ scripts/start-server.sh --check --config /path/to/config.toml
 
 The script builds `web/dist` unless `--skip-web-build` is set, then starts the Rust backend with `cargo run --release`.
 
-If accessing from another machine, open an SSH tunnel:
-
-```bash
-ssh -N -L 8787:127.0.0.1:8787 <devbox>
-```
-
-Then open:
+After the daemon binds successfully, it prints the resolved remote bind address, an SSH tunnel command, and the local browser URL:
 
 ```text
-http://127.0.0.1:8787
+Claude Remote Web is running.
+
+Remote bind: 127.0.0.1:8787
+
+From your local machine, open an SSH tunnel:
+  ssh -N -L 8787:127.0.0.1:8787 <devbox>
+
+Then open in your browser:
+  http://127.0.0.1:8787
 ```
+
+If accessing from another machine, run the printed SSH tunnel command on your local machine, replacing `<devbox>` with the remote host name. Then open the printed browser URL.
 
 ## Create a session
 
