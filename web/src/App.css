@@ -73,6 +73,29 @@ button {
   padding: 10px 12px;
 }
 
+.session-modes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.session-modes button {
+  border-color: #334155;
+  background: #1e293b;
+}
+
+.session-modes button.selected {
+  border-color: #93c5fd;
+  background: #1d4ed8;
+}
+
+button.danger {
+  border-color: #ef4444;
+  color: #fee2e2;
+  background: #991b1b;
+}
+
 .sessions {
   display: grid;
   gap: 10px;
