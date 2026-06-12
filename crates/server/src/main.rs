@@ -17,6 +17,7 @@ async fn main() -> anyhow::Result<()> {
         config.launcher.clone(),
         config.default_permission_mode.clone(),
     );
+    manager.restore_active_sessions().await?;
     let state = AppState { manager, store };
     let app = build_router(state, config.web_dir.clone());
     let listener = TcpListener::bind(config.bind).await?;
