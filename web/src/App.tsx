@@ -134,9 +134,11 @@ export default function App() {
               </div>
             </header>
             <div className="events">
-              {(events[activeSession.id] ?? []).map((event, index) => (
-                <EventCard key={`${event.id}-${index}`} event={event} />
-              ))}
+              {(events[activeSession.id] ?? [])
+                .filter((event) => event.kind !== 'raw' && event.kind !== 'system')
+                .map((event, index) => (
+                  <EventCard key={`${event.id}-${index}`} event={event} />
+                ))}
             </div>
             <form className="composer" onSubmit={onSend}>
               <label>
