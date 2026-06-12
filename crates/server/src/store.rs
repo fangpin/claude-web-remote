@@ -1,4 +1,4 @@
-use crate::{AppResult, UiEvent};
+use crate::{AppError, AppResult, UiEvent};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -159,7 +159,10 @@ impl EventStore {
 
     async fn append_line(&self, session_id: Uuid, file_name: &str, line: &str) -> AppResult<()> {
         let _guard = self.write_lock.lock().await;
-        let dir = self.ensure_session_dir(session_id).await?;
+        let dir = self.session_dir(session_id);
+        if !fs::try_exists(&dir).await? {
+            return Err(AppError::NotFound(format!("session {session_id}")));
+        }
         let path = dir.join(file_name);
         let mut content = line.to_string();
         content.push('\n');
@@ -300,6 +303,24 @@ mod tests {
 
         store.remove_session_dir(session_id).await.unwrap();
 
+        assert!(
+            !fs::try_exists(temp.path().join("sessions").join(session_id.to_string()))
+                .await
+                .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn append_after_remove_session_dir_does_not_recreate_session_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = EventStore::new(temp.path()).await.unwrap();
+        let session_id = Uuid::new_v4();
+        store.ensure_session_dir(session_id).await.unwrap();
+
+        store.remove_session_dir(session_id).await.unwrap();
+        let append_result = store.append_stderr(session_id, "late stderr").await;
+
+        assert!(append_result.is_err());
         assert!(
             !fs::try_exists(temp.path().join("sessions").join(session_id.to_string()))
                 .await
