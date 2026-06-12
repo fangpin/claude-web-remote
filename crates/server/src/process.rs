@@ -31,6 +31,7 @@ pub enum ProcessEvent {
     Exited(Option<i32>),
 }
 
+#[derive(Clone)]
 pub struct ClaudeProcess {
     child_id: Option<u32>,
     stdin: Arc<Mutex<tokio::process::ChildStdin>>,

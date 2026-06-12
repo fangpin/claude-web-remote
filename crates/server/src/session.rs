@@ -5,7 +5,12 @@ use crate::{
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    io::ErrorKind,
+    path::PathBuf,
+    sync::Arc,
+};
 use tokio::sync::{Mutex, broadcast};
 use uuid::Uuid;
 
@@ -42,6 +47,7 @@ pub struct SessionManager {
     launcher: Vec<String>,
     default_permission_mode: String,
     running: Arc<Mutex<HashMap<Uuid, RunningSession>>>,
+    starting: Arc<Mutex<HashSet<Uuid>>>,
 }
 
 impl SessionManager {
@@ -51,6 +57,7 @@ impl SessionManager {
             launcher,
             default_permission_mode,
             running: Arc::new(Mutex::new(HashMap::new())),
+            starting: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
@@ -122,51 +129,45 @@ impl SessionManager {
         );
         self.store.append_event(&event).await?;
 
-        let running = self.running.lock().await;
-        let session = running
-            .get(&session_id)
-            .ok_or_else(|| AppError::NotFound(format!("running session {session_id}")))?;
-        let _ = session.tx.send(event);
-        session.process.send_input(&text).await
+        let (process, tx) = {
+            let running = self.running.lock().await;
+            let session = running
+                .get(&session_id)
+                .ok_or_else(|| AppError::NotFound(format!("running session {session_id}")))?;
+            (session.process.clone(), session.tx.clone())
+        };
+        let _ = tx.send(event);
+        process.send_input(&text).await
     }
 
     pub async fn stop_session(&self, session_id: Uuid) -> AppResult<()> {
-        let running = self.running.lock().await.remove(&session_id);
-        if let Some(session) = running {
-            session.process.kill().await?;
-        }
+        let _meta = self.load_active_meta(session_id).await?;
+        self.stop_running_process(session_id).await?;
         self.update_status(session_id, SessionStatus::Stopped).await
     }
 
     pub async fn restart_session(&self, session_id: Uuid) -> AppResult<SessionInfo> {
         let _meta = self.load_active_meta(session_id).await?;
-        let _ = self.stop_session(session_id).await;
+        let _ = self.stop_running_process(session_id).await;
+        self.update_status(session_id, SessionStatus::Stopped)
+            .await?;
         self.resume_session(session_id).await
     }
 
     pub async fn resume_session(&self, session_id: Uuid) -> AppResult<SessionInfo> {
         let meta = self.load_active_meta(session_id).await?;
-        if self.running.lock().await.contains_key(&session_id) {
-            return Err(AppError::InvalidRequest(format!(
-                "session {session_id} is already running"
-            )));
-        }
-        if matches!(
-            meta.status,
-            SessionStatus::Starting | SessionStatus::Running
-        ) {
-            return Err(AppError::InvalidRequest(format!(
-                "session {session_id} cannot be resumed from status {:?}",
-                meta.status
-            )));
-        }
-        self.start_or_resume(meta).await
+        self.reserve_starting(session_id).await?;
+        let result = self.resume_reserved_session(meta).await;
+        self.starting.lock().await.remove(&session_id);
+        result
     }
 
     pub async fn delete_session(&self, session_id: Uuid) -> AppResult<SessionInfo> {
         let mut meta = self.load_active_meta(session_id).await?;
         if self.running.lock().await.contains_key(&session_id) {
-            self.stop_session(session_id).await?;
+            self.stop_running_process(session_id).await?;
+            self.update_status(session_id, SessionStatus::Stopped)
+                .await?;
             meta = self.store.load_meta(session_id).await?;
         }
         let now = Utc::now();
@@ -191,18 +192,17 @@ impl SessionManager {
     }
 
     pub async fn permanently_delete_session(&self, session_id: Uuid) -> AppResult<()> {
-        let meta = self.store.load_meta(session_id).await?;
+        let meta = match self.store.load_meta(session_id).await {
+            Ok(meta) => meta,
+            Err(AppError::Io(error)) if error.kind() == ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+        };
         if meta.deleted_at.is_none() {
             return Err(AppError::InvalidRequest(format!(
                 "session {session_id} must be deleted before permanent removal"
             )));
         }
-        if self.running.lock().await.contains_key(&session_id) {
-            let running = self.running.lock().await.remove(&session_id);
-            if let Some(session) = running {
-                session.process.kill().await?;
-            }
-        }
+        self.stop_running_process(session_id).await?;
         self.store.remove_session_dir(session_id).await
     }
 
@@ -216,7 +216,41 @@ impl SessionManager {
     }
 
     pub async fn events_after(&self, session_id: Uuid, after_id: u64) -> AppResult<Vec<UiEvent>> {
+        let _meta = self.load_active_meta(session_id).await?;
         self.store.load_events_after(session_id, after_id).await
+    }
+
+    async fn stop_running_process(&self, session_id: Uuid) -> AppResult<()> {
+        let running = self.running.lock().await.remove(&session_id);
+        if let Some(session) = running {
+            session.process.kill().await?;
+        }
+        Ok(())
+    }
+
+    async fn reserve_starting(&self, session_id: Uuid) -> AppResult<()> {
+        let mut starting = self.starting.lock().await;
+        let running = self.running.lock().await;
+        if running.contains_key(&session_id) || starting.contains(&session_id) {
+            return Err(AppError::InvalidRequest(format!(
+                "session {session_id} is already running"
+            )));
+        }
+        starting.insert(session_id);
+        Ok(())
+    }
+
+    async fn resume_reserved_session(&self, meta: SessionMeta) -> AppResult<SessionInfo> {
+        if matches!(
+            meta.status,
+            SessionStatus::Starting | SessionStatus::Running
+        ) {
+            return Err(AppError::InvalidRequest(format!(
+                "session {} cannot be resumed from status {:?}",
+                meta.id, meta.status
+            )));
+        }
+        self.start_or_resume(meta).await
     }
 
     async fn start_or_resume(&self, meta: SessionMeta) -> AppResult<SessionInfo> {
@@ -691,6 +725,10 @@ done
                 .await
                 .unwrap()
         );
+        manager
+            .permanently_delete_session(session.id)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -730,6 +768,64 @@ done
             manager.subscribe(session.id).await,
             Err(AppError::InvalidRequest(_))
         ));
+        assert!(matches!(
+            manager.stop_session(session.id).await,
+            Err(AppError::InvalidRequest(_))
+        ));
+        assert!(matches!(
+            manager.events_after(session.id, 0).await,
+            Err(AppError::InvalidRequest(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn concurrent_resume_allows_only_one_starter() {
+        let temp = tempfile::tempdir().unwrap();
+        let starts_log = temp.path().join("starts.log");
+        let wrapper = temp.path().join("slow-wrapper.sh");
+        fs::write(
+            &wrapper,
+            format!(
+                "#!/usr/bin/env bash\nprintf 'start\\n' >> '{}'\nsleep 0.2\nprintf '{{\"type\":\"system\",\"session_id\":\"slow-session\"}}\\n'\nwhile IFS= read -r line; do sleep 10; done\n",
+                starts_log.display()
+            ),
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&wrapper).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&wrapper, permissions).unwrap();
+        let store = EventStore::new(temp.path().join("data")).await.unwrap();
+        let manager = SessionManager::new(
+            store,
+            vec![wrapper.to_string_lossy().to_string()],
+            "acceptEdits".to_string(),
+        );
+        let session = manager
+            .create_session(CreateSessionRequest {
+                cwd: temp.path().to_path_buf(),
+                name: None,
+                permission_mode: None,
+            })
+            .await
+            .unwrap();
+        manager.stop_session(session.id).await.unwrap();
+
+        let (first, second) = tokio::join!(
+            manager.resume_session(session.id),
+            manager.resume_session(session.id)
+        );
+        let successes = [&first, &second]
+            .iter()
+            .filter(|result| result.is_ok())
+            .count();
+        let invalid_requests = [&first, &second]
+            .iter()
+            .filter(|result| matches!(result, Err(AppError::InvalidRequest(_))))
+            .count();
+
+        assert_eq!(successes, 1);
+        assert_eq!(invalid_requests, 1);
+        manager.stop_session(session.id).await.unwrap();
     }
 
     #[tokio::test]
@@ -763,19 +859,27 @@ done
             .await
             .unwrap();
         manager.stop_session(session.id).await.unwrap();
+        if let Err(error) = fs::remove_file(&args_log)
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            panic!("failed to remove pre-resume args log: {error}");
+        }
         let mut meta = store.load_meta(session.id).await.unwrap();
         meta.claude_session_id = Some("resume-me".to_string());
         store.save_meta(&meta).await.unwrap();
 
         manager.resume_session(session.id).await.unwrap();
-        for _ in 0..10 {
-            if args_log.exists() {
+        let mut args = String::new();
+        for _ in 0..20 {
+            if let Ok(contents) = fs::read_to_string(&args_log)
+                && contents.contains("--resume resume-me")
+            {
+                args = contents;
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
 
-        let args = fs::read_to_string(args_log).unwrap();
         assert!(args.contains("--resume resume-me"));
     }
 }
