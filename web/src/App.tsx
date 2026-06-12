@@ -102,6 +102,11 @@ export default function App() {
         return { ...session, status: 'stopped' };
       }));
     } catch (err: unknown) {
+      if (removeWorktree) {
+        setSessions((current) => current.map((session) => (
+          session.id === activeId ? { ...session, status: 'stopped' } : session
+        )));
+      }
       setError(err instanceof Error ? err.message : String(err));
     }
   }
@@ -184,7 +189,9 @@ export default function App() {
                 {activeSession.worktree ? (
                   <>
                     <button onClick={() => onStop(false)}>Stop only</button>
-                    <button onClick={() => onStop(true)}>Stop and remove worktree</button>
+                    {activeSession.worktree.createdByClaudeRemoteWeb && (
+                      <button onClick={() => onStop(true)}>Stop and remove worktree</button>
+                    )}
                   </>
                 ) : (
                   <button onClick={() => onStop(false)}>Stop</button>

@@ -48,6 +48,22 @@ const sessions = [
     },
     createdAt: '2026-06-11T03:00:00Z',
     updatedAt: '2026-06-11T03:00:00Z'
+  },
+  {
+    id: 's5',
+    name: 'External Worktree Repo',
+    cwd: '/repo/external-worktree',
+    permissionMode: 'acceptEdits',
+    status: 'running',
+    claudeSessionId: null,
+    worktree: {
+      sourceCwd: '/repo/external',
+      worktreeCwd: '/repo/external-worktree',
+      branch: 'feature/external',
+      createdByClaudeRemoteWeb: false
+    },
+    createdAt: '2026-06-11T04:00:00Z',
+    updatedAt: '2026-06-11T04:00:00Z'
   }
 ];
 
@@ -211,6 +227,40 @@ describe('App', () => {
     expect(activeHeader).not.toBeNull();
     expect(within(activeHeader as HTMLElement).getByText('/repo/one')).toBeInTheDocument();
     expect(within(activeHeader as HTMLElement).getByText('Stop')).toBeInTheDocument();
+  });
+
+  it('marks worktree sessions stopped when stop succeeds but removal fails', async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/sessions' && !init) {
+        return new Response(JSON.stringify({ sessions }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (url.endsWith('/stop-and-remove-worktree')) {
+        return new Response(JSON.stringify({ error: 'worktree has uncommitted changes' }), { status: 400, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+    render(<App />);
+
+    fireEvent.click(await screen.findByText('Worktree Repo'));
+    fireEvent.click(screen.getByText('Stop and remove worktree'));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('worktree has uncommitted changes');
+    const activeHeader = screen.getByRole('heading', { name: 'Worktree Repo' }).closest('header');
+    expect(activeHeader).not.toBeNull();
+    expect(within(activeHeader as HTMLElement).getByText('/repo/one/.claude/worktrees/abc123')).toBeInTheDocument();
+    expect(within(activeHeader as HTMLElement).getByText('Branch: pin/abc123')).toBeInTheDocument();
+    const activeSessionButton = screen.getByRole('button', { name: /^Worktree Repo/ });
+    expect(within(activeSessionButton).getByText('stopped')).toBeInTheDocument();
+  });
+
+  it('hides remove action for worktrees not created by this app', async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByText('External Worktree Repo'));
+
+    expect(screen.queryByText('Stop and remove worktree')).not.toBeInTheDocument();
+    expect(screen.getByText('Stop only')).toBeInTheDocument();
   });
 
   it('sends user input to the active session', async () => {
