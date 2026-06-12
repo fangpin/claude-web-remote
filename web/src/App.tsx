@@ -1,8 +1,10 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { createSession, eventsUrl, listSessions, restartSession, sendInput, stopSession } from './api';
 import EventCard from './EventCard';
 import type { SessionInfo, UiEvent } from './types';
 import './App.css';
+
+const EVENT_RENDER_LIMIT = 80;
 
 export default function App() {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
@@ -13,6 +15,8 @@ export default function App() {
   const [permissionMode, setPermissionMode] = useState('acceptEdits');
   const [message, setMessage] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const composerRef = useRef<HTMLFormElement | null>(null);
+  const eventsRef = useRef<HTMLDivElement | null>(null);
 
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeId) ?? null,
@@ -41,6 +45,11 @@ export default function App() {
     };
     socket.onclose = () => undefined;
     return () => socket.close();
+  }, [activeId]);
+
+  useEffect(() => {
+    if (!activeId) return;
+    composerRef.current?.scrollIntoView({ block: 'end' });
   }, [activeId]);
 
   async function onCreateSession(event: FormEvent) {
@@ -81,6 +90,16 @@ export default function App() {
     setSessions((current) => current.map((session) => session.id === activeId ? restarted : session));
   }
 
+  const activeEvents = activeSession ? (events[activeSession.id] ?? []) : [];
+  const visibleEvents = activeEvents.slice(-EVENT_RENDER_LIMIT);
+  const hiddenEventCount = activeEvents.length - visibleEvents.length;
+
+  useEffect(() => {
+    const eventsElement = eventsRef.current;
+    if (!eventsElement) return;
+    eventsElement.scrollTop = eventsElement.scrollHeight;
+  }, [activeId, visibleEvents.length]);
+
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -111,9 +130,10 @@ export default function App() {
               key={session.id}
               className={session.id === activeId ? 'session active' : 'session'}
               onClick={() => setActiveId(session.id)}
+              title={session.cwd}
             >
               <strong>{session.name || session.cwd}</strong>
-              <span>{session.cwd}</span>
+              <span className="session-path" title={session.cwd}>{session.cwd}</span>
               <em>{session.status}</em>
             </button>
           ))}
@@ -126,19 +146,24 @@ export default function App() {
             <header className="conversation-header">
               <div>
                 <h2>{activeSession.name || activeSession.cwd}</h2>
-                <p>{activeSession.cwd}</p>
+                <p title={activeSession.cwd}>{activeSession.cwd}</p>
               </div>
               <div className="actions">
                 <button onClick={onStop}>Stop</button>
                 <button onClick={onRestart}>Restart</button>
               </div>
             </header>
-            <div className="events">
-              {(events[activeSession.id] ?? []).map((event, index) => (
+            <div className="events" ref={eventsRef}>
+              {hiddenEventCount > 0 && (
+                <div className="event-limit-note">
+                  Showing latest {EVENT_RENDER_LIMIT} events. {hiddenEventCount} older events hidden.
+                </div>
+              )}
+              {visibleEvents.map((event, index) => (
                 <EventCard key={`${event.id}-${index}`} event={event} />
               ))}
             </div>
-            <form className="composer" onSubmit={onSend}>
+            <form className="composer" onSubmit={onSend} ref={composerRef}>
               <label>
                 Message
                 <textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={3} />

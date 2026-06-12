@@ -12,10 +12,21 @@ const sessions = [
     claudeSessionId: null,
     createdAt: '2026-06-11T00:00:00Z',
     updatedAt: '2026-06-11T00:00:00Z'
+  },
+  {
+    id: 's2',
+    name: 'Repo Two',
+    cwd: '/data00/home/user/repos/very/long/path/that/should/still/be/available/in/full',
+    permissionMode: 'acceptEdits',
+    status: 'running',
+    claudeSessionId: null,
+    createdAt: '2026-06-11T00:00:00Z',
+    updatedAt: '2026-06-11T00:00:00Z'
   }
 ];
 
 let fetchMock: ReturnType<typeof vi.fn>;
+let scrollIntoViewMock: ReturnType<typeof vi.fn>;
 
 class FakeWebSocket {
   static instances: FakeWebSocket[] = [];
@@ -34,6 +45,11 @@ class FakeWebSocket {
 beforeEach(() => {
   cleanup();
   FakeWebSocket.instances = [];
+  scrollIntoViewMock = vi.fn();
+  Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+    configurable: true,
+    value: scrollIntoViewMock
+  });
   fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url === '/api/sessions' && !init) {
@@ -75,6 +91,42 @@ describe('App', () => {
     });
 
     expect(await screen.findByText(/hello from claude/)).toBeInTheDocument();
+  });
+
+  it('keeps the full working directory available on truncated session labels', async () => {
+    render(<App />);
+
+    expect((await screen.findAllByTitle('/repo/one')).length).toBeGreaterThan(0);
+    expect(
+      (await screen.findAllByTitle('/data00/home/user/repos/very/long/path/that/should/still/be/available/in/full')).length
+    ).toBeGreaterThan(0);
+  });
+
+  it('only renders the most recent events for long streams', async () => {
+    render(<App />);
+
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBe(1));
+    for (let id = 1; id <= 90; id += 1) {
+      FakeWebSocket.instances[0].emit({
+        id,
+        sessionId: 's1',
+        time: '2026-06-11T00:00:00Z',
+        kind: 'assistant',
+        payload: { message: `event ${id}` }
+      });
+    }
+
+    expect(await screen.findByText('event 90')).toBeInTheDocument();
+    expect(screen.queryByText('event 1')).not.toBeInTheDocument();
+    expect(screen.getByText(/Showing latest 80 events/)).toBeInTheDocument();
+  });
+
+  it('scrolls to the composer when selecting a session', async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByText('Repo Two'));
+
+    await waitFor(() => expect(scrollIntoViewMock).toHaveBeenCalled());
   });
 
   it('creates a session from the form', async () => {
