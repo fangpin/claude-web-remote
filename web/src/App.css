@@ -159,6 +159,22 @@ button {
   font-size: 13px;
 }
 
+.worktree-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.worktree-meta span {
+  border: 1px solid #334155;
+  border-radius: 999px;
+  color: #cbd5e1;
+  background: #0f172a;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
 .actions {
   display: flex;
   gap: 8px;

@@ -32,6 +32,22 @@ const sessions = [
     claudeSessionId: null,
     createdAt: '2026-06-10T00:00:00Z',
     updatedAt: '2026-06-10T00:00:00Z'
+  },
+  {
+    id: 's4',
+    name: 'Worktree Repo',
+    cwd: '/repo/one/.claude/worktrees/abc123',
+    permissionMode: 'acceptEdits',
+    status: 'running',
+    claudeSessionId: null,
+    worktree: {
+      sourceCwd: '/repo/one',
+      worktreeCwd: '/repo/one/.claude/worktrees/abc123',
+      branch: 'pin/abc123',
+      createdByClaudeRemoteWeb: true
+    },
+    createdAt: '2026-06-11T03:00:00Z',
+    updatedAt: '2026-06-11T03:00:00Z'
   }
 ];
 
@@ -67,6 +83,9 @@ beforeEach(() => {
       return new Response(JSON.stringify({ ...sessions[0], id: 's4', name: body.name ?? 'New Repo', cwd: body.cwd }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
     if (url.endsWith('/input')) {
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (url.endsWith('/stop-and-remove-worktree')) {
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
     if (url.endsWith('/stop') || url.endsWith('/restart')) {
@@ -152,6 +171,46 @@ describe('App', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions', expect.objectContaining({ method: 'POST' })));
     const createCall = fetchMock.mock.calls.find(([url, init]) => url === '/api/sessions' && init?.method === 'POST');
     expect(JSON.parse(String(createCall?.[1]?.body)).worktree).toBeUndefined();
+  });
+
+  it('renders worktree source and branch metadata', async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByText('Worktree Repo'));
+
+    expect(screen.getByText('Source: /repo/one')).toBeInTheDocument();
+    expect(screen.getByText('Branch: pin/abc123')).toBeInTheDocument();
+  });
+
+  it('offers stop and remove for worktree sessions', async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByText('Worktree Repo'));
+    fireEvent.click(screen.getByText('Stop and remove worktree'));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s4/stop-and-remove-worktree', expect.objectContaining({ method: 'POST' })));
+  });
+
+  it('keeps stop-only behavior for worktree sessions', async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByText('Worktree Repo'));
+    fireEvent.click(screen.getByText('Stop only'));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s4/stop', expect.objectContaining({ method: 'POST' })));
+  });
+
+  it('updates local worktree state after stop and remove succeeds', async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByText('Worktree Repo'));
+    fireEvent.click(screen.getByText('Stop and remove worktree'));
+
+    await waitFor(() => expect(screen.queryByText('Branch: pin/abc123')).not.toBeInTheDocument());
+    const activeHeader = screen.getByRole('heading', { name: 'Worktree Repo' }).closest('header');
+    expect(activeHeader).not.toBeNull();
+    expect(within(activeHeader as HTMLElement).getByText('/repo/one')).toBeInTheDocument();
+    expect(within(activeHeader as HTMLElement).getByText('Stop')).toBeInTheDocument();
   });
 
   it('sends user input to the active session', async () => {

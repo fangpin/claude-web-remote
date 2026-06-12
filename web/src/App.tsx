@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { createSession, eventsUrl, listSessions, restartSession, sendInput, stopSession } from './api';
+import { createSession, eventsUrl, listSessions, restartSession, sendInput, stopAndRemoveWorktree, stopSession } from './api';
 import EventCard from './EventCard';
 import type { SessionInfo, UiEvent } from './types';
 import './App.css';
@@ -85,10 +85,25 @@ export default function App() {
     await sendInput(activeId, text);
   }
 
-  async function onStop() {
+  async function onStop(removeWorktree = false) {
     if (!activeId) return;
-    await stopSession(activeId);
-    setSessions((current) => current.map((session) => session.id === activeId ? { ...session, status: 'stopped' } : session));
+    setError(null);
+    try {
+      if (removeWorktree) {
+        await stopAndRemoveWorktree(activeId);
+      } else {
+        await stopSession(activeId);
+      }
+      setSessions((current) => current.map((session) => {
+        if (session.id !== activeId) return session;
+        if (removeWorktree && session.worktree) {
+          return { ...session, cwd: session.worktree.sourceCwd, status: 'stopped', worktree: null };
+        }
+        return { ...session, status: 'stopped' };
+      }));
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
   }
 
   async function onRestart() {
@@ -144,6 +159,7 @@ export default function App() {
             >
               <strong>{session.name || session.cwd}</strong>
               <span>{session.cwd}</span>
+              {session.worktree && <span>{session.worktree.branch}</span>}
               <em>{session.status}</em>
             </button>
           ))}
@@ -157,9 +173,22 @@ export default function App() {
               <div>
                 <h2>{activeSession.name || activeSession.cwd}</h2>
                 <p>{activeSession.cwd}</p>
+                {activeSession.worktree && (
+                  <div className="worktree-meta">
+                    <span>Source: {activeSession.worktree.sourceCwd}</span>
+                    <span>Branch: {activeSession.worktree.branch}</span>
+                  </div>
+                )}
               </div>
               <div className="actions">
-                <button onClick={onStop}>Stop</button>
+                {activeSession.worktree ? (
+                  <>
+                    <button onClick={() => onStop(false)}>Stop only</button>
+                    <button onClick={() => onStop(true)}>Stop and remove worktree</button>
+                  </>
+                ) : (
+                  <button onClick={() => onStop(false)}>Stop</button>
+                )}
                 <button onClick={onRestart}>Restart</button>
               </div>
             </header>
