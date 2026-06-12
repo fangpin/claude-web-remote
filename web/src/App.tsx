@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { createSession, eventsUrl, listSessions, restartSession, sendInput, stopSession } from './api';
-import EventCard from './EventCard';
+import ConversationBlockList from './ConversationBlockList';
+import { buildConversationBlocks } from './conversationBlocks';
 import type { SessionInfo, UiEvent } from './types';
 import './App.css';
 
@@ -17,6 +18,14 @@ export default function App() {
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeId) ?? null,
     [sessions, activeId]
+  );
+  const activeEvents = useMemo(
+    () => (activeId ? events[activeId] ?? [] : []),
+    [activeId, events]
+  );
+  const activeBlocks = useMemo(
+    () => buildConversationBlocks(activeEvents),
+    [activeEvents]
   );
 
   useEffect(() => {
@@ -134,9 +143,7 @@ export default function App() {
               </div>
             </header>
             <div className="events">
-              {(events[activeSession.id] ?? []).map((event, index) => (
-                <EventCard key={`${event.id}-${index}`} event={event} />
-              ))}
+              <ConversationBlockList blocks={activeBlocks} />
             </div>
             <form className="composer" onSubmit={onSend}>
               <label>
