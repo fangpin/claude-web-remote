@@ -1,9 +1,16 @@
+/// <reference types="node" />
+
 import { cleanup, render, screen, within } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
 import { beforeEach, describe, expect, it } from 'vitest';
 import ConversationBlockList from './ConversationBlockList';
 import type { ConversationBlock } from './conversationBlocks';
 
 const rawEvent = (id: number, payload: unknown) => ({ id, kind: 'raw' as const, payload });
+const appCss = () => {
+  const appCssPath = './App.css';
+  return readFileSync(new URL(appCssPath, import.meta.url), 'utf8');
+};
 
 describe('ConversationBlockList', () => {
   beforeEach(() => cleanup());
@@ -86,6 +93,66 @@ describe('ConversationBlockList', () => {
       'output-path'
     );
     expect(within(article).getByText('/tmp/backend-check.log')).toBeInTheDocument();
+  });
+
+  it('uses distinct classes for messages, tools, tasks, and raw details', () => {
+    const blocks: ConversationBlock[] = [
+      {
+        id: 'message-user-1',
+        type: 'message',
+        role: 'user',
+        text: 'hello',
+        eventIds: [1],
+        rawEvents: [rawEvent(1, { message: 'hello' })]
+      },
+      {
+        id: 'message-system-1',
+        type: 'message',
+        role: 'system',
+        text: 'system reminder',
+        eventIds: [2],
+        rawEvents: [rawEvent(2, { message: 'system reminder' })]
+      },
+      {
+        id: 'tool-2',
+        type: 'tool',
+        name: 'Read',
+        status: 'running',
+        inputSummary: 'file_path: /tmp/a.txt',
+        resultSummary: '',
+        eventIds: [3],
+        rawEvents: [rawEvent(3, { name: 'Read' })]
+      },
+      {
+        id: 'task-3',
+        type: 'task',
+        title: 'Explore',
+        source: 'Agent',
+        status: 'pending',
+        summary: 'queued',
+        eventIds: [4],
+        rawEvents: [rawEvent(4, { summary: 'queued' })]
+      }
+    ];
+
+    const { container } = render(<ConversationBlockList blocks={blocks} />);
+
+    expect(container.querySelector('.message-block.user')).not.toBeNull();
+    expect(container.querySelector('.message-block.system')).not.toBeNull();
+    expect(container.querySelector('.tool-block.running')).not.toBeNull();
+    expect(container.querySelector('.task-block.pending')).not.toBeNull();
+    expect(container.querySelectorAll('.raw-event-details')).toHaveLength(4);
+  });
+
+  it('keeps App.css selectors aligned with rendered conversation block DOM', () => {
+    const css = appCss();
+
+    expect(css).toMatch(/\.message-block\.system\b/);
+    expect(css).toMatch(/\.task-block\.pending\b/);
+    expect(css).not.toMatch(/\.task-header\s+small/);
+    expect(css).not.toMatch(/\.task-header\s*>\s*div/);
+    expect(css).not.toMatch(/\.block-section\s+strong/);
+    expect(css).not.toMatch(/\.output-path\s+code/);
   });
 
   it('renders error and raw fallback blocks', () => {

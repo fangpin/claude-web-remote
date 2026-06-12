@@ -134,61 +134,160 @@ button {
 }
 
 .events {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
   overflow: auto;
   padding: 20px;
 }
 
-.event {
-  border: 1px solid #334155;
-  border-radius: 10px;
-  background: #111827;
-  padding: 12px;
+.conversation-blocks {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 
-.event-header {
+.conversation-block {
+  border: 1px solid #334155;
+  border-radius: 12px;
+  background: #111827;
+  padding: 12px 14px;
+}
+
+.message-block {
+  border-color: transparent;
+  background: transparent;
+  padding: 4px 2px;
+}
+
+.message-block.user {
+  margin-left: auto;
+  max-width: min(760px, 85%);
+  border-color: #2563eb;
+  background: #1e3a8a;
+  padding: 12px 14px;
+}
+
+.message-block.assistant {
+  max-width: 920px;
+}
+
+.message-block.system {
+  max-width: 920px;
+  border-left: 3px solid #64748b;
+  background: rgba(30, 41, 59, 0.5);
+  padding: 10px 12px;
+  color: #cbd5e1;
+}
+
+.block-header {
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: space-between;
+  gap: 10px;
   margin-bottom: 8px;
 }
 
-.event-header span {
+.block-header span:first-child,
+.block-section h4 {
   color: #93c5fd;
   font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin: 0;
   text-transform: uppercase;
 }
 
-.event-header em {
+.block-header span:not(:first-child) {
   color: #94a3b8;
   font-size: 12px;
+  font-style: normal;
 }
 
-.event-section {
+.task-header {
+  align-items: start;
+}
+
+.block-section {
   display: grid;
-  gap: 8px;
+  gap: 6px;
+  margin-top: 10px;
 }
 
-.event pre {
+.conversation-block pre,
+.message-text {
   overflow: auto;
   margin: 0;
   white-space: pre-wrap;
 }
 
-.event-json {
-  margin-top: 8px;
+.message-text {
+  line-height: 1.6;
 }
 
-.event-json summary {
+.tool-block,
+.task-block {
+  border-color: #475569;
+  background: #0f172a;
+}
+
+.tool-block.running,
+.task-block.running {
+  border-color: #f59e0b;
+}
+
+.tool-block.completed {
+  border-color: #22c55e;
+}
+
+.task-block {
+  border-left: 4px solid #8b5cf6;
+}
+
+.task-block.pending {
+  border-left-color: #8b5cf6;
+}
+
+.task-block.running {
+  border-left-color: #f59e0b;
+}
+
+.task-block.completed {
+  border-left-color: #22c55e;
+}
+
+.task-block.failed,
+.tool-block.failed,
+.error-block {
+  border-color: #ef4444;
+}
+
+.task-block p,
+.error-block p {
+  margin: 0;
+  color: #dbeafe;
+}
+
+.output-path pre {
+  overflow-wrap: anywhere;
+  color: #bfdbfe;
+}
+
+.raw-block {
+  opacity: 0.85;
+}
+
+.raw-event-details {
+  margin-top: 10px;
+}
+
+.raw-event-details summary {
   cursor: pointer;
-  color: #cbd5e1;
+  color: #94a3b8;
   font-size: 12px;
 }
 
-.event.error {
-  border-color: #ef4444;
+.raw-event-details pre {
+  margin-top: 8px;
+  max-height: 360px;
+  color: #cbd5e1;
 }
 
 .composer {
