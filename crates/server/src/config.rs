@@ -1,5 +1,5 @@
 use crate::{AppError, AppResult};
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use serde::Deserialize;
 use std::{
     net::SocketAddr,
@@ -29,6 +29,15 @@ pub struct Config {
 
     #[arg(long, env = "CRW_DEFAULT_PERMISSION_MODE")]
     pub default_permission_mode: Option<String>,
+
+    #[arg(long, env = "CRW_WORKTREES_DIR")]
+    pub worktrees_dir: Option<PathBuf>,
+
+    #[arg(long, env = "CRW_WORKTREE_BRANCH_PREFIX")]
+    pub worktree_branch_prefix: Option<String>,
+
+    #[arg(long, env = "CRW_WORKTREE_BASE_REF")]
+    pub worktree_base_ref: Option<WorktreeBaseRef>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,6 +47,21 @@ pub struct ResolvedConfig {
     pub launcher: Vec<String>,
     pub web_dir: Option<PathBuf>,
     pub default_permission_mode: String,
+    pub worktree: WorktreeConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, ValueEnum)]
+#[serde(rename_all = "kebab-case")]
+pub enum WorktreeBaseRef {
+    Fresh,
+    Head,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorktreeConfig {
+    pub worktrees_dir: Option<PathBuf>,
+    pub branch_prefix: String,
+    pub base_ref: WorktreeBaseRef,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -48,6 +72,9 @@ struct FileConfig {
     launcher: Option<Vec<String>>,
     web_dir: Option<PathBuf>,
     default_permission_mode: Option<String>,
+    worktrees_dir: Option<PathBuf>,
+    worktree_branch_prefix: Option<String>,
+    worktree_base_ref: Option<WorktreeBaseRef>,
 }
 
 impl Config {
@@ -76,6 +103,23 @@ impl Config {
                 .clone()
                 .or(file_config.default_permission_mode)
                 .unwrap_or_else(|| "acceptEdits".to_string()),
+            worktree: WorktreeConfig {
+                worktrees_dir: self
+                    .worktrees_dir
+                    .clone()
+                    .or(file_config.worktrees_dir)
+                    .map(expand_home),
+                branch_prefix: self
+                    .worktree_branch_prefix
+                    .clone()
+                    .or(file_config.worktree_branch_prefix)
+                    .unwrap_or_else(|| "pin".to_string()),
+                base_ref: self
+                    .worktree_base_ref
+                    .clone()
+                    .or(file_config.worktree_base_ref)
+                    .unwrap_or(WorktreeBaseRef::Fresh),
+            },
         })
     }
 }
@@ -171,6 +215,9 @@ mod tests {
             launcher: Vec::new(),
             web_dir: None,
             default_permission_mode: None,
+            worktrees_dir: None,
+            worktree_branch_prefix: None,
+            worktree_base_ref: None,
         };
 
         let resolved = config.resolve().await.unwrap();
@@ -209,6 +256,9 @@ default_permission_mode = "auto"
             launcher: Vec::new(),
             web_dir: None,
             default_permission_mode: None,
+            worktrees_dir: None,
+            worktree_branch_prefix: None,
+            worktree_base_ref: None,
         };
 
         let resolved = config.resolve().await.unwrap();
@@ -248,6 +298,9 @@ default_permission_mode = "auto"
             launcher: Vec::new(),
             web_dir: Some(temp.path().join("web")),
             default_permission_mode: Some("default".to_string()),
+            worktrees_dir: None,
+            worktree_branch_prefix: None,
+            worktree_base_ref: None,
         };
 
         let resolved = config.resolve().await.unwrap();
@@ -263,6 +316,106 @@ default_permission_mode = "auto"
     }
 
     #[tokio::test]
+    async fn uses_default_worktree_config() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("config.toml");
+        fs::write(&config_path, "").unwrap();
+        let config = Config {
+            config: Some(config_path),
+            bind: None,
+            data_dir: None,
+            claude_bin: None,
+            launcher: Vec::new(),
+            web_dir: None,
+            default_permission_mode: None,
+            worktrees_dir: None,
+            worktree_branch_prefix: None,
+            worktree_base_ref: None,
+        };
+
+        let resolved = config.resolve().await.unwrap();
+
+        assert_eq!(resolved.worktree.branch_prefix, "pin");
+        assert_eq!(resolved.worktree.base_ref, WorktreeBaseRef::Fresh);
+        assert_eq!(resolved.worktree.worktrees_dir, None);
+    }
+
+    #[tokio::test]
+    async fn loads_worktree_config_and_expands_home() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("config.toml");
+        fs::write(
+            &config_path,
+            r#"
+worktrees_dir = "~/worktrees"
+worktree_branch_prefix = "crw"
+worktree_base_ref = "head"
+"#,
+        )
+        .unwrap();
+
+        let config = Config {
+            config: Some(config_path),
+            bind: None,
+            data_dir: None,
+            claude_bin: None,
+            launcher: Vec::new(),
+            web_dir: None,
+            default_permission_mode: None,
+            worktrees_dir: None,
+            worktree_branch_prefix: None,
+            worktree_base_ref: None,
+        };
+
+        let resolved = config.resolve().await.unwrap();
+        let home = std::env::var_os("HOME").map(PathBuf::from).unwrap();
+
+        assert_eq!(
+            resolved.worktree.worktrees_dir,
+            Some(home.join("worktrees"))
+        );
+        assert_eq!(resolved.worktree.branch_prefix, "crw");
+        assert_eq!(resolved.worktree.base_ref, WorktreeBaseRef::Head);
+    }
+
+    #[tokio::test]
+    async fn cli_worktree_values_override_file_values() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("config.toml");
+        fs::write(
+            &config_path,
+            r#"
+worktrees_dir = "/from-file"
+worktree_branch_prefix = "file"
+worktree_base_ref = "fresh"
+"#,
+        )
+        .unwrap();
+
+        let config = Config {
+            config: Some(config_path),
+            bind: None,
+            data_dir: None,
+            claude_bin: None,
+            launcher: Vec::new(),
+            web_dir: None,
+            default_permission_mode: None,
+            worktrees_dir: Some(temp.path().join("from-cli")),
+            worktree_branch_prefix: Some("cli".to_string()),
+            worktree_base_ref: Some(WorktreeBaseRef::Head),
+        };
+
+        let resolved = config.resolve().await.unwrap();
+
+        assert_eq!(
+            resolved.worktree.worktrees_dir,
+            Some(temp.path().join("from-cli"))
+        );
+        assert_eq!(resolved.worktree.branch_prefix, "cli");
+        assert_eq!(resolved.worktree.base_ref, WorktreeBaseRef::Head);
+    }
+
+    #[tokio::test]
     async fn explicit_missing_config_path_is_an_error() {
         let temp = tempfile::tempdir().unwrap();
         let config = Config {
@@ -273,6 +426,9 @@ default_permission_mode = "auto"
             launcher: Vec::new(),
             web_dir: None,
             default_permission_mode: None,
+            worktrees_dir: None,
+            worktree_branch_prefix: None,
+            worktree_base_ref: None,
         };
 
         let err = config.resolve().await.unwrap_err();
@@ -293,6 +449,9 @@ default_permission_mode = "auto"
             launcher: Vec::new(),
             web_dir: None,
             default_permission_mode: None,
+            worktrees_dir: None,
+            worktree_branch_prefix: None,
+            worktree_base_ref: None,
         };
 
         let resolved = config.resolve().await.unwrap();
@@ -325,6 +484,9 @@ launcher = ["ttadk", "claude", "-m", "gpt-5.5", "--skip-check", "-a"]
             launcher: Vec::new(),
             web_dir: None,
             default_permission_mode: None,
+            worktrees_dir: None,
+            worktree_branch_prefix: None,
+            worktree_base_ref: None,
         };
 
         let resolved = config.resolve().await.unwrap();
@@ -356,6 +518,9 @@ launcher = ["from-file"]
             launcher: vec!["ttadk".to_string(), "claude".to_string(), "-a".to_string()],
             web_dir: None,
             default_permission_mode: None,
+            worktrees_dir: None,
+            worktree_branch_prefix: None,
+            worktree_base_ref: None,
         };
 
         let resolved = config.resolve().await.unwrap();
