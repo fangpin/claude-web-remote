@@ -181,6 +181,13 @@ fn values_from_file_config(file_config: FileConfig, current: &ResolvedConfig) ->
             .to_string(),
         launcher: file_config
             .launcher
+            .filter(|launcher| !launcher.is_empty())
+            .or_else(|| {
+                file_config
+                    .claude_bin
+                    .clone()
+                    .map(|claude_bin| vec![path_to_arg(claude_bin)])
+            })
             .unwrap_or_else(|| current.launcher.clone()),
         web_dir: file_config
             .web_dir
@@ -548,6 +555,36 @@ launcher = ["from-file"]
         assert_eq!(response.file.bind, "127.0.0.1:8787");
         assert_eq!(response.file.launcher, vec!["claude".to_string()]);
         assert_eq!(response.file.default_permission_mode, "acceptEdits");
+    }
+
+    #[tokio::test]
+    async fn config_store_uses_claude_bin_when_file_launcher_is_empty() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("config.toml");
+        fs::write(
+            &path,
+            r#"
+claude_bin = "~/bin/claude"
+launcher = []
+"#,
+        )
+        .unwrap();
+        let current = ResolvedConfig {
+            bind: "127.0.0.1:8787".parse().unwrap(),
+            data_dir: temp.path().join("data"),
+            launcher: vec!["claude".to_string()],
+            web_dir: None,
+            default_permission_mode: "acceptEdits".to_string(),
+        };
+        let store = ConfigStore::new(path, current);
+
+        let response = store.get().await.unwrap();
+        let home = std::env::var_os("HOME").map(PathBuf::from).unwrap();
+
+        assert_eq!(
+            response.file.launcher,
+            vec![home.join("bin/claude").to_string_lossy().to_string()]
+        );
     }
 
     #[tokio::test]
