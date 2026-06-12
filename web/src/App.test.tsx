@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 
@@ -96,6 +96,78 @@ describe('App', () => {
     expect(await screen.findByText('invalid request: cwd does not exist: ~')).toBeInTheDocument();
   });
 
+  it('shows slash command suggestions while typing a command prefix', async () => {
+    render(<App />);
+
+    const messageInput = await screen.findByLabelText('Message');
+    fireEvent.change(messageInput, { target: { value: '/he', selectionStart: 3 } });
+
+    expect(await screen.findByRole('listbox', { name: 'Claude command suggestions' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /\/help/ })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /\/status/ })).not.toBeInTheDocument();
+  });
+
+  it('completes the active slash command with Tab without sending input', async () => {
+    render(<App />);
+
+    const messageInput = await screen.findByLabelText('Message') as HTMLTextAreaElement;
+    fireEvent.change(messageInput, { target: { value: '/he', selectionStart: 3 } });
+    fireEvent.keyDown(messageInput, { key: 'Tab' });
+
+    expect(messageInput.value).toBe('/help ');
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/sessions/s1/input', expect.anything());
+  });
+
+  it('completes the active slash command with Enter while suggestions are open', async () => {
+    render(<App />);
+
+    const messageInput = await screen.findByLabelText('Message') as HTMLTextAreaElement;
+    fireEvent.change(messageInput, { target: { value: '/he', selectionStart: 3 } });
+    fireEvent.keyDown(messageInput, { key: 'Enter' });
+
+    expect(messageInput.value).toBe('/help ');
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/sessions/s1/input', expect.anything());
+  });
+
+  it('closes slash command suggestions with Escape', async () => {
+    render(<App />);
+
+    const messageInput = await screen.findByLabelText('Message');
+    fireEvent.change(messageInput, { target: { value: '/', selectionStart: 1 } });
+    expect(await screen.findByRole('listbox', { name: 'Claude command suggestions' })).toBeInTheDocument();
+
+    fireEvent.keyDown(messageInput, { key: 'Escape' });
+
+    expect(screen.queryByRole('listbox', { name: 'Claude command suggestions' })).not.toBeInTheDocument();
+  });
+
+  it('moves the active suggestion with arrow keys', async () => {
+    render(<App />);
+
+    const messageInput = await screen.findByLabelText('Message');
+    fireEvent.change(messageInput, { target: { value: '/', selectionStart: 1 } });
+
+    const listbox = await screen.findByRole('listbox', { name: 'Claude command suggestions' });
+    const options = within(listbox).getAllByRole('option');
+    expect(options[0]).toHaveAttribute('aria-selected', 'true');
+
+    fireEvent.keyDown(messageInput, { key: 'ArrowDown' });
+    expect(options[1]).toHaveAttribute('aria-selected', 'true');
+
+    fireEvent.keyDown(messageInput, { key: 'ArrowUp' });
+    expect(options[0]).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('completes a clicked slash command suggestion', async () => {
+    render(<App />);
+
+    const messageInput = await screen.findByLabelText('Message') as HTMLTextAreaElement;
+    fireEvent.change(messageInput, { target: { value: '/sta', selectionStart: 4 } });
+    fireEvent.click(await screen.findByRole('option', { name: /\/status/ }));
+
+    expect(messageInput.value).toBe('/status ');
+  });
+
   it('sends user input to the active session', async () => {
     render(<App />);
 
@@ -103,5 +175,19 @@ describe('App', () => {
     fireEvent.click(screen.getByText('Send'));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/input', expect.objectContaining({ method: 'POST' })));
+  });
+
+  it('hides slash command suggestions after sending a command prefix', async () => {
+    render(<App />);
+
+    const messageInput = await screen.findByLabelText('Message');
+    fireEvent.change(messageInput, { target: { value: '/he', selectionStart: 3 } });
+
+    expect(await screen.findByRole('listbox', { name: 'Claude command suggestions' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Send'));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/input', expect.objectContaining({ method: 'POST' })));
+    expect(screen.queryByRole('listbox', { name: 'Claude command suggestions' })).not.toBeInTheDocument();
   });
 });

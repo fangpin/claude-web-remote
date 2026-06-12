@@ -200,6 +200,47 @@ button {
   padding: 20px;
 }
 
+.composer-input {
+  position: relative;
+}
+
+.autocomplete {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 10;
+  display: grid;
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: #111827;
+  box-shadow: 0 16px 32px rgb(0 0 0 / 0.35);
+}
+
+.autocomplete-option {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  padding: 10px 12px;
+  text-align: left;
+  color: #e5e7eb;
+  background: transparent;
+}
+
+.autocomplete-option.active,
+.autocomplete-option:hover {
+  background: #1d4ed8;
+}
+
+.autocomplete-option span {
+  color: #cbd5e1;
+  font-size: 12px;
+}
+
 .error,
 .empty-state {
   margin: 20px;
