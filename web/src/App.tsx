@@ -62,15 +62,19 @@ export default function App() {
     () => (activeId ? events[activeId] ?? [] : []),
     [activeId, events]
   );
-  const visibleEvents = useMemo(
-    () => activeEvents.slice(-EVENT_RENDER_LIMIT),
+  const displayableEvents = useMemo(
+    () => activeEvents.filter((event) => event.kind !== 'raw' && event.kind !== 'system'),
     [activeEvents]
+  );
+  const visibleEvents = useMemo(
+    () => displayableEvents.slice(-EVENT_RENDER_LIMIT),
+    [displayableEvents]
   );
   const activeBlocks = useMemo(
     () => buildConversationBlocks(visibleEvents),
     [visibleEvents]
   );
-  const hiddenEventCount = activeEvents.length - visibleEvents.length;
+  const hiddenEventCount = displayableEvents.length - visibleEvents.length;
   const isActiveSessionMode = listMode === 'active' && !activeSession?.deletedAt;
 
   const recentDirectories = useMemo(() => {

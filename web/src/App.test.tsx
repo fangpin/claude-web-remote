@@ -282,6 +282,39 @@ describe('App', () => {
     expect(await screen.findByText('hello from claude')).toBeInTheDocument();
   });
 
+  it('hides raw and system events from the event stream', async () => {
+    render(<App />);
+
+    await screen.findAllByText('Repo One');
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBe(1));
+
+    FakeWebSocket.instances[0].emit({
+      id: 1,
+      sessionId: 's1',
+      time: '2026-06-11T00:00:00Z',
+      kind: 'raw',
+      payload: { message: 'raw event should stay hidden' }
+    });
+    FakeWebSocket.instances[0].emit({
+      id: 2,
+      sessionId: 's1',
+      time: '2026-06-11T00:00:01Z',
+      kind: 'system',
+      payload: { message: 'system event should stay hidden' }
+    });
+    FakeWebSocket.instances[0].emit({
+      id: 3,
+      sessionId: 's1',
+      time: '2026-06-11T00:00:02Z',
+      kind: 'error',
+      payload: { error: 'visible error event' }
+    });
+
+    expect(await screen.findByText('visible error event')).toBeInTheDocument();
+    expect(screen.queryByText('raw event should stay hidden')).not.toBeInTheDocument();
+    expect(screen.queryByText('system event should stay hidden')).not.toBeInTheDocument();
+  });
+
   it('creates a session from the form and can include worktree request data', async () => {
     render(<App />);
 
