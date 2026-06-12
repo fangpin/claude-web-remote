@@ -1,0 +1,7 @@
+bind = "127.0.0.1:8787"
+data_dir = "~/.claude-remote-web"
+launcher = ["claude"]
+default_permission_mode = "acceptEdits"
+
+# Optional: serve an external frontend build instead of embedded assets.
+# web_dir = "/absolute/path/to/web/dist"

@@ -1,5 +1,6 @@
 pub mod api;
 pub mod config;
+pub mod embedded_assets;
 pub mod error;
 pub mod event;
 pub mod process;
