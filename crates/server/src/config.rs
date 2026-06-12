@@ -120,7 +120,7 @@ impl ConfigStore {
         let exists = tokio::fs::try_exists(&self.path).await?;
         let file = if exists {
             let file_config = load_file_config(Some(&self.path)).await?;
-            values_from_file_config(file_config, &self.current)
+            values_from_file_config(file_config)
         } else {
             ConfigValues::from(&self.current)
         };
@@ -172,36 +172,28 @@ impl From<&ResolvedConfig> for ConfigValues {
     }
 }
 
-fn values_from_file_config(file_config: FileConfig, current: &ResolvedConfig) -> ConfigValues {
+fn values_from_file_config(file_config: FileConfig) -> ConfigValues {
+    let launcher = resolve_launcher(&[], None, &file_config);
+
     ConfigValues {
         bind: file_config
             .bind
             .map(|bind| bind.to_string())
-            .unwrap_or_else(|| current.bind.to_string()),
+            .unwrap_or_else(|| "127.0.0.1:8787".to_string()),
         data_dir: file_config
             .data_dir
             .map(expand_home)
-            .unwrap_or_else(|| current.data_dir.clone())
+            .unwrap_or_else(default_data_dir)
             .to_string_lossy()
             .to_string(),
-        launcher: file_config
-            .launcher
-            .filter(|launcher| !launcher.is_empty())
-            .or_else(|| {
-                file_config
-                    .claude_bin
-                    .clone()
-                    .map(|claude_bin| vec![path_to_arg(claude_bin)])
-            })
-            .unwrap_or_else(|| current.launcher.clone()),
+        launcher,
         web_dir: file_config
             .web_dir
             .map(expand_home)
-            .or_else(|| current.web_dir.clone())
             .map(|path| path.to_string_lossy().to_string()),
         default_permission_mode: file_config
             .default_permission_mode
-            .unwrap_or_else(|| current.default_permission_mode.clone()),
+            .unwrap_or_else(|| "acceptEdits".to_string()),
     }
 }
 
@@ -590,6 +582,28 @@ launcher = []
             response.file.launcher,
             vec![home.join("bin/claude").to_string_lossy().to_string()]
         );
+    }
+
+    #[tokio::test]
+    async fn config_store_get_uses_startup_default_when_existing_file_omits_launcher() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("config.toml");
+        fs::write(&path, "").unwrap();
+        let current = ResolvedConfig {
+            bind: "127.0.0.1:8787".parse().unwrap(),
+            data_dir: default_data_dir(),
+            launcher: vec!["ttadk".to_string(), "claude".to_string()],
+            web_dir: None,
+            default_permission_mode: "acceptEdits".to_string(),
+        };
+        let store = ConfigStore::new(path, current);
+
+        let response = store.get().await.unwrap();
+
+        assert!(response.exists);
+        assert_eq!(response.current.launcher, vec!["ttadk", "claude"]);
+        assert_eq!(response.file.launcher, vec!["claude".to_string()]);
+        assert!(response.restart_required);
     }
 
     #[tokio::test]
