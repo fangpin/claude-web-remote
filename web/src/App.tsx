@@ -7,6 +7,7 @@ import {
   listTasks,
   restartSession,
   sendInput,
+  stopAndRemoveWorktree,
   stopSession
 } from './api';
 import EventCard from './EventCard';
@@ -24,6 +25,7 @@ export default function App() {
   const [cwd, setCwd] = useState('');
   const [name, setName] = useState('');
   const [permissionMode, setPermissionMode] = useState('acceptEdits');
+  const [useWorktree, setUseWorktree] = useState(false);
   const [message, setMessage] = useState('');
   const messageInputRef = useRef<HTMLTextAreaElement | null>(null);
   const [autocompleteToken, setAutocompleteToken] = useState<SlashCommandToken | null>(null);
@@ -43,6 +45,19 @@ export default function App() {
     () => sessions.find((session) => session.id === activeId) ?? null,
     [sessions, activeId]
   );
+
+  const recentDirectories = useMemo(() => {
+    const seen = new Set<string>();
+    return [...sessions]
+      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+      .filter((session) => {
+        if (seen.has(session.cwd)) return false;
+        seen.add(session.cwd);
+        return true;
+      })
+      .slice(0, 5)
+      .map((session) => session.cwd);
+  }, [sessions]);
 
   function refreshAutocomplete(value: string, cursor: number | null | undefined) {
     const token = findSlashCommandToken(value, cursor);
@@ -156,12 +171,14 @@ export default function App() {
       const created = await createSession({
         cwd,
         name: name.trim() || undefined,
-        permissionMode
+        permissionMode,
+        worktree: useWorktree ? { enabled: true } : undefined
       });
       setSessions((current) => [created, ...current]);
       setActiveId(created.id);
       setCwd('');
       setName('');
+      setUseWorktree(false);
       void refreshTasks();
       void refreshSessionTasks(created.id);
     } catch (err: unknown) {
@@ -227,12 +244,34 @@ export default function App() {
     event.currentTarget.form?.requestSubmit();
   }
 
-  async function onStop() {
+  async function onStop(removeWorktree = false) {
     if (!activeId) return;
-    await stopSession(activeId);
-    setSessions((current) => current.map((session) => session.id === activeId ? { ...session, status: 'stopped' } : session));
-    void refreshTasks();
-    void refreshSessionTasks(activeId);
+    const sessionId = activeId;
+    setError(null);
+    try {
+      if (removeWorktree) {
+        await stopAndRemoveWorktree(sessionId);
+      } else {
+        await stopSession(sessionId);
+      }
+      setSessions((current) => current.map((session) => {
+        if (session.id !== sessionId) return session;
+        if (removeWorktree && session.worktree) {
+          return { ...session, cwd: session.worktree.sourceCwd, status: 'stopped', worktree: null };
+        }
+        return { ...session, status: 'stopped' };
+      }));
+    } catch (err: unknown) {
+      if (removeWorktree) {
+        setSessions((current) => current.map((session) => (
+          session.id === sessionId ? { ...session, status: 'stopped' } : session
+        )));
+      }
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      void refreshTasks();
+      void refreshSessionTasks(sessionId);
+    }
   }
 
   async function onRestart() {
@@ -251,6 +290,20 @@ export default function App() {
           <label>
             Working directory
             <input value={cwd} onChange={(event) => setCwd(event.target.value)} placeholder="/data00/home/user/repos/project" required />
+          </label>
+          {recentDirectories.length > 0 && (
+            <div className="directory-suggestions" aria-label="Recent working directories">
+              <span>Recent</span>
+              {recentDirectories.map((directory) => (
+                <button key={directory} type="button" onClick={() => setCwd(directory)} aria-label={`Use ${directory}`}>
+                  {directory}
+                </button>
+              ))}
+            </div>
+          )}
+          <label className="checkbox-label">
+            <input type="checkbox" checked={useWorktree} onChange={(event) => setUseWorktree(event.target.checked)} />
+            Use git worktree
           </label>
           <label>
             Name
@@ -276,6 +329,7 @@ export default function App() {
             >
               <strong>{session.name || session.cwd}</strong>
               <span>{session.cwd}</span>
+              {session.worktree && <span>{session.worktree.branch}</span>}
               <em>{session.status}</em>
             </button>
           ))}
@@ -290,9 +344,24 @@ export default function App() {
               <div>
                 <h2>{activeSession.name || activeSession.cwd}</h2>
                 <p>{activeSession.cwd}</p>
+                {activeSession.worktree && (
+                  <div className="worktree-meta">
+                    <span>Source: {activeSession.worktree.sourceCwd}</span>
+                    <span>Branch: {activeSession.worktree.branch}</span>
+                  </div>
+                )}
               </div>
               <div className="actions">
-                <button onClick={onStop}>Stop</button>
+                {activeSession.worktree ? (
+                  <>
+                    <button onClick={() => onStop(false)}>Stop only</button>
+                    {activeSession.worktree.createdByClaudeRemoteWeb && (
+                      <button onClick={() => onStop(true)}>Stop and remove worktree</button>
+                    )}
+                  </>
+                ) : (
+                  <button onClick={() => onStop(false)}>Stop</button>
+                )}
                 <button onClick={onRestart}>Restart</button>
               </div>
             </header>

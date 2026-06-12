@@ -80,7 +80,12 @@ data_dir = "~/.claude-remote-web"
 launcher = ["claude"]
 web_dir = "/absolute/path/to/web/dist"
 default_permission_mode = "acceptEdits"
+worktrees_dir = "/absolute/path/to/worktrees"
+worktree_branch_prefix = "pin"
+worktree_base_ref = "fresh"
 ```
+
+`worktrees_dir` is optional; when omitted, worktrees are created under the selected repo's `.claude/worktrees`. `worktree_base_ref = "fresh"` creates from the repository's configured `refs/remotes/origin/HEAD` (the remote default branch) without fetching, while `"head"` creates from the repo's current local `HEAD`.
 
 Wrapper launcher example:
 

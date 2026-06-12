@@ -43,6 +43,10 @@ pub fn build_router(state: AppState, web_dir: Option<PathBuf>) -> Router {
         .route("/sessions/{id}/tasks", get(list_session_tasks))
         .route("/sessions/{id}/input", post(send_input))
         .route("/sessions/{id}/stop", post(stop_session))
+        .route(
+            "/sessions/{id}/stop-and-remove-worktree",
+            post(stop_and_remove_worktree),
+        )
         .route("/sessions/{id}/restart", post(restart_session))
         .route("/sessions/{id}/events", get(events_ws))
         .fallback(api_not_found)
@@ -110,6 +114,14 @@ async fn stop_session(
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
     state.manager.stop_session(id).await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn stop_and_remove_worktree(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<serde_json::Value>> {
+    state.manager.stop_and_remove_worktree(id).await?;
     Ok(Json(json!({ "ok": true })))
 }
 

@@ -39,6 +39,7 @@ async fn main() -> anyhow::Result<()> {
         store.clone(),
         config.launcher.clone(),
         config.default_permission_mode.clone(),
+        config.worktree.clone(),
     );
     manager.restore_active_sessions().await?;
     let state = AppState { manager, store };

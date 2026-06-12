@@ -362,6 +362,7 @@ mod tests {
             permission_mode: "acceptEdits".to_string(),
             status,
             claude_session_id: Some("claude-session".to_string()),
+            worktree: None,
             created_at: now,
             updated_at: now,
         }

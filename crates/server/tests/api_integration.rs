@@ -24,8 +24,7 @@ fn fake_claude(dir: &Path) -> PathBuf {
 set -euo pipefail
 printf '{"type":"system","session_id":"fake-session"}\n'
 while IFS= read -r line; do
-  text=$(python3 -c 'import json,sys; msg=json.loads(sys.argv[1]); print(msg["message"]["content"][0]["text"])' "$line")
-  printf '{"type":"assistant","message":"ack:%s"}\n' "$text"
+  python3 -c 'import json,sys; msg=json.loads(sys.argv[1]); text=msg["message"]["content"][0]["text"]; print(json.dumps({"type":"assistant","message":f"ack:{text}"}))' "$line"
 done
 "#,
     )
@@ -60,6 +59,31 @@ done
     path
 }
 
+async fn git(dir: &Path, args: &[&str]) {
+    let output = tokio::process::Command::new("git")
+        .current_dir(dir)
+        .args(args)
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git {:?} failed: {}",
+        args,
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+async fn init_repo(root: &Path) {
+    fs::create_dir_all(root).unwrap();
+    git(root, &["init", "-b", "master"]).await;
+    git(root, &["config", "user.email", "test@example.com"]).await;
+    git(root, &["config", "user.name", "Test User"]).await;
+    fs::write(root.join("README.md"), "hello\n").unwrap();
+    git(root, &["add", "README.md"]).await;
+    git(root, &["commit", "-m", "initial"]).await;
+}
+
 async fn spawn_app(temp: &tempfile::TempDir, launcher: Vec<String>) -> SocketAddr {
     spawn_app_with_web_dir(temp, launcher, None).await
 }
@@ -70,7 +94,16 @@ async fn spawn_app_with_web_dir(
     web_dir: Option<PathBuf>,
 ) -> SocketAddr {
     let store = EventStore::new(temp.path().join("data")).await.unwrap();
-    let manager = SessionManager::new(store.clone(), launcher, "acceptEdits".to_string());
+    let manager = SessionManager::new(
+        store.clone(),
+        launcher,
+        "acceptEdits".to_string(),
+        claude_remote_web_server::WorktreeConfig {
+            worktrees_dir: None,
+            branch_prefix: "pin".to_string(),
+            base_ref: claude_remote_web_server::WorktreeBaseRef::Head,
+        },
+    );
     let state = AppState { manager, store };
     let app: Router = build_router(state, web_dir);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -86,6 +119,11 @@ async fn spawn_app_with_store(store: EventStore) -> SocketAddr {
         store.clone(),
         vec!["claude".to_string()],
         "acceptEdits".to_string(),
+        claude_remote_web_server::WorktreeConfig {
+            worktrees_dir: None,
+            branch_prefix: "pin".to_string(),
+            base_ref: claude_remote_web_server::WorktreeBaseRef::Head,
+        },
     );
     let state = AppState { manager, store };
     let app: Router = build_router(state, None);
@@ -107,6 +145,7 @@ async fn seed_task_session(store: &EventStore, name: &str) -> Uuid {
         permission_mode: "acceptEdits".to_string(),
         status: SessionStatus::Running,
         claude_session_id: Some(format!("claude-{name}")),
+        worktree: None,
         created_at: now,
         updated_at: now,
     };
@@ -175,16 +214,19 @@ async fn creates_session_accepts_input_and_streams_events() {
         .error_for_status()
         .unwrap();
 
-    let mut saw_ack = false;
-    for _ in 0..5 {
-        if let Some(Ok(message)) = ws.next().await {
-            let text = message.into_text().unwrap();
-            if text.contains("ack:hello") {
-                saw_ack = true;
-                break;
+    let saw_ack = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        for _ in 0..5 {
+            if let Some(Ok(message)) = ws.next().await {
+                let text = message.into_text().unwrap();
+                if text.contains("ack:hello") {
+                    return true;
+                }
             }
         }
-    }
+        false
+    })
+    .await
+    .unwrap_or(false);
 
     assert!(saw_ack);
 }
@@ -250,6 +292,43 @@ async fn lists_tasks_for_one_session() {
     assert_ne!(finished[0]["sessionId"], second_session.to_string());
     assert_eq!(finished[0]["status"], "completed");
     assert_eq!(finished[0]["summary"], "done one");
+}
+
+#[tokio::test]
+async fn stop_and_remove_worktree_endpoint_removes_worktree() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    init_repo(&repo).await;
+    let bin = fake_claude(temp.path());
+    let addr = spawn_app(&temp, vec![bin.to_string_lossy().to_string()]).await;
+    let client = reqwest::Client::new();
+
+    let created: Value = client
+        .post(format!("http://{addr}/api/sessions"))
+        .json(&json!({ "cwd": repo, "worktree": { "enabled": true } }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let session_id = created["id"].as_str().unwrap();
+    let worktree_cwd = PathBuf::from(created["worktree"]["worktreeCwd"].as_str().unwrap());
+    assert!(worktree_cwd.exists());
+
+    client
+        .post(format!(
+            "http://{addr}/api/sessions/{session_id}/stop-and-remove-worktree"
+        ))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+
+    assert!(!worktree_cwd.exists());
 }
 
 #[tokio::test]

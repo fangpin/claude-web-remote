@@ -51,6 +51,10 @@ export async function stopSession(sessionId: string): Promise<void> {
   await request<{ ok: true }>(`/api/sessions/${sessionId}/stop`, { method: 'POST' });
 }
 
+export async function stopAndRemoveWorktree(sessionId: string): Promise<void> {
+  await request<{ ok: true }>(`/api/sessions/${sessionId}/stop-and-remove-worktree`, { method: 'POST' });
+}
+
 export async function restartSession(sessionId: string): Promise<SessionInfo> {
   return request<SessionInfo>(`/api/sessions/${sessionId}/restart`, { method: 'POST' });
 }

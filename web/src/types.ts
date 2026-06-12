@@ -1,5 +1,12 @@
 export type SessionStatus = 'starting' | 'running' | 'exited' | 'stopped' | 'failed';
 
+export type WorktreeInfo = {
+  sourceCwd: string;
+  worktreeCwd: string;
+  branch: string;
+  createdByClaudeRemoteWeb: boolean;
+};
+
 export type SessionInfo = {
   id: string;
   name?: string | null;
@@ -7,6 +14,7 @@ export type SessionInfo = {
   permissionMode: string;
   status: SessionStatus;
   claudeSessionId?: string | null;
+  worktree?: WorktreeInfo | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -25,6 +33,9 @@ export type CreateSessionInput = {
   cwd: string;
   name?: string;
   permissionMode?: string;
+  worktree?: {
+    enabled: boolean;
+  };
 };
 
 export type TaskStatus = 'background' | 'completed' | 'failed' | 'interrupted';
