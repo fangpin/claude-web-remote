@@ -1,6 +1,7 @@
 use crate::{
     AppError, AppResult, ClaudeProcess, ClaudeProcessConfig, EventKind, EventStore, ProcessEvent,
-    SessionMeta, SessionStatus, UiEvent, extract_claude_session_id,
+    SessionMeta, SessionStatus, TaskGroups, UiEvent, extract_claude_session_id, group_tasks,
+    project_session_tasks,
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -97,6 +98,22 @@ impl SessionManager {
 
     pub async fn get_session(&self, session_id: Uuid) -> AppResult<SessionInfo> {
         Ok(SessionInfo::from(self.store.load_meta(session_id).await?))
+    }
+
+    pub async fn list_tasks(&self) -> AppResult<TaskGroups> {
+        let metas = self.store.list_meta().await?;
+        let mut tasks = Vec::new();
+        for meta in metas {
+            let events = self.store.load_events_after(meta.id, 0).await?;
+            tasks.extend(project_session_tasks(&meta, &events).into_tasks());
+        }
+        Ok(group_tasks(tasks))
+    }
+
+    pub async fn tasks_for_session(&self, session_id: Uuid) -> AppResult<TaskGroups> {
+        let meta = self.store.load_meta(session_id).await?;
+        let events = self.store.load_events_after(session_id, 0).await?;
+        Ok(project_session_tasks(&meta, &events))
     }
 
     pub async fn send_input(&self, session_id: Uuid, text: String) -> AppResult<()> {

@@ -5,6 +5,7 @@ pub mod event;
 pub mod process;
 pub mod session;
 pub mod store;
+pub mod task;
 
 pub use api::{AppState, build_router};
 pub use config::Config;
@@ -13,3 +14,4 @@ pub use event::{EventKind, UiEvent, extract_claude_session_id, normalize_claude_
 pub use process::{ClaudeProcess, ClaudeProcessConfig, ProcessEvent};
 pub use session::{CreateSessionRequest, SessionInfo, SessionManager};
 pub use store::{EventStore, SessionMeta, SessionStatus};
+pub use task::{TaskGroups, TaskInfo, TaskStatus, group_tasks, project_session_tasks};

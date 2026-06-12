@@ -36,7 +36,7 @@ export default function EventCard({ event }: { event: UiEvent }) {
   const isTool = event.kind === 'tool' || type === 'tool_use' || type === 'tool_result';
 
   return (
-    <article className={`event ${event.kind}`}>
+    <article id={`event-${event.id}`} className={`event ${event.kind}`}>
       <header className="event-header">
         <span>{event.kind}</span>
         {type !== event.kind && <em>{type}</em>}

@@ -1,5 +1,9 @@
 use axum::Router;
-use claude_remote_web_server::{AppState, EventStore, SessionManager, build_router};
+use chrono::Utc;
+use claude_remote_web_server::{
+    AppState, EventKind, EventStore, SessionManager, SessionMeta, SessionStatus, UiEvent,
+    build_router,
+};
 use futures::StreamExt;
 use serde_json::{Value, json};
 use std::{
@@ -10,6 +14,7 @@ use std::{
 };
 use tokio::net::TcpListener;
 use tokio_tungstenite::connect_async;
+use uuid::Uuid;
 
 fn fake_claude(dir: &Path) -> PathBuf {
     let path = dir.join("fake-claude-api.sh");
@@ -68,6 +73,66 @@ async fn spawn_app(temp: &tempfile::TempDir, launcher: Vec<String>) -> SocketAdd
     addr
 }
 
+async fn spawn_app_with_store(store: EventStore) -> SocketAddr {
+    let manager = SessionManager::new(
+        store.clone(),
+        vec!["claude".to_string()],
+        "acceptEdits".to_string(),
+    );
+    let state = AppState { manager, store };
+    let app: Router = build_router(state, None);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    addr
+}
+
+async fn seed_task_session(store: &EventStore, name: &str) -> Uuid {
+    let session_id = Uuid::new_v4();
+    let now = Utc::now();
+    let meta = SessionMeta {
+        id: session_id,
+        name: Some(name.to_string()),
+        cwd: PathBuf::from(format!("/repo/{name}")),
+        permission_mode: "acceptEdits".to_string(),
+        status: SessionStatus::Running,
+        claude_session_id: Some(format!("claude-{name}")),
+        created_at: now,
+        updated_at: now,
+    };
+    store.save_meta(&meta).await.unwrap();
+    store
+        .append_event(&UiEvent::new(
+            1,
+            session_id,
+            EventKind::Tool,
+            json!({
+                "type": "tool_use",
+                "id": format!("toolu-{name}"),
+                "name": "Bash",
+                "input": { "command": format!("echo {name}") }
+            }),
+        ))
+        .await
+        .unwrap();
+    store
+        .append_event(&UiEvent::new(
+            2,
+            session_id,
+            EventKind::Tool,
+            json!({
+                "type": "tool_result",
+                "tool_use_id": format!("toolu-{name}"),
+                "content": format!("done {name}")
+            }),
+        ))
+        .await
+        .unwrap();
+    session_id
+}
+
 #[tokio::test]
 async fn creates_session_accepts_input_and_streams_events() {
     let temp = tempfile::tempdir().unwrap();
@@ -114,6 +179,69 @@ async fn creates_session_accepts_input_and_streams_events() {
     }
 
     assert!(saw_ack);
+}
+
+#[tokio::test]
+async fn lists_tasks_across_sessions() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = EventStore::new(temp.path().join("data")).await.unwrap();
+    let first_session = seed_task_session(&store, "one").await;
+    let second_session = seed_task_session(&store, "two").await;
+    let addr = spawn_app_with_store(store).await;
+    let client = reqwest::Client::new();
+
+    let tasks: Value = client
+        .get(format!("http://{addr}/api/tasks"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(tasks["background"].as_array().unwrap().len(), 0);
+    let finished = tasks["finished"].as_array().unwrap();
+    assert_eq!(finished.len(), 2);
+    assert!(
+        finished
+            .iter()
+            .any(|task| task["sessionId"] == first_session.to_string())
+    );
+    assert!(
+        finished
+            .iter()
+            .any(|task| task["sessionId"] == second_session.to_string())
+    );
+}
+
+#[tokio::test]
+async fn lists_tasks_for_one_session() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = EventStore::new(temp.path().join("data")).await.unwrap();
+    let first_session = seed_task_session(&store, "one").await;
+    let second_session = seed_task_session(&store, "two").await;
+    let addr = spawn_app_with_store(store).await;
+    let client = reqwest::Client::new();
+
+    let tasks: Value = client
+        .get(format!("http://{addr}/api/sessions/{first_session}/tasks"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let finished = tasks["finished"].as_array().unwrap();
+    assert_eq!(finished.len(), 1);
+    assert_eq!(finished[0]["sessionId"], first_session.to_string());
+    assert_ne!(finished[0]["sessionId"], second_session.to_string());
+    assert_eq!(finished[0]["status"], "completed");
+    assert_eq!(finished[0]["summary"], "done one");
 }
 
 #[tokio::test]

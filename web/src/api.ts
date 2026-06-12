@@ -1,4 +1,4 @@
-import type { CreateSessionInput, SessionInfo } from './types';
+import type { CreateSessionInput, SessionInfo, TaskGroups } from './types';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const requestInit: RequestInit | undefined = init
@@ -23,6 +23,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export async function listSessions(): Promise<SessionInfo[]> {
   const result = await request<{ sessions: SessionInfo[] }>('/api/sessions');
   return result.sessions;
+}
+
+export async function listTasks(): Promise<TaskGroups> {
+  return request<TaskGroups>('/api/tasks');
+}
+
+export async function listSessionTasks(sessionId: string): Promise<TaskGroups> {
+  return request<TaskGroups>(`/api/sessions/${sessionId}/tasks`);
 }
 
 export async function createSession(input: CreateSessionInput): Promise<SessionInfo> {
