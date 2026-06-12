@@ -26,3 +26,25 @@ export type CreateSessionInput = {
   name?: string;
   permissionMode?: string;
 };
+
+export type TaskStatus = 'background' | 'completed' | 'failed' | 'interrupted';
+
+export type TaskInfo = {
+  id: string;
+  sessionId: string;
+  sessionName?: string | null;
+  sessionCwd: string;
+  toolKind: string;
+  title: string;
+  status: TaskStatus;
+  startedAt: string;
+  finishedAt?: string | null;
+  startEventId: number;
+  finishEventId?: number | null;
+  summary?: string | null;
+};
+
+export type TaskGroups = {
+  background: TaskInfo[];
+  finished: TaskInfo[];
+};

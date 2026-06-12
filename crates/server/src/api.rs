@@ -34,8 +34,10 @@ pub struct EventsQuery {
 
 pub fn build_router(state: AppState, web_dir: Option<PathBuf>) -> Router {
     let api = Router::new()
+        .route("/api/tasks", get(list_tasks))
         .route("/api/sessions", get(list_sessions).post(create_session))
         .route("/api/sessions/{id}", get(get_session))
+        .route("/api/sessions/{id}/tasks", get(list_session_tasks))
         .route("/api/sessions/{id}/input", post(send_input))
         .route("/api/sessions/{id}/stop", post(stop_session))
         .route("/api/sessions/{id}/restart", post(restart_session))
@@ -68,6 +70,17 @@ async fn get_session(
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
     Ok(Json(json!(state.manager.get_session(id).await?)))
+}
+
+async fn list_tasks(State(state): State<AppState>) -> AppResult<Json<serde_json::Value>> {
+    Ok(Json(json!(state.manager.list_tasks().await?)))
+}
+
+async fn list_session_tasks(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<serde_json::Value>> {
+    Ok(Json(json!(state.manager.tasks_for_session(id).await?)))
 }
 
 async fn send_input(

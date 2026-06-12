@@ -18,10 +18,10 @@ function eventStateClass(state: string) {
   return state === 'error' ? 'is-error' : state;
 }
 
-function DisplayArticle({ display }: { display: DisplayEvent }) {
+function DisplayArticle({ display, eventId }: { display: DisplayEvent; eventId?: string }) {
   if (display.kind === 'message') {
     return (
-      <article className={`event event-message ${display.role}`}>
+      <article id={eventId} className={`event event-message ${display.role}`}>
         <header className="event-header">
           <span>{display.label}</span>
         </header>
@@ -33,7 +33,7 @@ function DisplayArticle({ display }: { display: DisplayEvent }) {
 
   if (display.kind === 'tool') {
     return (
-      <article className={`event event-tool ${eventStateClass(display.status)}`}>
+      <article id={eventId} className={`event event-tool ${eventStateClass(display.status)}`}>
         <header className="event-header">
           <span>tool</span>
           <strong>{display.name}</strong>
@@ -67,7 +67,7 @@ function DisplayArticle({ display }: { display: DisplayEvent }) {
 
   if (display.kind === 'status') {
     return (
-      <article className={`event event-status ${eventStateClass(display.tone)}`}>
+      <article id={eventId} className={`event event-status ${eventStateClass(display.tone)}`}>
         <header className="event-header">
           <span>{display.label}</span>
         </header>
@@ -78,7 +78,7 @@ function DisplayArticle({ display }: { display: DisplayEvent }) {
   }
 
   return (
-    <article className="event event-status raw">
+    <article id={eventId} className="event event-status raw">
       <header className="event-header">
         <span>{display.label}</span>
       </header>
@@ -88,5 +88,5 @@ function DisplayArticle({ display }: { display: DisplayEvent }) {
 }
 
 export default function EventCard({ event }: { event: UiEvent }) {
-  return <>{parseDisplayEvents(event).map((display, index) => <DisplayArticle key={index} display={display} />)}</>;
+  return <>{parseDisplayEvents(event).map((display, index) => <DisplayArticle key={index} eventId={index === 0 ? `event-${event.id}` : undefined} display={display} />)}</>;
 }

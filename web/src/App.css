@@ -105,7 +105,7 @@ button {
 
 .conversation {
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto auto 1fr auto;
   min-width: 0;
 }
 
@@ -320,4 +320,100 @@ button {
 
 .error {
   color: #fecaca;
+}
+
+.tasks-panel {
+  display: grid;
+  gap: 12px;
+  margin-top: 20px;
+  border-top: 1px solid #273449;
+  padding-top: 20px;
+}
+
+.tasks-panel.compact {
+  margin: 0;
+  border-top: 0;
+  border-bottom: 1px solid #273449;
+  padding: 12px 20px;
+  background: #0f172a;
+}
+
+.tasks-panel h3,
+.task-section h4,
+.task-empty,
+.task-error {
+  margin: 0;
+}
+
+.tasks-panel h3 {
+  font-size: 16px;
+}
+
+.task-section {
+  display: grid;
+  gap: 8px;
+}
+
+.task-section h4 {
+  color: #93c5fd;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.task-list {
+  display: grid;
+  gap: 8px;
+}
+
+.task-card {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  border-color: #334155;
+  text-align: left;
+  color: #e5e7eb;
+  background: #1e293b;
+}
+
+.task-card.background {
+  border-color: #60a5fa;
+}
+
+.task-card.completed {
+  border-color: #22c55e;
+}
+
+.task-card.failed {
+  border-color: #ef4444;
+}
+
+.task-card.interrupted {
+  border-color: #f59e0b;
+}
+
+.task-card-title {
+  overflow: hidden;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-card-meta,
+.task-card-summary,
+.task-empty {
+  overflow: hidden;
+  color: #cbd5e1;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-error {
+  color: #fecaca;
+  font-size: 12px;
+}
+
+.event-highlight {
+  outline: 2px solid #facc15;
+  outline-offset: 2px;
 }
