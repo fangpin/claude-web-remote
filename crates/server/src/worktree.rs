@@ -1,6 +1,7 @@
 use crate::{AppError, AppResult, WorktreeBaseRef, WorktreeConfig};
 use serde::{Deserialize, Serialize};
 use std::{
+    ffi::OsStr,
     path::{Path, PathBuf},
     process::Stdio,
 };
@@ -30,24 +31,19 @@ impl WorktreeManager {
         let base_ref = self.resolve_base_ref(&source_repo).await?;
         let slug = uuid::Uuid::new_v4().simple().to_string()[..12].to_string();
         let branch = format!("{}/{}", self.config.branch_prefix, slug);
-        let worktrees_dir = self
-            .config
-            .worktrees_dir
-            .clone()
-            .unwrap_or_else(|| source_repo.join(".claude").join("worktrees"));
+        let worktrees_dir = self.resolve_worktrees_dir(&source_repo)?;
         tokio::fs::create_dir_all(&worktrees_dir).await?;
         let worktree_cwd = worktrees_dir.join(&slug);
 
-        let worktree_cwd_arg = worktree_cwd.to_string_lossy().to_string();
         run_git(
             &source_repo,
-            &[
-                "worktree",
-                "add",
-                "-b",
-                &branch,
-                &worktree_cwd_arg,
-                &base_ref,
+            [
+                OsStr::new("worktree"),
+                OsStr::new("add"),
+                OsStr::new("-b"),
+                OsStr::new(&branch),
+                worktree_cwd.as_os_str(),
+                OsStr::new(&base_ref),
             ],
         )
         .await?;
@@ -67,9 +63,29 @@ impl WorktreeManager {
             ));
         }
 
-        let worktree_cwd_arg = meta.worktree_cwd.to_string_lossy().to_string();
-        run_git(&meta.source_cwd, &["worktree", "remove", &worktree_cwd_arg]).await?;
+        run_git(
+            &meta.source_cwd,
+            [
+                OsStr::new("worktree"),
+                OsStr::new("remove"),
+                meta.worktree_cwd.as_os_str(),
+            ],
+        )
+        .await?;
         Ok(())
+    }
+
+    fn resolve_worktrees_dir(&self, source_repo: &Path) -> AppResult<PathBuf> {
+        let worktrees_dir = self
+            .config
+            .worktrees_dir
+            .clone()
+            .unwrap_or_else(|| source_repo.join(".claude").join("worktrees"));
+        if worktrees_dir.is_absolute() {
+            Ok(worktrees_dir)
+        } else {
+            Ok(std::env::current_dir()?.join(worktrees_dir))
+        }
     }
 
     async fn resolve_base_ref(&self, source_cwd: &Path) -> AppResult<String> {
@@ -81,30 +97,24 @@ impl WorktreeManager {
 }
 
 async fn resolve_source_repo(source_cwd: &Path) -> AppResult<PathBuf> {
-    let repo = run_git(source_cwd, &["rev-parse", "--show-toplevel"]).await?;
+    let repo = run_git(source_cwd, ["rev-parse", "--show-toplevel"]).await?;
     Ok(tokio::fs::canonicalize(repo).await?)
 }
 
 async fn resolve_fresh_base_ref(source_cwd: &Path) -> AppResult<String> {
-    if let Some(remote_ref) = run_git(
+    let remote_ref = run_git(
         source_cwd,
-        &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+        ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
     )
     .await
-    .ok()
-    .filter(|output| !output.is_empty())
-    {
-        verify_remote_ref(source_cwd, &remote_ref).await?;
-        return Ok(remote_ref);
+    .map_err(|_| missing_remote_head_error())?;
+
+    if remote_ref.is_empty() {
+        return Err(missing_remote_head_error());
     }
 
-    for remote_ref in ["origin/master", "origin/main"] {
-        if has_commit_ref(source_cwd, remote_ref).await? {
-            return Ok(remote_ref.to_string());
-        }
-    }
-
-    Err(missing_remote_ref_error("origin/master"))
+    verify_remote_ref(source_cwd, &remote_ref).await?;
+    Ok(remote_ref)
 }
 
 async fn verify_remote_ref(source_cwd: &Path, remote_ref: &str) -> AppResult<()> {
@@ -132,7 +142,18 @@ fn missing_remote_ref_error(remote_ref: &str) -> AppError {
     ))
 }
 
-async fn run_git(source_cwd: &Path, args: &[&str]) -> AppResult<String> {
+fn missing_remote_head_error() -> AppError {
+    AppError::InvalidRequest(
+        "remote default branch refs/remotes/origin/HEAD is not available; sync the repo or set worktree_base_ref = \"head\""
+            .to_string(),
+    )
+}
+
+async fn run_git<I, S>(source_cwd: &Path, args: I) -> AppResult<String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
     let output = Command::new("git")
         .arg("-C")
         .arg(source_cwd)
@@ -220,6 +241,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn relative_custom_worktrees_dir_is_resolved_from_process_cwd() {
+        let current_dir = std::env::current_dir().unwrap();
+        let temp = tempfile::Builder::new()
+            .prefix("crw-worktree-config-relative-")
+            .tempdir_in(&current_dir)
+            .unwrap();
+        let repo_parent = tempfile::tempdir().unwrap();
+        let repo = repo_parent.path().join("repo");
+        let relative_worktrees = temp
+            .path()
+            .strip_prefix(&current_dir)
+            .unwrap()
+            .join("worktrees");
+        let expected_worktrees = current_dir.join(&relative_worktrees);
+        init_repo(&repo).await;
+        let manager = WorktreeManager::new(WorktreeConfig {
+            worktrees_dir: Some(relative_worktrees),
+            branch_prefix: "crw".to_string(),
+            base_ref: WorktreeBaseRef::Head,
+        });
+
+        let meta = manager.create(&repo).await.unwrap();
+
+        assert!(meta.worktree_cwd.starts_with(expected_worktrees));
+        assert!(meta.worktree_cwd.exists());
+    }
+
+    #[tokio::test]
     async fn rejects_non_git_directories() {
         let temp = tempfile::tempdir().unwrap();
         let manager = WorktreeManager::new(WorktreeConfig {
@@ -246,7 +295,7 @@ mod tests {
 
         let err = manager.create(&repo).await.unwrap_err();
 
-        assert!(err.to_string().contains("origin/master"));
+        assert!(err.to_string().contains("refs/remotes/origin/HEAD"));
         assert!(
             err.to_string()
                 .contains("sync the repo or set worktree_base_ref = \"head\"")
@@ -272,7 +321,7 @@ mod tests {
 
         let err = manager.create(&repo).await.unwrap_err();
 
-        assert!(err.to_string().contains("origin/master"));
+        assert!(err.to_string().contains("refs/remotes/origin/HEAD"));
         assert!(!err.to_string().contains("origin/feature"));
         assert!(
             err.to_string()
@@ -281,20 +330,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fresh_mode_uses_origin_main_when_remote_head_is_missing() {
+    async fn fresh_mode_rejects_ambiguous_remote_branches_without_remote_head() {
         let temp = tempfile::tempdir().unwrap();
         let repo = temp.path().join("repo");
         init_repo(&repo).await;
         git(&repo, &["update-ref", "refs/remotes/origin/main", "HEAD"]).await;
+        git(&repo, &["update-ref", "refs/remotes/origin/master", "HEAD"]).await;
         let manager = WorktreeManager::new(WorktreeConfig {
             worktrees_dir: None,
             branch_prefix: "pin".to_string(),
             base_ref: WorktreeBaseRef::Fresh,
         });
 
-        let meta = manager.create(&repo).await.unwrap();
+        let err = manager.create(&repo).await.unwrap_err();
 
-        assert!(meta.worktree_cwd.exists());
+        assert!(err.to_string().contains("refs/remotes/origin/HEAD"));
+        assert!(
+            err.to_string()
+                .contains("sync the repo or set worktree_base_ref = \"head\"")
+        );
     }
 
     #[tokio::test]
