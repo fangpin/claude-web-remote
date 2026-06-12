@@ -86,14 +86,16 @@ export default function ConfigView() {
   }
 
   return (
-    <section className="config-view">
-      <h1>Daemon config</h1>
+    <section className="config-panel">
+      <div className="config-header">
+        <h2>Daemon config</h2>
+        {managedConfig && <p>{managedConfig.path}</p>}
+      </div>
       {error && <p role="alert" className="error">{error}</p>}
-      {success && <p>{success}</p>}
-      {managedConfig && <p>{managedConfig.path}</p>}
-      <p>Saved changes require a manual daemon restart before they take effect.</p>
+      {success && <p className="success">{success}</p>}
+      <p className="notice">Saved changes require a manual daemon restart before they take effect.</p>
       {form && (
-        <form onSubmit={onSave}>
+        <form className="config-form" onSubmit={onSave}>
           <label>
             Bind address
             <input value={form.bind} onChange={(event) => updateField('bind', event.target.value)} />
