@@ -1,0 +1,7 @@
+/target
+/crates/server/target
+/web/node_modules
+/web/dist
+/.claude-remote-web
+*.log
+.DS_Store
