@@ -1,6 +1,6 @@
 use crate::{
     AppError, AppResult, ClaudeProcess, ClaudeProcessConfig, EventKind, EventStore, ProcessEvent,
-    SessionMeta, SessionStatus, UiEvent, extract_claude_session_id,
+    SessionMeta, SessionStatus, UiEvent, extract_claude_session_id, store::SessionListFilter,
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -78,6 +78,7 @@ impl SessionManager {
                 .unwrap_or_else(|| self.default_permission_mode.clone()),
             status: SessionStatus::Starting,
             claude_session_id: None,
+            deleted_at: None,
             created_at: now,
             updated_at: now,
         };
@@ -88,7 +89,7 @@ impl SessionManager {
     pub async fn list_sessions(&self) -> AppResult<Vec<SessionInfo>> {
         Ok(self
             .store
-            .list_meta()
+            .list_meta(SessionListFilter::Active)
             .await?
             .into_iter()
             .map(SessionInfo::from)

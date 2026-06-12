@@ -27,8 +27,27 @@ pub struct SessionMeta {
     pub permission_mode: String,
     pub status: SessionStatus,
     pub claude_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionListFilter {
+    Active,
+    Deleted,
+    All,
+}
+
+impl SessionListFilter {
+    fn includes(self, meta: &SessionMeta) -> bool {
+        match self {
+            SessionListFilter::Active => meta.deleted_at.is_none(),
+            SessionListFilter::Deleted => meta.deleted_at.is_some(),
+            SessionListFilter::All => true,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -70,7 +89,7 @@ impl EventStore {
         Ok(serde_json::from_slice(&content)?)
     }
 
-    pub async fn list_meta(&self) -> AppResult<Vec<SessionMeta>> {
+    pub async fn list_meta(&self, filter: SessionListFilter) -> AppResult<Vec<SessionMeta>> {
         let mut entries = fs::read_dir(self.root.join("sessions")).await?;
         let mut sessions: Vec<SessionMeta> = Vec::new();
 
@@ -78,12 +97,24 @@ impl EventStore {
             let meta_path = entry.path().join("meta.json");
             if fs::try_exists(&meta_path).await? {
                 let content = fs::read(meta_path).await?;
-                sessions.push(serde_json::from_slice(&content)?);
+                let meta: SessionMeta = serde_json::from_slice(&content)?;
+                if filter.includes(&meta) {
+                    sessions.push(meta);
+                }
             }
         }
 
         sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
         Ok(sessions)
+    }
+
+    pub async fn remove_session_dir(&self, session_id: Uuid) -> AppResult<()> {
+        let _guard = self.write_lock.lock().await;
+        let dir = self.session_dir(session_id);
+        if fs::try_exists(&dir).await? {
+            fs::remove_dir_all(dir).await?;
+        }
+        Ok(())
     }
 
     pub async fn append_event(&self, event: &UiEvent) -> AppResult<()> {
@@ -166,6 +197,7 @@ mod tests {
             permission_mode: "acceptEdits".to_string(),
             status: SessionStatus::Running,
             claude_session_id: Some("claude-session".to_string()),
+            deleted_at: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
@@ -179,6 +211,100 @@ mod tests {
         assert_eq!(loaded.permission_mode, "acceptEdits");
         assert_eq!(loaded.status, SessionStatus::Running);
         assert_eq!(loaded.claude_session_id, Some("claude-session".to_string()));
+    }
+
+    #[tokio::test]
+    async fn loads_legacy_meta_without_deleted_at_as_active() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = EventStore::new(temp.path()).await.unwrap();
+        let id = Uuid::new_v4();
+        let dir = temp.path().join("sessions").join(id.to_string());
+        fs::create_dir_all(&dir).await.unwrap();
+        fs::write(
+            dir.join("meta.json"),
+            serde_json::json!({
+                "id": id,
+                "name": "legacy",
+                "cwd": "/tmp/legacy",
+                "permissionMode": "acceptEdits",
+                "status": "stopped",
+                "claudeSessionId": null,
+                "createdAt": "2026-06-11T00:00:00Z",
+                "updatedAt": "2026-06-11T00:00:00Z"
+            })
+            .to_string(),
+        )
+        .await
+        .unwrap();
+
+        let loaded = store.load_meta(id).await.unwrap();
+
+        assert_eq!(loaded.deleted_at, None);
+    }
+
+    #[tokio::test]
+    async fn filters_session_meta_by_deleted_state() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = EventStore::new(temp.path()).await.unwrap();
+        let now = Utc::now();
+        let active = SessionMeta {
+            id: Uuid::new_v4(),
+            name: Some("active".to_string()),
+            cwd: PathBuf::from("/tmp/active"),
+            permission_mode: "acceptEdits".to_string(),
+            status: SessionStatus::Stopped,
+            claude_session_id: None,
+            deleted_at: None,
+            created_at: now,
+            updated_at: now,
+        };
+        let deleted = SessionMeta {
+            id: Uuid::new_v4(),
+            name: Some("deleted".to_string()),
+            cwd: PathBuf::from("/tmp/deleted"),
+            permission_mode: "acceptEdits".to_string(),
+            status: SessionStatus::Stopped,
+            claude_session_id: None,
+            deleted_at: Some(now),
+            created_at: now,
+            updated_at: now + chrono::TimeDelta::seconds(1),
+        };
+        store.save_meta(&active).await.unwrap();
+        store.save_meta(&deleted).await.unwrap();
+
+        let active_only = store.list_meta(SessionListFilter::Active).await.unwrap();
+        let deleted_only = store.list_meta(SessionListFilter::Deleted).await.unwrap();
+        let all = store.list_meta(SessionListFilter::All).await.unwrap();
+
+        assert_eq!(
+            active_only.iter().map(|meta| meta.id).collect::<Vec<_>>(),
+            vec![active.id]
+        );
+        assert_eq!(
+            deleted_only.iter().map(|meta| meta.id).collect::<Vec<_>>(),
+            vec![deleted.id]
+        );
+        assert_eq!(
+            all.iter().map(|meta| meta.id).collect::<Vec<_>>(),
+            vec![deleted.id, active.id]
+        );
+    }
+
+    #[tokio::test]
+    async fn removes_session_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = EventStore::new(temp.path()).await.unwrap();
+        let session_id = Uuid::new_v4();
+        let dir = store.ensure_session_dir(session_id).await.unwrap();
+        fs::write(dir.join("events.jsonl"), "{}").await.unwrap();
+
+        store.remove_session_dir(session_id).await.unwrap();
+
+        assert!(
+            !fs::try_exists(temp.path().join("sessions").join(session_id.to_string()))
+                .await
+                .unwrap()
+        );
     }
 
     #[tokio::test]
