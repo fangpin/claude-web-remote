@@ -84,8 +84,12 @@ export default function App() {
   return (
     <main className="app-shell">
       <aside className="sidebar">
-        <h1>Claude Remote Web</h1>
+        <div className="brand">
+          <h1>Claude Remote Web</h1>
+          <p>Remote Claude sessions</p>
+        </div>
         <form className="new-session" onSubmit={onCreateSession}>
+          <h2>New session</h2>
           <label>
             Working directory
             <input value={cwd} onChange={(event) => setCwd(event.target.value)} placeholder="/data00/home/user/repos/project" required />
@@ -102,10 +106,11 @@ export default function App() {
               <option value="default">default</option>
             </select>
           </label>
-          <button type="submit">Create session</button>
+          <button className="primary-action" type="submit">Create session</button>
         </form>
         <section className="sessions">
-          {sessions.length === 0 && <p>No sessions yet.</p>}
+          <h2>Sessions</h2>
+          {sessions.length === 0 && <p className="muted">No sessions yet.</p>}
           {sessions.map((session) => (
             <button
               key={session.id}
@@ -114,7 +119,7 @@ export default function App() {
             >
               <strong>{session.name || session.cwd}</strong>
               <span>{session.cwd}</span>
-              <em>{session.status}</em>
+              <em className={`status status-${session.status}`}>{session.status}</em>
             </button>
           ))}
         </section>
@@ -125,6 +130,7 @@ export default function App() {
           <>
             <header className="conversation-header">
               <div>
+                <span className="eyebrow">Remote Claude session</span>
                 <h2>{activeSession.name || activeSession.cwd}</h2>
                 <p>{activeSession.cwd}</p>
               </div>
@@ -133,17 +139,27 @@ export default function App() {
                 <button onClick={onRestart}>Restart</button>
               </div>
             </header>
-            <div className="events">
-              {(events[activeSession.id] ?? []).map((event, index) => (
-                <EventCard key={`${event.id}-${index}`} event={event} />
-              ))}
+            <div className="events" aria-live="polite">
+              {(events[activeSession.id] ?? []).length > 0 ? (
+                (events[activeSession.id] ?? []).map((event, index) => (
+                  <EventCard key={`${event.id}-${index}`} event={event} />
+                ))
+              ) : (
+                <div className="empty-thread">No events yet.</div>
+              )}
             </div>
             <form className="composer" onSubmit={onSend}>
-              <label>
-                Message
-                <textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={3} />
+              <label className="composer-field">
+                <span className="sr-only">Message Claude</span>
+                <textarea
+                  aria-label="Message Claude"
+                  value={message}
+                  onChange={(event) => setMessage(event.target.value)}
+                  placeholder="Ask Claude to inspect, edit, test, or explain..."
+                  rows={3}
+                />
               </label>
-              <button type="submit">Send</button>
+              <button className="send-button" type="submit">Send</button>
             </form>
           </>
         ) : (

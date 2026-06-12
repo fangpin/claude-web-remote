@@ -17,8 +17,14 @@ describe('EventCard', () => {
   beforeEach(() => cleanup());
   it('renders assistant text from message field', () => {
     render(<EventCard event={event({ message: 'hello assistant' }, 'assistant')} />);
-    expect(screen.getByText('assistant')).toBeInTheDocument();
+    expect(screen.getByText('Claude')).toBeInTheDocument();
     expect(screen.getByText('hello assistant')).toBeInTheDocument();
+  });
+
+  it('renders user text from stream content blocks', () => {
+    render(<EventCard event={event({ type: 'user', message: { content: [{ type: 'text', text: 'please inspect the layout' }] } }, 'user')} />);
+    expect(screen.getByText('You')).toBeInTheDocument();
+    expect(screen.getByText('please inspect the layout')).toBeInTheDocument();
   });
 
   it('renders tool name and input summary', () => {
@@ -34,7 +40,7 @@ describe('EventCard', () => {
 
   it('renders unknown payload as collapsible json', () => {
     render(<EventCard event={event({ unexpected: { nested: true } }, 'raw')} />);
-    expect(screen.getByText('raw')).toBeInTheDocument();
+    expect(screen.getByText('Raw event')).toBeInTheDocument();
     expect(screen.getByText('JSON payload')).toBeInTheDocument();
     expect(screen.getByText(/unexpected/)).toBeInTheDocument();
   });

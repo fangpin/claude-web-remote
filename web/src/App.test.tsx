@@ -64,6 +64,7 @@ describe('App', () => {
 
     expect((await screen.findAllByText('Repo One')).length).toBeGreaterThan(0);
     expect(screen.getAllByText('/repo/one').length).toBeGreaterThan(0);
+    expect(screen.getByText('Remote Claude session')).toBeInTheDocument();
 
     await waitFor(() => expect(FakeWebSocket.instances.length).toBe(1));
     FakeWebSocket.instances[0].emit({
@@ -75,6 +76,7 @@ describe('App', () => {
     });
 
     expect(await screen.findByText(/hello from claude/)).toBeInTheDocument();
+    expect(screen.getByText('Claude')).toBeInTheDocument();
   });
 
   it('creates a session from the form', async () => {
@@ -99,7 +101,7 @@ describe('App', () => {
   it('sends user input to the active session', async () => {
     render(<App />);
 
-    fireEvent.change(await screen.findByLabelText('Message'), { target: { value: 'do work' } });
+    fireEvent.change(await screen.findByLabelText('Message Claude'), { target: { value: 'do work' } });
     fireEvent.click(screen.getByText('Send'));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/input', expect.objectContaining({ method: 'POST' })));
