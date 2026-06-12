@@ -288,7 +288,7 @@ describe('buildConversationBlocks', () => {
       event(2, 'tool', {
         type: 'tool_result',
         tool_use_id: 'toolu_agent',
-        content: 'Found EventCard.tsx and App.tsx'
+        content: 'Found ConversationBlockList.tsx and App.tsx'
       })
     ]);
 
@@ -298,7 +298,7 @@ describe('buildConversationBlocks', () => {
       title: 'Explore output rendering',
       source: 'Explore agent',
       status: 'completed',
-      summary: 'Found EventCard.tsx and App.tsx',
+      summary: 'Found ConversationBlockList.tsx and App.tsx',
       eventIds: [1, 2]
     });
   });
