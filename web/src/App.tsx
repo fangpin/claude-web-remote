@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { createSession, eventsUrl, listSessions, restartSession, sendInput, stopSession } from './api';
 import EventCard from './EventCard';
 import { applyCommandCompletion, findSlashCommandToken, getCommandSuggestions, type ClaudeCommand, type SlashCommandToken } from './autocomplete';
@@ -106,31 +106,36 @@ export default function App() {
     completeSuggestion(suggestion);
   }
 
-  function onMessageKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (suggestions.length === 0 || !autocompleteToken) return;
+  function onMessageKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (suggestions.length > 0 && autocompleteToken) {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        setActiveSuggestionIndex((current) => (current + 1) % suggestions.length);
+        return;
+      }
 
-    if (event.key === 'ArrowDown') {
-      event.preventDefault();
-      setActiveSuggestionIndex((current) => (current + 1) % suggestions.length);
-      return;
+      if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        setActiveSuggestionIndex((current) => (current - 1 + suggestions.length) % suggestions.length);
+        return;
+      }
+
+      if ((event.key === 'Tab' || event.key === 'Enter') && !event.shiftKey && !event.nativeEvent.isComposing) {
+        event.preventDefault();
+        completeActiveSuggestion();
+        return;
+      }
+
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeAutocomplete();
+        return;
+      }
     }
 
-    if (event.key === 'ArrowUp') {
-      event.preventDefault();
-      setActiveSuggestionIndex((current) => (current - 1 + suggestions.length) % suggestions.length);
-      return;
-    }
-
-    if (event.key === 'Tab' || event.key === 'Enter') {
-      event.preventDefault();
-      completeActiveSuggestion();
-      return;
-    }
-
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      closeAutocomplete();
-    }
+    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
+    event.preventDefault();
+    event.currentTarget.form?.requestSubmit();
   }
 
   async function onStop() {

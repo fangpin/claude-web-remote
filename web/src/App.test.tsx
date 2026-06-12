@@ -190,4 +190,57 @@ describe('App', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/input', expect.objectContaining({ method: 'POST' })));
     expect(screen.queryByRole('listbox', { name: 'Claude command suggestions' })).not.toBeInTheDocument();
   });
+
+  it('sends user input when Enter is pressed in the composer', async () => {
+    render(<App />);
+
+    const messageInput = await screen.findByLabelText('Message');
+    fireEvent.change(messageInput, { target: { value: 'do keyboard work' } });
+    fireEvent.keyDown(messageInput, { key: 'Enter', code: 'Enter', charCode: 13 });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/input', expect.objectContaining({ method: 'POST' })));
+    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/input', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ text: 'do keyboard work' })
+    }));
+    expect(messageInput).toHaveValue('');
+  });
+
+  it('keeps Shift+Enter as multiline input in the composer', async () => {
+    render(<App />);
+
+    const messageInput = await screen.findByLabelText('Message');
+    fireEvent.change(messageInput, { target: { value: 'line one' } });
+    const shiftEnterEvent = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      code: 'Enter',
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true
+    });
+    messageInput.dispatchEvent(shiftEnterEvent);
+    expect(shiftEnterEvent.defaultPrevented).toBe(false);
+    fireEvent.change(messageInput, { target: { value: 'line one\nline two' } });
+
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/sessions/s1/input', expect.objectContaining({ method: 'POST' }));
+    expect(messageInput).toHaveValue('line one\nline two');
+  });
+
+  it('leaves composing Enter to the IME in the composer', async () => {
+    render(<App />);
+
+    const messageInput = await screen.findByLabelText('Message');
+    fireEvent.change(messageInput, { target: { value: 'composing text' } });
+    const composingEnterEvent = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      code: 'Enter',
+      bubbles: true,
+      cancelable: true
+    });
+    Object.defineProperty(composingEnterEvent, 'isComposing', { value: true });
+    messageInput.dispatchEvent(composingEnterEvent);
+
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/sessions/s1/input', expect.objectContaining({ method: 'POST' }));
+    expect(composingEnterEvent.defaultPrevented).toBe(false);
+  });
 });
