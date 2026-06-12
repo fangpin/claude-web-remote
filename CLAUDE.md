@@ -85,7 +85,7 @@ worktree_branch_prefix = "pin"
 worktree_base_ref = "fresh"
 ```
 
-`worktrees_dir` is optional; when omitted, worktrees are created under the selected repo's `.claude/worktrees`. `worktree_base_ref = "fresh"` creates from `origin/<default-branch>` without fetching, while `"head"` creates from the repo's current local `HEAD`.
+`worktrees_dir` is optional; when omitted, worktrees are created under the selected repo's `.claude/worktrees`. `worktree_base_ref = "fresh"` creates from the repository's configured `refs/remotes/origin/HEAD` (the remote default branch) without fetching, while `"head"` creates from the repo's current local `HEAD`.
 
 Wrapper launcher example:
 
