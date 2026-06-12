@@ -2,45 +2,47 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 
-const sessions = [
+const baseSession = {
+  permissionMode: 'acceptEdits',
+  claudeSessionId: null,
+  deletedAt: null,
+  createdAt: '2026-06-11T00:00:00Z',
+  updatedAt: '2026-06-11T00:00:00Z'
+};
+
+const defaultSessions = [
   {
+    ...baseSession,
     id: 's1',
     name: 'Repo One',
     cwd: '/repo/one',
-    permissionMode: 'acceptEdits',
-    status: 'running',
-    claudeSessionId: null,
-    deletedAt: null,
-    createdAt: '2026-06-11T00:00:00Z',
-    updatedAt: '2026-06-11T00:00:00Z'
+    status: 'running'
   },
   {
+    ...baseSession,
     id: 's2',
     name: 'Stopped Repo',
     cwd: '/repo/stopped',
-    permissionMode: 'acceptEdits',
     status: 'stopped',
-    claudeSessionId: 'claude-s2',
-    deletedAt: null,
-    createdAt: '2026-06-11T00:00:00Z',
-    updatedAt: '2026-06-11T00:00:00Z'
+    claudeSessionId: 'claude-s2'
   }
 ];
 
-const deletedSessions = [
+const defaultDeletedSessions = [
   {
+    ...baseSession,
     id: 's3',
     name: 'Deleted Repo',
     cwd: '/repo/deleted',
-    permissionMode: 'acceptEdits',
     status: 'stopped',
     claudeSessionId: 'claude-s3',
     deletedAt: '2026-06-12T00:00:00Z',
-    createdAt: '2026-06-11T00:00:00Z',
     updatedAt: '2026-06-12T00:00:00Z'
   }
 ];
 
+let sessions = defaultSessions;
+let deletedSessions = defaultDeletedSessions;
 let fetchMock: ReturnType<typeof vi.fn>;
 
 class FakeWebSocket {
@@ -59,6 +61,8 @@ class FakeWebSocket {
 
 beforeEach(() => {
   cleanup();
+  sessions = defaultSessions;
+  deletedSessions = defaultDeletedSessions;
   FakeWebSocket.instances = [];
   fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -159,12 +163,60 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: 'Restart' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
 
+    fireEvent.click(screen.getByRole('button', { name: 'Restart' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/restart', expect.objectContaining({ method: 'POST' })));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/stop', expect.objectContaining({ method: 'POST' })));
+
     fireEvent.click(screen.getByRole('button', { name: /Stopped Repo/ }));
 
     expect(await screen.findByRole('heading', { name: 'Stopped Repo' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Resume' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Restart' })).not.toBeInTheDocument();
+  });
+
+  it('renders Stop and Delete actions for starting sessions', async () => {
+    sessions = [
+      {
+        ...baseSession,
+        id: 's1',
+        name: 'Starting Repo',
+        cwd: '/repo/starting',
+        status: 'starting'
+      }
+    ];
+
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'Starting Repo' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Restart' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
+  });
+
+  it.each(['exited', 'failed'])('renders Resume and Delete actions for %s sessions', async (status) => {
+    const name = `${status[0].toUpperCase()}${status.slice(1)} Repo`;
+    sessions = [
+      {
+        ...baseSession,
+        id: 's1',
+        name,
+        cwd: `/repo/${status}`,
+        status
+      }
+    ];
+
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Resume' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Restart' })).not.toBeInTheDocument();
   });
 
   it('soft deletes an active session and removes it from the active list', async () => {
