@@ -4,4 +4,7 @@
 /web/dist
 /.claude-remote-web
 *.log
+*.tsbuildinfo
+/web/vite.config.d.ts
+/web/vite.config.js
 .DS_Store
