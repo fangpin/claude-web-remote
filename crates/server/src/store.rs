@@ -1,4 +1,4 @@
-use crate::{AppResult, UiEvent};
+use crate::{AppResult, UiEvent, WorktreeMeta};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -27,6 +27,7 @@ pub struct SessionMeta {
     pub permission_mode: String,
     pub status: SessionStatus,
     pub claude_session_id: Option<String>,
+    pub worktree: Option<WorktreeMeta>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -166,6 +167,12 @@ mod tests {
             permission_mode: "acceptEdits".to_string(),
             status: SessionStatus::Running,
             claude_session_id: Some("claude-session".to_string()),
+            worktree: Some(crate::WorktreeMeta {
+                source_cwd: PathBuf::from("/tmp/source"),
+                worktree_cwd: PathBuf::from("/tmp/source/.claude/worktrees/abc123"),
+                branch: "pin/abc123".to_string(),
+                created_by_claude_remote_web: true,
+            }),
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
@@ -179,6 +186,7 @@ mod tests {
         assert_eq!(loaded.permission_mode, "acceptEdits");
         assert_eq!(loaded.status, SessionStatus::Running);
         assert_eq!(loaded.claude_session_id, Some("claude-session".to_string()));
+        assert_eq!(loaded.worktree.as_ref().unwrap().branch, "pin/abc123");
     }
 
     #[tokio::test]

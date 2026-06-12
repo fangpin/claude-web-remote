@@ -53,7 +53,16 @@ done
 
 async fn spawn_app(temp: &tempfile::TempDir, launcher: Vec<String>) -> SocketAddr {
     let store = EventStore::new(temp.path().join("data")).await.unwrap();
-    let manager = SessionManager::new(store.clone(), launcher, "acceptEdits".to_string());
+    let manager = SessionManager::new(
+        store.clone(),
+        launcher,
+        "acceptEdits".to_string(),
+        claude_remote_web_server::WorktreeConfig {
+            worktrees_dir: None,
+            branch_prefix: "pin".to_string(),
+            base_ref: claude_remote_web_server::WorktreeBaseRef::Head,
+        },
+    );
     let state = AppState { manager, store };
     let app: Router = build_router(state, None);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

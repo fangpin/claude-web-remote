@@ -1,6 +1,7 @@
 use crate::{
     AppError, AppResult, ClaudeProcess, ClaudeProcessConfig, EventKind, EventStore, ProcessEvent,
-    SessionMeta, SessionStatus, UiEvent, extract_claude_session_id,
+    SessionMeta, SessionStatus, UiEvent, WorktreeConfig, WorktreeManager, WorktreeMeta,
+    extract_claude_session_id,
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -15,6 +16,13 @@ pub struct CreateSessionRequest {
     pub cwd: PathBuf,
     pub name: Option<String>,
     pub permission_mode: Option<String>,
+    pub worktree: Option<WorktreeRequest>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeRequest {
+    pub enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -26,6 +34,7 @@ pub struct SessionInfo {
     pub permission_mode: String,
     pub status: SessionStatus,
     pub claude_session_id: Option<String>,
+    pub worktree: Option<WorktreeMeta>,
     pub created_at: chrono::DateTime<Utc>,
     pub updated_at: chrono::DateTime<Utc>,
 }
@@ -40,15 +49,22 @@ pub struct SessionManager {
     store: EventStore,
     launcher: Vec<String>,
     default_permission_mode: String,
+    worktree_manager: WorktreeManager,
     running: Arc<Mutex<HashMap<Uuid, RunningSession>>>,
 }
 
 impl SessionManager {
-    pub fn new(store: EventStore, launcher: Vec<String>, default_permission_mode: String) -> Self {
+    pub fn new(
+        store: EventStore,
+        launcher: Vec<String>,
+        default_permission_mode: String,
+        worktree_config: WorktreeConfig,
+    ) -> Self {
         Self {
             store,
             launcher,
             default_permission_mode,
+            worktree_manager: WorktreeManager::new(worktree_config),
             running: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -68,16 +84,32 @@ impl SessionManager {
             )));
         }
 
+        let worktree = if request
+            .worktree
+            .as_ref()
+            .map(|worktree| worktree.enabled)
+            .unwrap_or(false)
+        {
+            Some(self.worktree_manager.create(&cwd).await?)
+        } else {
+            None
+        };
+        let session_cwd = worktree
+            .as_ref()
+            .map(|worktree| worktree.worktree_cwd.clone())
+            .unwrap_or_else(|| cwd.clone());
+
         let now = Utc::now();
         let meta = SessionMeta {
             id: Uuid::new_v4(),
             name: request.name,
-            cwd,
+            cwd: session_cwd,
             permission_mode: request
                 .permission_mode
                 .unwrap_or_else(|| self.default_permission_mode.clone()),
             status: SessionStatus::Starting,
             claude_session_id: None,
+            worktree,
             created_at: now,
             updated_at: now,
         };
@@ -290,6 +322,7 @@ impl From<SessionMeta> for SessionInfo {
             permission_mode: meta.permission_mode,
             status: meta.status,
             claude_session_id: meta.claude_session_id,
+            worktree: meta.worktree,
             created_at: meta.created_at,
             updated_at: meta.updated_at,
         }
@@ -324,18 +357,115 @@ done
         path
     }
 
+    async fn init_repo(root: &std::path::Path) {
+        fs::create_dir_all(root).unwrap();
+        let run = |args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .current_dir(root)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        run(&["init", "-b", "master"]);
+        run(&["config", "user.email", "test@example.com"]);
+        run(&["config", "user.name", "Test User"]);
+        fs::write(root.join("README.md"), "hello\n").unwrap();
+        run(&["add", "README.md"]);
+        run(&["commit", "-m", "initial"]);
+    }
+
+    #[tokio::test]
+    async fn creates_worktree_session_and_uses_worktree_cwd() {
+        let temp = tempfile::tempdir().unwrap();
+        let repo = temp.path().join("repo");
+        init_repo(&repo).await;
+        let bin = fake_claude(temp.path());
+        let store = EventStore::new(temp.path().join("data")).await.unwrap();
+        let manager = SessionManager::new(
+            store.clone(),
+            vec![bin.to_string_lossy().to_string()],
+            "acceptEdits".to_string(),
+            crate::WorktreeConfig {
+                worktrees_dir: None,
+                branch_prefix: "pin".to_string(),
+                base_ref: crate::WorktreeBaseRef::Head,
+            },
+        );
+
+        let created = manager
+            .create_session(CreateSessionRequest {
+                cwd: repo.clone(),
+                name: None,
+                permission_mode: None,
+                worktree: Some(WorktreeRequest { enabled: true }),
+            })
+            .await
+            .unwrap();
+
+        let worktree = created.worktree.unwrap();
+        assert_eq!(worktree.source_cwd, repo.canonicalize().unwrap());
+        assert_eq!(created.cwd, worktree.worktree_cwd);
+        assert!(created.cwd.exists());
+        assert!(worktree.branch.starts_with("pin/"));
+    }
+
+    #[tokio::test]
+    async fn disabled_worktree_request_keeps_original_cwd() {
+        let temp = tempfile::tempdir().unwrap();
+        let bin = fake_claude(temp.path());
+        let store = EventStore::new(temp.path().join("data")).await.unwrap();
+        let manager = SessionManager::new(
+            store,
+            vec![bin.to_string_lossy().to_string()],
+            "acceptEdits".to_string(),
+            crate::WorktreeConfig {
+                worktrees_dir: None,
+                branch_prefix: "pin".to_string(),
+                base_ref: crate::WorktreeBaseRef::Head,
+            },
+        );
+
+        let created = manager
+            .create_session(CreateSessionRequest {
+                cwd: temp.path().to_path_buf(),
+                name: None,
+                permission_mode: None,
+                worktree: Some(WorktreeRequest { enabled: false }),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(created.cwd, temp.path());
+        assert_eq!(created.worktree, None);
+    }
+
     #[tokio::test]
     async fn rejects_missing_cwd() {
         let temp = tempfile::tempdir().unwrap();
         let store = EventStore::new(temp.path().join("data")).await.unwrap();
-        let manager =
-            SessionManager::new(store, vec!["claude".to_string()], "acceptEdits".to_string());
+        let manager = SessionManager::new(
+            store,
+            vec!["claude".to_string()],
+            "acceptEdits".to_string(),
+            crate::WorktreeConfig {
+                worktrees_dir: None,
+                branch_prefix: "pin".to_string(),
+                base_ref: crate::WorktreeBaseRef::Head,
+            },
+        );
 
         let result = manager
             .create_session(CreateSessionRequest {
                 cwd: temp.path().join("missing"),
                 name: None,
                 permission_mode: None,
+                worktree: None,
             })
             .await;
 
@@ -351,6 +481,11 @@ done
             store,
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
+            crate::WorktreeConfig {
+                worktrees_dir: None,
+                branch_prefix: "pin".to_string(),
+                base_ref: crate::WorktreeBaseRef::Head,
+            },
         );
 
         let created = manager
@@ -358,6 +493,7 @@ done
                 cwd: PathBuf::from("~"),
                 name: Some("home".to_string()),
                 permission_mode: None,
+                worktree: None,
             })
             .await
             .unwrap();
@@ -375,6 +511,11 @@ done
             store,
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
+            crate::WorktreeConfig {
+                worktrees_dir: None,
+                branch_prefix: "pin".to_string(),
+                base_ref: crate::WorktreeBaseRef::Head,
+            },
         );
 
         let created = manager
@@ -382,6 +523,7 @@ done
                 cwd: temp.path().to_path_buf(),
                 name: Some("demo".to_string()),
                 permission_mode: None,
+                worktree: None,
             })
             .await
             .unwrap();
@@ -413,6 +555,11 @@ done
             store,
             vec![bin.to_string_lossy().to_string()],
             "auto".to_string(),
+            crate::WorktreeConfig {
+                worktrees_dir: None,
+                branch_prefix: "pin".to_string(),
+                base_ref: crate::WorktreeBaseRef::Head,
+            },
         );
 
         let created = manager
@@ -420,6 +567,7 @@ done
                 cwd: temp.path().to_path_buf(),
                 name: None,
                 permission_mode: None,
+                worktree: None,
             })
             .await
             .unwrap();
@@ -436,6 +584,11 @@ done
             store.clone(),
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
+            crate::WorktreeConfig {
+                worktrees_dir: None,
+                branch_prefix: "pin".to_string(),
+                base_ref: crate::WorktreeBaseRef::Head,
+            },
         );
 
         let session = manager
@@ -443,6 +596,7 @@ done
                 cwd: temp.path().to_path_buf(),
                 name: None,
                 permission_mode: None,
+                worktree: None,
             })
             .await
             .unwrap();
@@ -462,6 +616,11 @@ done
             store.clone(),
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
+            crate::WorktreeConfig {
+                worktrees_dir: None,
+                branch_prefix: "pin".to_string(),
+                base_ref: crate::WorktreeBaseRef::Head,
+            },
         );
 
         let session = manager
@@ -469,6 +628,7 @@ done
                 cwd: temp.path().to_path_buf(),
                 name: None,
                 permission_mode: None,
+                worktree: None,
             })
             .await
             .unwrap();
@@ -497,6 +657,11 @@ done
             store.clone(),
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
+            crate::WorktreeConfig {
+                worktrees_dir: None,
+                branch_prefix: "pin".to_string(),
+                base_ref: crate::WorktreeBaseRef::Head,
+            },
         );
 
         let session = manager
@@ -504,6 +669,7 @@ done
                 cwd: temp.path().to_path_buf(),
                 name: None,
                 permission_mode: None,
+                worktree: None,
             })
             .await
             .unwrap();

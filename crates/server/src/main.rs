@@ -16,6 +16,7 @@ async fn main() -> anyhow::Result<()> {
         store.clone(),
         config.launcher.clone(),
         config.default_permission_mode.clone(),
+        config.worktree.clone(),
     );
     let state = AppState { manager, store };
     let app = build_router(state, config.web_dir.clone());
