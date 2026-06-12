@@ -27,6 +27,7 @@ export default function App() {
   const [permissionMode, setPermissionMode] = useState('acceptEdits');
   const [message, setMessage] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [isListLoading, setIsListLoading] = useState(false);
 
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeId) ?? null,
@@ -34,12 +35,27 @@ export default function App() {
   );
 
   useEffect(() => {
+    let cancelled = false;
+    setIsListLoading(true);
+    setSessions([]);
+    setActiveId(null);
     listSessions({ deletedOnly: listMode === 'deleted' })
       .then((loaded) => {
+        if (cancelled) return;
         setSessions(loaded);
         setActiveId(loaded[0]?.id ?? null);
       })
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setIsListLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [listMode]);
 
   useEffect(() => {
@@ -79,8 +95,14 @@ export default function App() {
     event.preventDefault();
     if (!activeId || !message.trim()) return;
     const text = message;
-    setMessage('');
-    await sendInput(activeId, text);
+    setError(null);
+    try {
+      await sendInput(activeId, text);
+      setMessage('');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+      setMessage(text);
+    }
   }
 
   async function onStop() {
@@ -118,13 +140,19 @@ export default function App() {
 
   async function onDelete() {
     if (!activeId) return;
+    const removedId = activeId;
     if (!confirm('Delete this session? It can be restored from Deleted sessions.')) return;
     setError(null);
     try {
-      await deleteSession(activeId);
+      await deleteSession(removedId);
       setSessions((current) => {
-        const remaining = current.filter((session) => session.id !== activeId);
-        setActiveId(remaining[0]?.id ?? null);
+        const remaining = current.filter((session) => session.id !== removedId);
+        setActiveId((currentActiveId) => {
+          if (currentActiveId !== removedId && remaining.some((session) => session.id === currentActiveId)) {
+            return currentActiveId;
+          }
+          return remaining[0]?.id ?? null;
+        });
         return remaining;
       });
     } catch (err: unknown) {
@@ -134,12 +162,18 @@ export default function App() {
 
   async function onRestore() {
     if (!activeId) return;
+    const removedId = activeId;
     setError(null);
     try {
-      await restoreSession(activeId);
+      await restoreSession(removedId);
       setSessions((current) => {
-        const remaining = current.filter((session) => session.id !== activeId);
-        setActiveId(remaining[0]?.id ?? null);
+        const remaining = current.filter((session) => session.id !== removedId);
+        setActiveId((currentActiveId) => {
+          if (currentActiveId !== removedId && remaining.some((session) => session.id === currentActiveId)) {
+            return currentActiveId;
+          }
+          return remaining[0]?.id ?? null;
+        });
         return remaining;
       });
     } catch (err: unknown) {
@@ -149,13 +183,19 @@ export default function App() {
 
   async function onPermanentDelete() {
     if (!activeId) return;
+    const removedId = activeId;
     if (!confirm('Permanently delete this session and its local event logs? This cannot be undone.')) return;
     setError(null);
     try {
-      await permanentlyDeleteSession(activeId);
+      await permanentlyDeleteSession(removedId);
       setSessions((current) => {
-        const remaining = current.filter((session) => session.id !== activeId);
-        setActiveId(remaining[0]?.id ?? null);
+        const remaining = current.filter((session) => session.id !== removedId);
+        setActiveId((currentActiveId) => {
+          if (currentActiveId !== removedId && remaining.some((session) => session.id === currentActiveId)) {
+            return currentActiveId;
+          }
+          return remaining[0]?.id ?? null;
+        });
         return remaining;
       });
     } catch (err: unknown) {
@@ -228,6 +268,7 @@ export default function App() {
           <button
             type="button"
             className={listMode === 'active' ? 'selected' : undefined}
+            aria-pressed={listMode === 'active'}
             onClick={() => setListMode('active')}
           >
             Active
@@ -235,13 +276,15 @@ export default function App() {
           <button
             type="button"
             className={listMode === 'deleted' ? 'selected' : undefined}
+            aria-pressed={listMode === 'deleted'}
             onClick={() => setListMode('deleted')}
           >
             Deleted
           </button>
         </div>
         <section className="sessions">
-          {sessions.length === 0 && <p>{listMode === 'deleted' ? 'No deleted sessions.' : 'No sessions yet.'}</p>}
+          {isListLoading && <p>Loading sessions...</p>}
+          {!isListLoading && sessions.length === 0 && <p>{listMode === 'deleted' ? 'No deleted sessions.' : 'No sessions yet.'}</p>}
           {sessions.map((session) => (
             <button
               key={session.id}
@@ -271,7 +314,7 @@ export default function App() {
                 <EventCard key={`${event.id}-${index}`} event={event} />
               ))}
             </div>
-            {listMode === 'active' && (
+            {listMode === 'active' && activeSession.status === 'running' && (
               <form className="composer" onSubmit={onSend}>
                 <label>
                   Message

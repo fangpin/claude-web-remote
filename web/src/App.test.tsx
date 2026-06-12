@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 
@@ -44,6 +44,14 @@ const defaultDeletedSessions = [
 let sessions = defaultSessions;
 let deletedSessions = defaultDeletedSessions;
 let fetchMock: ReturnType<typeof vi.fn>;
+
+function createDeferredResponse(body: unknown) {
+  let resolve!: () => void;
+  const promise = new Promise<Response>((deferredResolve) => {
+    resolve = () => deferredResolve(new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } }));
+  });
+  return { promise, resolve };
+}
 
 class FakeWebSocket {
   static instances: FakeWebSocket[] = [];
@@ -273,5 +281,154 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Restart' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
+  });
+
+  it('ignores stale active list responses after switching to deleted mode', async () => {
+    const activeList = createDeferredResponse({ sessions: defaultSessions });
+    const deletedList = createDeferredResponse({ sessions: defaultDeletedSessions });
+    fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/sessions') return activeList.promise;
+      if (url === '/api/sessions?deletedOnly=true') return deletedList.promise;
+      return Promise.resolve(new Response(JSON.stringify({ error: 'unexpected request' }), { status: 500 }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: 'Deleted' }));
+
+    await act(async () => {
+      deletedList.resolve();
+      await deletedList.promise;
+    });
+
+    expect(await screen.findByRole('heading', { name: 'Deleted Repo' })).toBeInTheDocument();
+
+    await act(async () => {
+      activeList.resolve();
+      await activeList.promise;
+    });
+
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Repo One' })).not.toBeInTheDocument());
+    expect(screen.getByRole('heading', { name: 'Deleted Repo' })).toBeInTheDocument();
+  });
+
+  it('clears active session actions while deleted sessions are loading', async () => {
+    const deletedList = createDeferredResponse({ sessions: defaultDeletedSessions });
+    fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/sessions') {
+        return Promise.resolve(new Response(JSON.stringify({ sessions: defaultSessions }), { status: 200, headers: { 'content-type': 'application/json' } }));
+      }
+      if (url === '/api/sessions?deletedOnly=true') return deletedList.promise;
+      return Promise.resolve(new Response(JSON.stringify({ error: 'unexpected request' }), { status: 500 }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+    expect(await screen.findByRole('heading', { name: 'Repo One' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Deleted' }));
+
+    expect(screen.queryByRole('heading', { name: 'Repo One' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Restore' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Permanently delete' })).not.toBeInTheDocument();
+
+    await act(async () => {
+      deletedList.resolve();
+      await deletedList.promise;
+    });
+
+    expect(await screen.findByRole('heading', { name: 'Deleted Repo' })).toBeInTheDocument();
+  });
+
+  it('only shows the composer for running active sessions', async () => {
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'Repo One' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Message')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Stopped Repo/ }));
+
+    expect(await screen.findByRole('heading', { name: 'Stopped Repo' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Message')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Send' })).not.toBeInTheDocument();
+  });
+
+  it('shows send errors and preserves the unsent message', async () => {
+    fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/sessions' && !init) {
+        return new Response(JSON.stringify({ sessions: defaultSessions }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (url === '/api/sessions/s1/input' && init?.method === 'POST') {
+        return new Response(JSON.stringify({ error: 'input failed' }), { status: 500, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response(JSON.stringify({ error: 'unexpected request' }), { status: 500 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    fireEvent.change(await screen.findByLabelText('Message'), { target: { value: 'do work' } });
+    fireEvent.click(screen.getByText('Send'));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('input failed');
+    expect(screen.getByLabelText('Message')).toHaveValue('do work');
+  });
+
+  it('keeps a newer valid selection when delete completes', async () => {
+    const threeSessions = [
+      ...defaultSessions,
+      {
+        ...baseSession,
+        id: 's5',
+        name: 'Newest Repo',
+        cwd: '/repo/newest',
+        status: 'running'
+      }
+    ];
+    let resolveDelete!: () => void;
+    const deletePromise = new Promise<Response>((resolve) => {
+      resolveDelete = () => resolve(new Response(JSON.stringify({ ...threeSessions[0], deletedAt: '2026-06-12T00:00:00Z' }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    });
+    fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/sessions' && !init) {
+        return Promise.resolve(new Response(JSON.stringify({ sessions: threeSessions }), { status: 200, headers: { 'content-type': 'application/json' } }));
+      }
+      if (url === '/api/sessions/s1' && init?.method === 'DELETE') return deletePromise;
+      return Promise.resolve(new Response(JSON.stringify({ error: 'unexpected request' }), { status: 500 }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'Repo One' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    fireEvent.click(screen.getByRole('button', { name: /Newest Repo/ }));
+
+    await act(async () => {
+      resolveDelete();
+      await deletePromise;
+    });
+
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Repo One/ })).not.toBeInTheDocument());
+    expect(screen.getByRole('heading', { name: 'Newest Repo' })).toBeInTheDocument();
+  });
+
+  it('exposes selected state on the active and deleted list mode buttons', async () => {
+    render(<App />);
+
+    const activeButton = screen.getByRole('button', { name: 'Active' });
+    const deletedButton = screen.getByRole('button', { name: 'Deleted' });
+
+    expect(activeButton).toHaveAttribute('aria-pressed', 'true');
+    expect(deletedButton).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(deletedButton);
+
+    expect(activeButton).toHaveAttribute('aria-pressed', 'false');
+    expect(deletedButton).toHaveAttribute('aria-pressed', 'true');
   });
 });
