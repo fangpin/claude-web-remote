@@ -71,6 +71,20 @@ impl EventStore {
         Ok(serde_json::from_slice(&content)?)
     }
 
+    pub async fn update_meta<F>(&self, session_id: Uuid, update: F) -> AppResult<SessionMeta>
+    where
+        F: FnOnce(&mut SessionMeta),
+    {
+        let _guard = self.write_lock.lock().await;
+        let path = self.session_dir(session_id).join("meta.json");
+        let content = fs::read(&path).await?;
+        let mut meta: SessionMeta = serde_json::from_slice(&content)?;
+        update(&mut meta);
+        let content = serde_json::to_vec_pretty(&meta)?;
+        fs::write(path, content).await?;
+        Ok(meta)
+    }
+
     pub async fn list_meta(&self) -> AppResult<Vec<SessionMeta>> {
         let mut entries = fs::read_dir(self.root.join("sessions")).await?;
         let mut sessions: Vec<SessionMeta> = Vec::new();
@@ -187,6 +201,53 @@ mod tests {
         assert_eq!(loaded.status, SessionStatus::Running);
         assert_eq!(loaded.claude_session_id, Some("claude-session".to_string()));
         assert_eq!(loaded.worktree.as_ref().unwrap().branch, "pin/abc123");
+    }
+
+    #[tokio::test]
+    async fn field_update_preserves_concurrent_worktree_removal() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = EventStore::new(temp.path()).await.unwrap();
+        let id = Uuid::new_v4();
+        let now = Utc::now();
+        let worktree = crate::WorktreeMeta {
+            source_cwd: PathBuf::from("/tmp/source"),
+            worktree_cwd: PathBuf::from("/tmp/source/.claude/worktrees/abc123"),
+            branch: "pin/abc123".to_string(),
+            created_by_claude_remote_web: true,
+        };
+        let meta = SessionMeta {
+            id,
+            name: Some("demo".to_string()),
+            cwd: worktree.worktree_cwd.clone(),
+            permission_mode: "acceptEdits".to_string(),
+            status: SessionStatus::Running,
+            claude_session_id: None,
+            worktree: Some(worktree.clone()),
+            created_at: now,
+            updated_at: now,
+        };
+        store.save_meta(&meta).await.unwrap();
+
+        store
+            .update_meta(id, |meta| {
+                meta.cwd = worktree.source_cwd.clone();
+                meta.worktree = None;
+                meta.updated_at = Utc::now();
+            })
+            .await
+            .unwrap();
+        store
+            .update_meta(id, |meta| {
+                meta.claude_session_id = Some("late-session".to_string());
+                meta.updated_at = Utc::now();
+            })
+            .await
+            .unwrap();
+
+        let loaded = store.load_meta(id).await.unwrap();
+        assert_eq!(loaded.worktree, None);
+        assert_eq!(loaded.cwd, PathBuf::from("/tmp/source"));
+        assert_eq!(loaded.claude_session_id, Some("late-session".to_string()));
     }
 
     #[tokio::test]

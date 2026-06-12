@@ -189,7 +189,7 @@ impl SessionManager {
 
     pub async fn stop_and_remove_worktree(&self, session_id: Uuid) -> AppResult<()> {
         let _ = self.stop_session(session_id).await;
-        let mut meta = self.store.load_meta(session_id).await?;
+        let meta = self.store.load_meta(session_id).await?;
         let worktree = meta.worktree.clone().ok_or_else(|| {
             AppError::InvalidRequest("session has no app-created worktree".to_string())
         })?;
@@ -199,11 +199,15 @@ impl SessionManager {
             ));
         }
         self.worktree_manager.remove(&worktree).await?;
-        meta.status = SessionStatus::Stopped;
-        meta.cwd = worktree.source_cwd;
-        meta.worktree = None;
-        meta.updated_at = Utc::now();
-        self.store.save_meta(&meta).await
+        self.store
+            .update_meta(session_id, |meta| {
+                meta.status = SessionStatus::Stopped;
+                meta.cwd = worktree.source_cwd;
+                meta.worktree = None;
+                meta.updated_at = Utc::now();
+            })
+            .await?;
+        Ok(())
     }
 
     pub async fn restart_session(&self, session_id: Uuid) -> AppResult<SessionInfo> {
@@ -304,13 +308,14 @@ impl SessionManager {
                     }
                     ProcessEvent::Exited(_) => {
                         let _ = running.lock().await.remove(&session_id);
-                        if let Ok(mut meta) = store.load_meta(session_id).await
-                            && meta.status != SessionStatus::Stopped
-                        {
-                            meta.status = SessionStatus::Exited;
-                            meta.updated_at = Utc::now();
-                            let _ = store.save_meta(&meta).await;
-                        }
+                        let _ = store
+                            .update_meta(session_id, |meta| {
+                                if meta.status != SessionStatus::Stopped {
+                                    meta.status = SessionStatus::Exited;
+                                    meta.updated_at = Utc::now();
+                                }
+                            })
+                            .await;
                         let event_id = store.next_event_id(session_id).await.unwrap_or(1);
                         let ui_event = UiEvent::new(
                             event_id,
@@ -333,20 +338,25 @@ impl SessionManager {
         session_id: Uuid,
         claude_session_id: String,
     ) -> AppResult<()> {
-        let mut meta = store.load_meta(session_id).await?;
-        if meta.claude_session_id.as_deref() == Some(claude_session_id.as_str()) {
-            return Ok(());
-        }
-        meta.claude_session_id = Some(claude_session_id);
-        meta.updated_at = Utc::now();
-        store.save_meta(&meta).await
+        store
+            .update_meta(session_id, |meta| {
+                if meta.claude_session_id.as_deref() != Some(claude_session_id.as_str()) {
+                    meta.claude_session_id = Some(claude_session_id);
+                    meta.updated_at = Utc::now();
+                }
+            })
+            .await?;
+        Ok(())
     }
 
     async fn update_status(&self, session_id: Uuid, status: SessionStatus) -> AppResult<()> {
-        let mut meta = self.store.load_meta(session_id).await?;
-        meta.status = status;
-        meta.updated_at = Utc::now();
-        self.store.save_meta(&meta).await
+        self.store
+            .update_meta(session_id, |meta| {
+                meta.status = status;
+                meta.updated_at = Utc::now();
+            })
+            .await?;
+        Ok(())
     }
 }
 
