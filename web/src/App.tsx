@@ -10,7 +10,8 @@ import {
   stopAndRemoveWorktree,
   stopSession
 } from './api';
-import EventCard from './EventCard';
+import ConversationBlockList from './ConversationBlockList';
+import { buildConversationBlocks } from './conversationBlocks';
 import TasksPanel from './TasksPanel';
 import { applyCommandCompletion, findSlashCommandToken, getCommandSuggestions, type ClaudeCommand, type SlashCommandToken } from './autocomplete';
 import type { SessionInfo, TaskGroups, TaskInfo, UiEvent } from './types';
@@ -44,6 +45,14 @@ export default function App() {
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeId) ?? null,
     [sessions, activeId]
+  );
+  const activeEvents = useMemo(
+    () => (activeId ? events[activeId] ?? [] : []),
+    [activeId, events]
+  );
+  const activeBlocks = useMemo(
+    () => buildConversationBlocks(activeEvents),
+    [activeEvents]
   );
 
   const recentDirectories = useMemo(() => {
@@ -373,9 +382,7 @@ export default function App() {
               onSelectTask={onSelectTask}
             />
             <div className="events">
-              {(events[activeSession.id] ?? []).map((event, index) => (
-                <EventCard key={`${event.id}-${index}`} event={event} />
-              ))}
+              <ConversationBlockList blocks={activeBlocks} />
             </div>
             <form className="composer" onSubmit={onSend}>
               <div className="composer-input">

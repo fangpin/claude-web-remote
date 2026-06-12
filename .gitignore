@@ -1,5 +1,6 @@
 /target
 /crates/server/target
+/node_modules
 /web/node_modules
 /web/dist
 /.claude-remote-web

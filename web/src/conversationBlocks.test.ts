@@ -1,0 +1,465 @@
+import { describe, expect, it } from 'vitest';
+import { buildConversationBlocks } from './conversationBlocks';
+import type { UiEvent } from './types';
+
+function event(id: number, kind: UiEvent['kind'], payload: unknown): UiEvent {
+  return {
+    id,
+    sessionId: 's1',
+    time: '2026-06-12T00:00:00Z',
+    kind,
+    payload
+  };
+}
+
+describe('buildConversationBlocks', () => {
+  it('merges consecutive same-role text events into one message block', () => {
+    const blocks = buildConversationBlocks([
+      event(1, 'assistant', { message: 'hello' }),
+      event(2, 'assistant', { text: 'from claude' })
+    ]);
+
+    expect(blocks).toEqual([
+      {
+        id: 'message-assistant-1',
+        type: 'message',
+        role: 'assistant',
+        text: 'hello\n\nfrom claude',
+        eventIds: [1, 2],
+        rawEvents: [
+          { id: 1, kind: 'assistant', payload: { message: 'hello' } },
+          { id: 2, kind: 'assistant', payload: { text: 'from claude' } }
+        ]
+      }
+    ]);
+  });
+
+  it('merges consecutive user text events into one message block', () => {
+    const blocks = buildConversationBlocks([
+      event(1, 'user', { message: 'first instruction' }),
+      event(2, 'user', { text: 'second instruction' })
+    ]);
+
+    expect(blocks).toEqual([
+      {
+        id: 'message-user-1',
+        type: 'message',
+        role: 'user',
+        text: 'first instruction\n\nsecond instruction',
+        eventIds: [1, 2],
+        rawEvents: [
+          { id: 1, kind: 'user', payload: { message: 'first instruction' } },
+          { id: 2, kind: 'user', payload: { text: 'second instruction' } }
+        ]
+      }
+    ]);
+  });
+
+  it('merges consecutive system text events into one message block', () => {
+    const blocks = buildConversationBlocks([
+      event(1, 'system', { message: 'daemon notice' }),
+      event(2, 'system', { status: 'session resumed' })
+    ]);
+
+    expect(blocks).toEqual([
+      {
+        id: 'message-system-1',
+        type: 'message',
+        role: 'system',
+        text: 'daemon notice\n\nsession resumed',
+        eventIds: [1, 2],
+        rawEvents: [
+          { id: 1, kind: 'system', payload: { message: 'daemon notice' } },
+          { id: 2, kind: 'system', payload: { status: 'session resumed' } }
+        ]
+      }
+    ]);
+  });
+
+  it('extracts text from Claude stream-json content blocks', () => {
+    const assistantPayload = { type: 'assistant', message: { content: [{ type: 'text', text: 'done' }] } };
+    const userPayload = { type: 'user', message: { content: [{ type: 'text', text: 'please continue' }] } };
+    const systemPayload = { type: 'system', content: [{ type: 'text', text: 'session ready' }] };
+    const blocks = buildConversationBlocks([
+      event(1, 'assistant', assistantPayload),
+      event(2, 'user', userPayload),
+      event(3, 'system', systemPayload)
+    ]);
+
+    expect(blocks).toEqual([
+      {
+        id: 'message-assistant-1',
+        type: 'message',
+        role: 'assistant',
+        text: 'done',
+        eventIds: [1],
+        rawEvents: [{ id: 1, kind: 'assistant', payload: assistantPayload }]
+      },
+      {
+        id: 'message-user-2',
+        type: 'message',
+        role: 'user',
+        text: 'please continue',
+        eventIds: [2],
+        rawEvents: [{ id: 2, kind: 'user', payload: userPayload }]
+      },
+      {
+        id: 'message-system-3',
+        type: 'message',
+        role: 'system',
+        text: 'session ready',
+        eventIds: [3],
+        rawEvents: [{ id: 3, kind: 'system', payload: systemPayload }]
+      }
+    ]);
+  });
+
+  it('pairs tool_use and tool_result events with the same tool_use_id', () => {
+    const blocks = buildConversationBlocks([
+      event(1, 'tool', { type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'git status' } }),
+      event(2, 'tool', { type: 'tool_result', tool_use_id: 'toolu_1', content: 'clean' })
+    ]);
+
+    expect(blocks).toEqual([
+      {
+        id: 'tool-toolu_1',
+        type: 'tool',
+        name: 'Bash',
+        status: 'completed',
+        inputSummary: 'command: git status',
+        resultSummary: 'clean',
+        eventIds: [1, 2],
+        rawEvents: [
+          { id: 1, kind: 'tool', payload: { type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'git status' } } },
+          { id: 2, kind: 'tool', payload: { type: 'tool_result', tool_use_id: 'toolu_1', content: 'clean' } }
+        ]
+      }
+    ]);
+  });
+
+  it('pairs nested Claude tool_use and tool_result content blocks', () => {
+    const assistantPayload = {
+      type: 'assistant',
+      message: { content: [{ type: 'tool_use', id: 'toolu_1', name: 'Read', input: { file_path: '/tmp/a.txt' } }] }
+    };
+    const userPayload = {
+      type: 'user',
+      message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'contents' }] }
+    };
+    const blocks = buildConversationBlocks([event(1, 'assistant', assistantPayload), event(2, 'user', userPayload)]);
+
+    expect(blocks).toEqual([
+      {
+        id: 'tool-toolu_1',
+        type: 'tool',
+        name: 'Read',
+        status: 'completed',
+        inputSummary: 'file_path: /tmp/a.txt',
+        resultSummary: 'contents',
+        eventIds: [1, 2],
+        rawEvents: [
+          { id: 1, kind: 'assistant', payload: assistantPayload },
+          { id: 2, kind: 'user', payload: userPayload }
+        ]
+      }
+    ]);
+  });
+
+  it('renders ordinary tools as running until they receive results', () => {
+    const blocks = buildConversationBlocks([
+      event(1, 'tool', { type: 'tool_use', id: 'toolu_read', name: 'Read', input: { file_path: '/tmp/example.txt' } })
+    ]);
+
+    expect(blocks).toEqual([
+      {
+        id: 'tool-toolu_read',
+        type: 'tool',
+        name: 'Read',
+        status: 'running',
+        inputSummary: 'file_path: /tmp/example.txt',
+        resultSummary: '',
+        eventIds: [1],
+        rawEvents: [
+          { id: 1, kind: 'tool', payload: { type: 'tool_use', id: 'toolu_read', name: 'Read', input: { file_path: '/tmp/example.txt' } } }
+        ]
+      }
+    ]);
+  });
+
+  it('renders ordinary tool results containing errors as failed', () => {
+    const blocks = buildConversationBlocks([
+      event(1, 'tool', { type: 'tool_use', id: 'toolu_read', name: 'Read', input: { file_path: '/tmp/missing.txt' } }),
+      event(2, 'tool', { type: 'tool_result', tool_use_id: 'toolu_read', content: 'Error: file not found' })
+    ]);
+
+    expect(blocks[0]).toMatchObject({
+      id: 'tool-toolu_read',
+      type: 'tool',
+      name: 'Read',
+      status: 'failed',
+      inputSummary: 'file_path: /tmp/missing.txt',
+      resultSummary: 'Error: file not found',
+      eventIds: [1, 2]
+    });
+  });
+
+  it('uses structured result fields for failure status without matching successful error text', () => {
+    const blocks = buildConversationBlocks([
+      event(1, 'tool', { type: 'tool_use', id: 'toolu_success_text', name: 'Bash', input: { command: 'npm test' } }),
+      event(2, 'tool', { type: 'tool_result', tool_use_id: 'toolu_success_text', content: 'Found 0 errors' }),
+      event(3, 'tool', { type: 'tool_use', id: 'toolu_no_errors', name: 'Read', input: { file_path: '/tmp/report.txt' } }),
+      event(4, 'tool', { type: 'tool_result', tool_use_id: 'toolu_no_errors', content: 'No errors detected' }),
+      event(5, 'tool', { type: 'tool_use', id: 'toolu_structured_error', name: 'Read', input: { file_path: '/tmp/missing.txt' } }),
+      event(6, 'tool', { type: 'tool_result', tool_use_id: 'toolu_structured_error', is_error: true, content: 'file missing' }),
+      event(7, 'tool', { type: 'tool_use', id: 'toolu_status_error', name: 'Read', input: { file_path: '/tmp/missing2.txt' } }),
+      event(8, 'tool', { type: 'tool_result', tool_use_id: 'toolu_status_error', status: 'error', content: 'missing2' })
+    ]);
+
+    expect(blocks).toMatchObject([
+      { id: 'tool-toolu_success_text', type: 'tool', status: 'completed', resultSummary: 'Found 0 errors' },
+      { id: 'tool-toolu_no_errors', type: 'tool', status: 'completed', resultSummary: 'No errors detected' },
+      { id: 'tool-toolu_structured_error', type: 'tool', status: 'failed', resultSummary: 'file missing' },
+      { id: 'tool-toolu_status_error', type: 'tool', status: 'failed', resultSummary: 'missing2' }
+    ]);
+  });
+
+  it('renders background Bash as a running task block with output path', () => {
+    const blocks = buildConversationBlocks([
+      event(1, 'tool', {
+        type: 'tool_use',
+        id: 'toolu_bg',
+        name: 'Bash',
+        input: { command: 'npm --prefix web test', run_in_background: true, description: 'Run frontend tests' }
+      }),
+      event(2, 'tool', {
+        type: 'tool_result',
+        tool_use_id: 'toolu_bg',
+        content: 'Task started in background with ID abc123. Output file: /tmp/test.log'
+      })
+    ]);
+
+    expect(blocks[0]).toMatchObject({
+      id: 'task-toolu_bg',
+      type: 'task',
+      title: 'Run frontend tests',
+      source: 'Bash',
+      status: 'running',
+      summary: 'Task started in background with ID abc123. Output file: /tmp/test.log',
+      outputPath: '/tmp/test.log',
+      eventIds: [1, 2]
+    });
+  });
+
+  it('classifies background Bash from result text even without run_in_background input', () => {
+    const blocks = buildConversationBlocks([
+      event(1, 'tool', {
+        type: 'tool_use',
+        id: 'toolu_bg_text',
+        name: 'Bash',
+        input: { command: 'npm --prefix web run build', description: 'Run frontend build' }
+      }),
+      event(2, 'tool', {
+        type: 'tool_result',
+        tool_use_id: 'toolu_bg_text',
+        content: 'Task started in background with ID build123. Output file: /tmp/build.log'
+      })
+    ]);
+
+    expect(blocks[0]).toMatchObject({
+      id: 'task-toolu_bg_text',
+      type: 'task',
+      title: 'Run frontend build',
+      source: 'Bash',
+      status: 'running',
+      summary: 'Task started in background with ID build123. Output file: /tmp/build.log',
+      outputPath: '/tmp/build.log',
+      eventIds: [1, 2]
+    });
+  });
+
+  it('renders Agent subagent calls as task blocks', () => {
+    const blocks = buildConversationBlocks([
+      event(1, 'tool', {
+        type: 'tool_use',
+        id: 'toolu_agent',
+        name: 'Agent',
+        input: { description: 'Explore output rendering', subagent_type: 'Explore', prompt: 'Find rendering files' }
+      }),
+      event(2, 'tool', {
+        type: 'tool_result',
+        tool_use_id: 'toolu_agent',
+        content: 'Found ConversationBlockList.tsx and App.tsx'
+      })
+    ]);
+
+    expect(blocks[0]).toMatchObject({
+      id: 'task-toolu_agent',
+      type: 'task',
+      title: 'Explore output rendering',
+      source: 'Explore agent',
+      status: 'completed',
+      summary: 'Found ConversationBlockList.tsx and App.tsx',
+      eventIds: [1, 2]
+    });
+  });
+
+  it('renders TaskUpdate tools as task blocks', () => {
+    const blocks = buildConversationBlocks([
+      event(1, 'tool', {
+        type: 'tool_use',
+        id: 'toolu_task',
+        name: 'TaskUpdate',
+        input: { taskId: '3', status: 'completed' }
+      })
+    ]);
+
+    expect(blocks[0]).toMatchObject({
+      id: 'task-toolu_task',
+      type: 'task',
+      title: 'TaskUpdate #3',
+      source: 'TaskUpdate',
+      status: 'completed',
+      summary: 'status: completed',
+      eventIds: [1]
+    });
+  });
+
+  it('does not let TaskUpdate completed input status mask a failed result', () => {
+    const blocks = buildConversationBlocks([
+      event(1, 'tool', {
+        type: 'tool_use',
+        id: 'toolu_task_failed',
+        name: 'TaskUpdate',
+        input: { taskId: '3', status: 'completed' }
+      }),
+      event(2, 'tool', {
+        type: 'tool_result',
+        tool_use_id: 'toolu_task_failed',
+        is_error: true,
+        content: 'Task update failed'
+      })
+    ]);
+
+    expect(blocks[0]).toMatchObject({
+      id: 'task-toolu_task_failed',
+      type: 'task',
+      title: 'TaskUpdate #3',
+      source: 'TaskUpdate',
+      status: 'failed',
+      summary: 'Task update failed',
+      eventIds: [1, 2]
+    });
+  });
+
+  it('renders Workflow and task management tools as task blocks', () => {
+    const blocks = buildConversationBlocks([
+      event(1, 'tool', {
+        type: 'tool_use',
+        id: 'toolu_workflow',
+        name: 'Workflow',
+        input: { description: 'Coordinate implementation', prompt: 'Run the workflow' }
+      }),
+      event(2, 'tool', { type: 'tool_result', tool_use_id: 'toolu_workflow', content: 'Workflow complete' }),
+      event(3, 'tool', {
+        type: 'tool_use',
+        id: 'toolu_create',
+        name: 'TaskCreate',
+        input: { subject: 'Add tests', description: 'Add missing coverage' }
+      }),
+      event(4, 'tool', { type: 'tool_result', tool_use_id: 'toolu_create', content: 'Task #7 created successfully' }),
+      event(5, 'tool', { type: 'tool_use', id: 'toolu_list', name: 'TaskList', input: {} }),
+      event(6, 'tool', { type: 'tool_result', tool_use_id: 'toolu_list', content: '1 pending task' }),
+      event(7, 'tool', { type: 'tool_use', id: 'toolu_get', name: 'TaskGet', input: { taskId: '7' } }),
+      event(8, 'tool', { type: 'tool_result', tool_use_id: 'toolu_get', content: 'Task #7: Add tests' }),
+      event(9, 'tool', { type: 'tool_use', id: 'toolu_output', name: 'TaskOutput', input: { task_id: 'bg123' } }),
+      event(10, 'tool', { type: 'tool_result', tool_use_id: 'toolu_output', content: 'Build output ready' }),
+      event(11, 'tool', { type: 'tool_use', id: 'toolu_stop', name: 'TaskStop', input: { task_id: 'bg123' } }),
+      event(12, 'tool', { type: 'tool_result', tool_use_id: 'toolu_stop', content: 'Stopped task bg123' })
+    ]);
+
+    expect(blocks).toMatchObject([
+      {
+        id: 'task-toolu_workflow',
+        type: 'task',
+        title: 'Coordinate implementation',
+        source: 'Workflow',
+        status: 'completed',
+        summary: 'Workflow complete',
+        eventIds: [1, 2]
+      },
+      {
+        id: 'task-toolu_create',
+        type: 'task',
+        title: 'Add missing coverage',
+        source: 'TaskCreate',
+        status: 'pending',
+        summary: 'Task #7 created successfully',
+        eventIds: [3, 4]
+      },
+      {
+        id: 'task-toolu_list',
+        type: 'task',
+        title: 'TaskList',
+        source: 'TaskList',
+        status: 'completed',
+        summary: '1 pending task',
+        eventIds: [5, 6]
+      },
+      {
+        id: 'task-toolu_get',
+        type: 'task',
+        title: 'TaskGet #7',
+        source: 'TaskGet',
+        status: 'completed',
+        summary: 'Task #7: Add tests',
+        eventIds: [7, 8]
+      },
+      {
+        id: 'task-toolu_output',
+        type: 'task',
+        title: 'TaskOutput',
+        source: 'TaskOutput',
+        status: 'completed',
+        summary: 'Build output ready',
+        eventIds: [9, 10]
+      },
+      {
+        id: 'task-toolu_stop',
+        type: 'task',
+        title: 'TaskStop',
+        source: 'TaskStop',
+        status: 'completed',
+        summary: 'Stopped task bg123',
+        eventIds: [11, 12]
+      }
+    ]);
+  });
+
+  it('renders error events as error blocks with useful messages', () => {
+    const blocks = buildConversationBlocks([event(1, 'error', { error: 'failed to start' })]);
+
+    expect(blocks).toEqual([
+      {
+        id: 'error-1',
+        type: 'error',
+        message: 'failed to start',
+        eventIds: [1],
+        rawEvents: [{ id: 1, kind: 'error', payload: { error: 'failed to start' } }]
+      }
+    ]);
+  });
+
+  it('preserves unknown events as raw blocks', () => {
+    const blocks = buildConversationBlocks([event(1, 'raw', { unexpected: { nested: true } })]);
+
+    expect(blocks).toEqual([
+      {
+        id: 'raw-1',
+        type: 'raw',
+        label: 'raw',
+        eventIds: [1],
+        rawEvents: [{ id: 1, kind: 'raw', payload: { unexpected: { nested: true } } }]
+      }
+    ]);
+  });
+});

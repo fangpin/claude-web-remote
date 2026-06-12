@@ -233,7 +233,44 @@ describe('App', () => {
       payload: { message: 'hello from claude' }
     });
 
-    expect(await screen.findByText('hello from claude', { selector: '.event-text' })).toBeInTheDocument();
+    expect(await screen.findByText('hello from claude')).toBeInTheDocument();
+  });
+
+  it('renders background Bash tool use as a running task block', async () => {
+    render(<App />);
+
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBe(1));
+    FakeWebSocket.instances[0].emit({
+      id: 2,
+      sessionId: 's1',
+      time: '2026-06-11T00:00:00Z',
+      kind: 'assistant',
+      payload: {
+        type: 'tool_use',
+        id: 'toolu_1',
+        name: 'Bash',
+        input: {
+          command: 'npm --prefix web test',
+          description: 'Run frontend tests',
+          run_in_background: true
+        }
+      }
+    });
+    FakeWebSocket.instances[0].emit({
+      id: 3,
+      sessionId: 's1',
+      time: '2026-06-11T00:00:01Z',
+      kind: 'user',
+      payload: {
+        type: 'tool_result',
+        tool_use_id: 'toolu_1',
+        content: 'Task started in background\nOutput file: /tmp/test.log'
+      }
+    });
+
+    expect(await screen.findByText('Run frontend tests')).toBeInTheDocument();
+    expect(screen.getAllByText('running').length).toBeGreaterThan(1);
+    expect(screen.getByText('/tmp/test.log')).toBeInTheDocument();
   });
 
   it('creates a session from the form', async () => {
