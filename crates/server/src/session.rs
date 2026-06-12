@@ -241,7 +241,7 @@ impl SessionManager {
 
     async fn start_process(
         &self,
-        mut meta: SessionMeta,
+        meta: SessionMeta,
         resume_session_id: Option<String>,
     ) -> AppResult<SessionInfo> {
         let (process, mut rx) = ClaudeProcess::spawn(
@@ -255,16 +255,25 @@ impl SessionManager {
         )
         .await?;
 
-        meta.status = SessionStatus::Running;
-        meta.updated_at = Utc::now();
-        if let Err(err) = self.store.save_meta(&meta).await {
-            let _ = process.kill().await;
-            return Err(err);
-        }
+        let updated_meta = match self
+            .store
+            .update_meta(meta.id, |stored| {
+                stored.status = SessionStatus::Running;
+                stored.updated_at = Utc::now();
+            })
+            .await
+        {
+            Ok(meta) => meta,
+            Err(err) => {
+                let _ = process.kill().await;
+                return Err(err);
+            }
+        };
 
         let (tx, _) = broadcast::channel(256);
+        let session_id = updated_meta.id;
         self.running.lock().await.insert(
-            meta.id,
+            session_id,
             RunningSession {
                 process,
                 tx: tx.clone(),
@@ -273,7 +282,6 @@ impl SessionManager {
 
         let store = self.store.clone();
         let running = self.running.clone();
-        let session_id = meta.id;
         tokio::spawn(async move {
             while let Some(event) = rx.recv().await {
                 match event {
@@ -330,7 +338,7 @@ impl SessionManager {
             }
         });
 
-        Ok(SessionInfo::from(meta))
+        Ok(SessionInfo::from(updated_meta))
     }
 
     async fn update_claude_session_id(
@@ -694,6 +702,70 @@ done
         let loaded = store.load_meta(session.id).await.unwrap();
         assert_eq!(loaded.status, SessionStatus::Stopped);
         assert_eq!(loaded.cwd, repo.canonicalize().unwrap());
+        assert_eq!(loaded.worktree, None);
+    }
+
+    #[tokio::test]
+    async fn start_process_marks_running_without_overwriting_latest_metadata() {
+        let temp = tempfile::tempdir().unwrap();
+        let source_cwd = temp.path().join("repo");
+        let worktree_cwd = temp.path().join("repo/.claude/worktrees/abc123");
+        fs::create_dir_all(&source_cwd).unwrap();
+        fs::create_dir_all(&worktree_cwd).unwrap();
+        let pid_file = temp.path().join("fake-claude.pid");
+        let bin = fake_claude_pid_loop(temp.path(), &pid_file);
+        let store = EventStore::new(temp.path().join("data")).await.unwrap();
+        let manager = SessionManager::new(
+            store.clone(),
+            vec![bin.to_string_lossy().to_string()],
+            "acceptEdits".to_string(),
+            crate::WorktreeConfig {
+                worktrees_dir: None,
+                branch_prefix: "pin".to_string(),
+                base_ref: crate::WorktreeBaseRef::Head,
+            },
+        );
+        let now = Utc::now();
+        let worktree = WorktreeMeta {
+            source_cwd: source_cwd.clone(),
+            worktree_cwd: worktree_cwd.clone(),
+            branch: "pin/abc123".to_string(),
+            created_by_claude_remote_web: true,
+        };
+        let stale_meta = SessionMeta {
+            id: Uuid::new_v4(),
+            name: None,
+            cwd: worktree_cwd,
+            permission_mode: "acceptEdits".to_string(),
+            status: SessionStatus::Starting,
+            claude_session_id: None,
+            worktree: Some(worktree),
+            created_at: now,
+            updated_at: now,
+        };
+        store.save_meta(&stale_meta).await.unwrap();
+        store
+            .update_meta(stale_meta.id, |meta| {
+                meta.status = SessionStatus::Stopped;
+                meta.cwd = source_cwd.clone();
+                meta.worktree = None;
+                meta.updated_at = Utc::now();
+            })
+            .await
+            .unwrap();
+
+        let info = manager
+            .start_process(stale_meta.clone(), None)
+            .await
+            .unwrap();
+        let loaded = store.load_meta(stale_meta.id).await.unwrap();
+        manager.stop_session(stale_meta.id).await.unwrap();
+
+        assert_eq!(info.status, SessionStatus::Running);
+        assert_eq!(info.cwd, source_cwd);
+        assert_eq!(info.worktree, None);
+        assert_eq!(loaded.status, SessionStatus::Running);
+        assert_eq!(loaded.cwd, source_cwd);
         assert_eq!(loaded.worktree, None);
     }
 
