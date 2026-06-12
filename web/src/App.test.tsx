@@ -74,7 +74,7 @@ describe('App', () => {
       payload: { message: 'hello from claude' }
     });
 
-    expect(await screen.findByText(/hello from claude/)).toBeInTheDocument();
+    expect(await screen.findByText('hello from claude', { selector: '.event-text' })).toBeInTheDocument();
   });
 
   it('creates a session from the form', async () => {
