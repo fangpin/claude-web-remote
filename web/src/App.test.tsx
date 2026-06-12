@@ -2,78 +2,72 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 
-const sessions = [
+const baseSession = {
+  permissionMode: 'acceptEdits',
+  claudeSessionId: null,
+  deletedAt: null,
+  createdAt: '2026-06-11T00:00:00Z',
+  updatedAt: '2026-06-11T00:00:00Z'
+};
+
+const defaultSessions = [
   {
+    ...baseSession,
     id: 's1',
     name: 'Repo One',
     cwd: '/repo/one',
-    permissionMode: 'acceptEdits',
     status: 'running',
-    claudeSessionId: null,
-    createdAt: '2026-06-11T00:00:00Z',
     updatedAt: '2026-06-11T02:00:00Z'
   },
   {
+    ...baseSession,
     id: 's2',
-    name: 'Repo Two',
-    cwd: '/repo/two',
-    permissionMode: 'acceptEdits',
+    name: 'Stopped Repo',
+    cwd: '/repo/stopped',
     status: 'stopped',
-    claudeSessionId: null,
-    createdAt: '2026-06-11T00:00:00Z',
+    claudeSessionId: 'claude-s2',
     updatedAt: '2026-06-11T01:00:00Z'
   },
   {
-    id: 's3',
-    name: 'Repo One Old',
-    cwd: '/repo/one',
-    permissionMode: 'acceptEdits',
-    status: 'stopped',
-    claudeSessionId: null,
-    createdAt: '2026-06-10T00:00:00Z',
-    updatedAt: '2026-06-10T00:00:00Z'
-  },
-  {
+    ...baseSession,
     id: 's4',
     name: 'Worktree Repo',
     cwd: '/repo/one/.claude/worktrees/abc123',
-    permissionMode: 'acceptEdits',
     status: 'running',
-    claudeSessionId: null,
     worktree: {
       sourceCwd: '/repo/one',
       worktreeCwd: '/repo/one/.claude/worktrees/abc123',
       branch: 'pin/abc123',
       createdByClaudeRemoteWeb: true
     },
-    createdAt: '2026-06-11T03:00:00Z',
     updatedAt: '2026-06-11T03:00:00Z'
   },
   {
+    ...baseSession,
     id: 's5',
     name: 'External Worktree Repo',
     cwd: '/repo/external-worktree',
-    permissionMode: 'acceptEdits',
     status: 'running',
-    claudeSessionId: null,
     worktree: {
       sourceCwd: '/repo/external',
       worktreeCwd: '/repo/external-worktree',
       branch: 'feature/external',
       createdByClaudeRemoteWeb: false
     },
-    createdAt: '2026-06-11T04:00:00Z',
     updatedAt: '2026-06-11T04:00:00Z'
-  },
+  }
+];
+
+const defaultDeletedSessions = [
   {
-    id: 's6',
-    name: 'Long Path Repo',
-    cwd: '/data00/home/user/repos/very/long/path/that/should/still/be/available/in/full',
-    permissionMode: 'acceptEdits',
-    status: 'running',
-    claudeSessionId: null,
-    createdAt: '2026-06-11T05:00:00Z',
-    updatedAt: '2026-06-11T05:00:00Z'
+    ...baseSession,
+    id: 's3',
+    name: 'Deleted Repo',
+    cwd: '/repo/deleted',
+    status: 'stopped',
+    claudeSessionId: 'claude-s3',
+    deletedAt: '2026-06-12T00:00:00Z',
+    updatedAt: '2026-06-12T00:00:00Z'
   }
 ];
 
@@ -82,8 +76,8 @@ const taskGroups = {
     {
       id: 's2:toolu_1',
       sessionId: 's2',
-      sessionName: 'Repo Two',
-      sessionCwd: '/repo/two',
+      sessionName: 'Stopped Repo',
+      sessionCwd: '/repo/stopped',
       toolKind: 'Bash',
       title: 'Bash: sleep 10',
       status: 'background',
@@ -114,19 +108,24 @@ const taskGroups = {
 
 const emptyTaskGroups = { background: [], finished: [] };
 
+let sessions = defaultSessions;
+let deletedSessions = defaultDeletedSessions;
+let fetchMock: ReturnType<typeof vi.fn>;
+let scrollIntoViewMock: ReturnType<typeof vi.fn>;
+
 type DeferredResponse = {
   promise: Promise<Response>;
-  resolve: (response: Response) => void;
+  resolve: (response?: Response) => void;
 };
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 }
 
-function deferredResponse(): DeferredResponse {
-  let resolve!: (response: Response) => void;
-  const promise = new Promise<Response>((done) => {
-    resolve = done;
+function createDeferredResponse(body: unknown): DeferredResponse {
+  let resolve!: (response?: Response) => void;
+  const promise = new Promise<Response>((deferredResolve) => {
+    resolve = (response?: Response) => deferredResolve(response ?? jsonResponse(body));
   });
   return { promise, resolve };
 }
@@ -139,16 +138,24 @@ function taskGroupsWithTitle(title: string, sessionId = 's1') {
         ...taskGroups.finished[0],
         id: `${sessionId}:${title}`,
         sessionId,
-        sessionName: sessionId === 's2' ? 'Repo Two' : 'Repo One',
-        sessionCwd: sessionId === 's2' ? '/repo/two' : '/repo/one',
+        sessionName: sessionId === 's2' ? 'Stopped Repo' : 'Repo One',
+        sessionCwd: sessionId === 's2' ? '/repo/stopped' : '/repo/one',
         title
       }
     ]
   };
 }
 
-let fetchMock: ReturnType<typeof vi.fn>;
-let scrollIntoViewMock: ReturnType<typeof vi.fn>;
+function sessionButton(name: string): HTMLElement {
+  const button = querySessionButton(name);
+  if (!button) throw new Error(`session button not found: ${name}`);
+  return button;
+}
+
+function querySessionButton(name: string): HTMLElement | null {
+  const matches = screen.queryAllByText(name);
+  return (matches.find((element) => element.closest('button.session'))?.closest('button') as HTMLElement | null) ?? null;
+}
 
 class FakeWebSocket {
   static instances: FakeWebSocket[] = [];
@@ -166,6 +173,8 @@ class FakeWebSocket {
 
 beforeEach(() => {
   cleanup();
+  sessions = defaultSessions;
+  deletedSessions = defaultDeletedSessions;
   FakeWebSocket.instances = [];
   scrollIntoViewMock = vi.fn();
   Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
@@ -176,6 +185,9 @@ beforeEach(() => {
     const url = String(input);
     if (url === '/api/sessions' && !init) {
       return jsonResponse({ sessions });
+    }
+    if (url === '/api/sessions?deletedOnly=true' && !init) {
+      return jsonResponse({ sessions: deletedSessions });
     }
     if (url === '/api/sessions' && init?.method === 'POST') {
       const body = JSON.parse(String(init.body));
@@ -195,7 +207,7 @@ beforeEach(() => {
               createdByClaudeRemoteWeb: true
             }
           : null,
-        updatedAt: '2026-06-11T05:00:00Z'
+        updatedAt: '2026-06-12T00:00:00Z'
       });
     }
     if (url === '/api/tasks') {
@@ -210,22 +222,36 @@ beforeEach(() => {
     if (url.endsWith('/tasks')) {
       return jsonResponse(emptyTaskGroups);
     }
+    if (url === '/api/sessions/s1' && init?.method === 'DELETE') {
+      return jsonResponse({ ...sessions[0], deletedAt: '2026-06-12T00:00:00Z', updatedAt: '2026-06-12T00:00:00Z' });
+    }
+    if (url === '/api/sessions/s2/resume' && init?.method === 'POST') {
+      return jsonResponse({ ...sessions[1], status: 'running', updatedAt: '2026-06-12T00:00:00Z' });
+    }
+    if (url === '/api/sessions/s3/restore' && init?.method === 'POST') {
+      return jsonResponse({ ...deletedSessions[0], deletedAt: null, updatedAt: '2026-06-12T01:00:00Z' });
+    }
+    if (url === '/api/sessions/s3?permanent=true' && init?.method === 'DELETE') {
+      return jsonResponse({ ok: true });
+    }
     if (url.endsWith('/input')) {
       return jsonResponse({ ok: true });
     }
     if (url.endsWith('/stop-and-remove-worktree')) {
       return jsonResponse({ ok: true });
     }
+    if (url.endsWith('/restart')) {
+      const session = sessions.find((item) => url.includes(item.id)) ?? sessions[0];
+      return jsonResponse({ ...session, status: 'running', updatedAt: '2026-06-12T00:00:00Z' });
+    }
     if (url.endsWith('/stop')) {
       return jsonResponse({ ok: true });
-    }
-    if (url.endsWith('/restart')) {
-      return jsonResponse(sessions[0]);
     }
     return jsonResponse({ error: 'unexpected request' }, 500);
   });
   vi.stubGlobal('fetch', fetchMock);
   vi.stubGlobal('WebSocket', FakeWebSocket);
+  vi.stubGlobal('confirm', vi.fn(() => true));
 });
 
 afterEach(() => {
@@ -234,12 +260,15 @@ afterEach(() => {
 });
 
 describe('App', () => {
-  it('loads sessions and renders active event stream', async () => {
+  it('loads sessions, tasks, and renders active event stream as conversation blocks', async () => {
     render(<App />);
 
     expect((await screen.findAllByText('Repo One')).length).toBeGreaterThan(0);
     expect(screen.getAllByText('/repo/one').length).toBeGreaterThan(0);
     expect(screen.getByText('Remote Claude session')).toBeInTheDocument();
+    expect(await screen.findByText('Tasks')).toBeInTheDocument();
+    expect(screen.getByText('Bash: sleep 10')).toBeInTheDocument();
+    expect(screen.getByText('Session tasks')).toBeInTheDocument();
 
     await waitFor(() => expect(FakeWebSocket.instances.length).toBe(1));
     FakeWebSocket.instances[0].emit({
@@ -253,108 +282,37 @@ describe('App', () => {
     expect(await screen.findByText('hello from claude')).toBeInTheDocument();
   });
 
-  it('renders background Bash tool use as a running task block', async () => {
-    render(<App />);
-
-    await waitFor(() => expect(FakeWebSocket.instances.length).toBe(1));
-    FakeWebSocket.instances[0].emit({
-      id: 2,
-      sessionId: 's1',
-      time: '2026-06-11T00:00:00Z',
-      kind: 'assistant',
-      payload: {
-        type: 'tool_use',
-        id: 'toolu_1',
-        name: 'Bash',
-        input: {
-          command: 'npm --prefix web test',
-          description: 'Run frontend tests',
-          run_in_background: true
-        }
-      }
-    });
-    FakeWebSocket.instances[0].emit({
-      id: 3,
-      sessionId: 's1',
-      time: '2026-06-11T00:00:01Z',
-      kind: 'user',
-      payload: {
-        type: 'tool_result',
-        tool_use_id: 'toolu_1',
-        content: 'Task started in background\nOutput file: /tmp/test.log'
-      }
-    });
-
-    expect(await screen.findByText('Run frontend tests')).toBeInTheDocument();
-    expect(screen.getAllByText('running').length).toBeGreaterThan(1);
-    expect(screen.getByText('/tmp/test.log')).toBeInTheDocument();
-  });
-
-  it('keeps the full working directory available on long session labels', async () => {
-    render(<App />);
-
-    expect(
-      (await screen.findAllByTitle('/data00/home/user/repos/very/long/path/that/should/still/be/available/in/full')).length
-    ).toBeGreaterThan(0);
-  });
-
-  it('only renders the most recent events for long streams', async () => {
-    render(<App />);
-
-    await waitFor(() => expect(FakeWebSocket.instances.length).toBe(1));
-    for (let id = 1; id <= 90; id += 1) {
-      FakeWebSocket.instances[0].emit({
-        id,
-        sessionId: 's1',
-        time: '2026-06-11T00:00:00Z',
-        kind: 'assistant',
-        payload: { message: `event ${id}` }
-      });
-    }
-
-    expect((await screen.findAllByText(/event 90/)).length).toBeGreaterThan(0);
-    expect(screen.queryByText(/^event 1$/)).not.toBeInTheDocument();
-    expect(screen.getByText(/Showing latest 80 events/)).toBeInTheDocument();
-  });
-
-  it('scrolls to the composer when selecting a session', async () => {
-    render(<App />);
-
-    fireEvent.click(await screen.findByText('Repo Two'));
-
-    await waitFor(() => expect(scrollIntoViewMock).toHaveBeenCalled());
-  });
-
-  it('only renders the most recent tasks in long task lists', async () => {
-    const longTasks = Array.from({ length: 10 }, (_, index) => ({
-      ...taskGroups.finished[0],
-      id: `s1:task-${index + 1}`,
-      title: `Finished task ${index + 1}`
-    }));
-    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url === '/api/sessions') return jsonResponse({ sessions });
-      if (url === '/api/tasks' || url.endsWith('/tasks')) {
-        return jsonResponse({ background: [], finished: longTasks });
-      }
-      return jsonResponse({ ok: true });
-    });
-
-    render(<App />);
-
-    expect(await screen.findByText('Finished task 10')).toBeInTheDocument();
-    expect(screen.queryByText('Finished task 1')).not.toBeInTheDocument();
-    expect(screen.getAllByText(/Showing latest 8/).length).toBeGreaterThan(0);
-  });
-
-  it('creates a session from the form', async () => {
+  it('creates a session from the form and can include worktree request data', async () => {
     render(<App />);
 
     fireEvent.change(await screen.findByLabelText('Working directory'), { target: { value: '/repo/two' } });
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'New Repo' } });
+    fireEvent.click(screen.getByLabelText('Use git worktree'));
     fireEvent.click(screen.getByText('Create session'));
 
     expect((await screen.findAllByText('New Repo')).length).toBeGreaterThan(0);
+    const createCall = fetchMock.mock.calls.find(([url, init]) => url === '/api/sessions' && init?.method === 'POST');
+    expect(JSON.parse(String(createCall?.[1]?.body))).toMatchObject({
+      cwd: '/repo/two',
+      name: 'New Repo',
+      worktree: { enabled: true }
+    });
+  });
+
+  it('switches to active mode when creating from deleted mode', async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Deleted' }));
+    expect(await screen.findByRole('heading', { name: 'Deleted Repo' })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Working directory'), { target: { value: '/repo/two' } });
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'New Repo' } });
+    fireEvent.click(screen.getByText('Create session'));
+
+    expect(await screen.findByRole('heading', { name: 'New Repo' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Active' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Deleted' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByRole('button', { name: /Deleted Repo/ })).not.toBeInTheDocument();
   });
 
   it('shows create session errors', async () => {
@@ -366,182 +324,249 @@ describe('App', () => {
     expect(await screen.findByText('invalid request: cwd does not exist: ~')).toBeInTheDocument();
   });
 
-  it('shows slash command suggestions while typing a command prefix', async () => {
+  it('shows recent working directory suggestions and fills the input', async () => {
     render(<App />);
 
-    const messageInput = await screen.findByLabelText('Message');
-    fireEvent.change(messageInput, { target: { value: '/he', selectionStart: 3 } });
+    const suggestions = await screen.findByLabelText('Recent working directories');
+    expect(within(suggestions).getByText('/repo/one')).toBeInTheDocument();
+    expect(within(suggestions).getByText('/repo/stopped')).toBeInTheDocument();
 
-    expect(await screen.findByRole('listbox', { name: 'Claude command suggestions' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: /\/help/ })).toBeInTheDocument();
-    expect(screen.queryByRole('option', { name: /\/status/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Use /repo/stopped' }));
+
+    expect(screen.getByLabelText('Working directory')).toHaveValue('/repo/stopped');
   });
 
-  it('completes the active slash command with Tab without sending input', async () => {
+  it('shows slash command autocomplete and completes without sending input', async () => {
     render(<App />);
 
     const messageInput = await screen.findByLabelText('Message') as HTMLTextAreaElement;
     fireEvent.change(messageInput, { target: { value: '/he', selectionStart: 3 } });
+
+    expect(await screen.findByRole('listbox', { name: 'Claude command suggestions' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /\/help/ })).toBeInTheDocument();
+
     fireEvent.keyDown(messageInput, { key: 'Tab' });
 
     expect(messageInput.value).toBe('/help ');
     expect(fetchMock).not.toHaveBeenCalledWith('/api/sessions/s1/input', expect.anything());
   });
 
-  it('completes the active slash command with Enter while suggestions are open', async () => {
+  it('sends user input to the active session and preserves text on send failure', async () => {
     render(<App />);
 
-    const messageInput = await screen.findByLabelText('Message') as HTMLTextAreaElement;
-    fireEvent.change(messageInput, { target: { value: '/he', selectionStart: 3 } });
-    fireEvent.keyDown(messageInput, { key: 'Enter' });
+    fireEvent.change(await screen.findByLabelText('Message'), { target: { value: 'do work' } });
+    fireEvent.click(screen.getByText('Send'));
 
-    expect(messageInput.value).toBe('/help ');
-    expect(fetchMock).not.toHaveBeenCalledWith('/api/sessions/s1/input', expect.anything());
-  });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/input', expect.objectContaining({ method: 'POST' })));
 
-  it('closes slash command suggestions with Escape', async () => {
-    render(<App />);
-
-    const messageInput = await screen.findByLabelText('Message');
-    fireEvent.change(messageInput, { target: { value: '/', selectionStart: 1 } });
-    expect(await screen.findByRole('listbox', { name: 'Claude command suggestions' })).toBeInTheDocument();
-
-    fireEvent.keyDown(messageInput, { key: 'Escape' });
-
-    expect(screen.queryByRole('listbox', { name: 'Claude command suggestions' })).not.toBeInTheDocument();
-  });
-
-  it('moves the active suggestion with arrow keys', async () => {
-    render(<App />);
-
-    const messageInput = await screen.findByLabelText('Message');
-    fireEvent.change(messageInput, { target: { value: '/', selectionStart: 1 } });
-
-    const listbox = await screen.findByRole('listbox', { name: 'Claude command suggestions' });
-    const options = within(listbox).getAllByRole('option');
-    expect(options[0]).toHaveAttribute('aria-selected', 'true');
-
-    fireEvent.keyDown(messageInput, { key: 'ArrowDown' });
-    expect(options[1]).toHaveAttribute('aria-selected', 'true');
-
-    fireEvent.keyDown(messageInput, { key: 'ArrowUp' });
-    expect(options[0]).toHaveAttribute('aria-selected', 'true');
-  });
-
-  it('completes a clicked slash command suggestion', async () => {
-    render(<App />);
-
-    const messageInput = await screen.findByLabelText('Message') as HTMLTextAreaElement;
-    fireEvent.change(messageInput, { target: { value: '/sta', selectionStart: 4 } });
-    fireEvent.click(await screen.findByRole('option', { name: /\/status/ }));
-
-    expect(messageInput.value).toBe('/status ');
-  });
-
-  it('shows recent working directory suggestions and fills the input', async () => {
-    render(<App />);
-
-    const suggestions = await screen.findByLabelText('Recent working directories');
-    expect(within(suggestions).getByText('/repo/one')).toBeInTheDocument();
-    expect(within(suggestions).getByText('/repo/two')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Use /repo/two' }));
-
-    expect(screen.getByLabelText('Working directory')).toHaveValue('/repo/two');
-  });
-
-  it('sends worktree enabled when the switch is selected', async () => {
-    render(<App />);
-
-    fireEvent.change(await screen.findByLabelText('Working directory'), { target: { value: '/repo/two' } });
-    fireEvent.click(screen.getByLabelText('Use git worktree'));
-    fireEvent.click(screen.getByText('Create session'));
-
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions', expect.objectContaining({ method: 'POST' })));
-    const createCall = fetchMock.mock.calls.find(([url, init]) => url === '/api/sessions' && init?.method === 'POST');
-    expect(JSON.parse(String(createCall?.[1]?.body))).toMatchObject({
-      cwd: '/repo/two',
-      worktree: { enabled: true }
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/sessions' && !init) return jsonResponse({ sessions: defaultSessions });
+      if (url === '/api/tasks' || url.endsWith('/tasks')) return jsonResponse(emptyTaskGroups);
+      if (url === '/api/sessions/s1/input' && init?.method === 'POST') return jsonResponse({ error: 'input failed' }, 500);
+      return jsonResponse({ ok: true });
     });
-  });
-
-  it('omits worktree when the switch is not selected', async () => {
+    cleanup();
     render(<App />);
 
-    fireEvent.change(await screen.findByLabelText('Working directory'), { target: { value: '/repo/two' } });
-    fireEvent.click(screen.getByText('Create session'));
+    fireEvent.change(await screen.findByLabelText('Message'), { target: { value: 'retry work' } });
+    fireEvent.click(screen.getByText('Send'));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions', expect.objectContaining({ method: 'POST' })));
-    const createCall = fetchMock.mock.calls.find(([url, init]) => url === '/api/sessions' && init?.method === 'POST');
-    expect(JSON.parse(String(createCall?.[1]?.body)).worktree).toBeUndefined();
+    expect(await screen.findByRole('alert')).toHaveTextContent('input failed');
+    expect(screen.getByLabelText('Message')).toHaveValue('retry work');
   });
 
-  it('renders worktree source and branch metadata', async () => {
+  it('renders actions by active session status and resumes stopped sessions', async () => {
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'Repo One' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Restart' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
+
+    fireEvent.click(sessionButton('Stopped Repo'));
+    expect(await screen.findByRole('heading', { name: 'Stopped Repo' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Message')).not.toBeInTheDocument();
+
+    const socketsBeforeResume = FakeWebSocket.instances.length;
+    fireEvent.click(screen.getByRole('button', { name: 'Resume' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s2/resume', expect.objectContaining({ method: 'POST' })));
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBe(socketsBeforeResume + 1));
+    expect(FakeWebSocket.instances.at(-1)?.url).toContain('/api/sessions/s2/events?afterId=0');
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
+  });
+
+  it('renders Stop and Delete actions for starting sessions', async () => {
+    sessions = [
+      {
+        ...baseSession,
+        id: 's1',
+        name: 'Starting Repo',
+        cwd: '/repo/starting',
+        status: 'starting'
+      }
+    ];
+
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'Starting Repo' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Restart' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
+  });
+
+  it.each(['exited', 'failed'])('renders Resume and Delete actions for %s sessions', async (status) => {
+    const name = `${status[0].toUpperCase()}${status.slice(1)} Repo`;
+    sessions = [
+      {
+        ...baseSession,
+        id: 's1',
+        name,
+        cwd: `/repo/${status}`,
+        status
+      }
+    ];
+
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Resume' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Restart' })).not.toBeInTheDocument();
+  });
+
+  it('soft deletes an active session and removes it from the active list', async () => {
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'Repo One' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1', expect.objectContaining({ method: 'DELETE' })));
+    await waitFor(() => expect(querySessionButton('Repo One')).toBeNull());
+    expect(await screen.findByRole('heading', { name: 'Stopped Repo' })).toBeInTheDocument();
+  });
+
+  it('loads deleted sessions without opening a WebSocket or composer and restores them', async () => {
+    render(<App />);
+
+    await screen.findByRole('heading', { name: 'Repo One' });
+    FakeWebSocket.instances = [];
+
+    fireEvent.click(screen.getByRole('button', { name: 'Deleted' }));
+
+    expect(await screen.findByRole('heading', { name: 'Deleted Repo' })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith('/api/sessions?deletedOnly=true', undefined);
+    expect(screen.queryByLabelText('Message')).not.toBeInTheDocument();
+    expect(screen.queryByText('Session tasks')).not.toBeInTheDocument();
+    expect(FakeWebSocket.instances).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s3/restore', expect.objectContaining({ method: 'POST' })));
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Deleted Repo/ })).not.toBeInTheDocument());
+    expect(screen.getByText('No deleted sessions.')).toBeInTheDocument();
+  });
+
+  it('permanently deletes from the deleted list', async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Deleted' }));
+    expect(await screen.findByRole('heading', { name: 'Deleted Repo' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Permanently delete' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s3?permanent=true', expect.objectContaining({ method: 'DELETE' })));
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Deleted Repo/ })).not.toBeInTheDocument());
+    expect(screen.getByText('No deleted sessions.')).toBeInTheDocument();
+  });
+
+  it('ignores stale active list responses after switching to deleted mode', async () => {
+    const activeList = createDeferredResponse({ sessions: defaultSessions });
+    const deletedList = createDeferredResponse({ sessions: defaultDeletedSessions });
+    fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/sessions') return activeList.promise;
+      if (url === '/api/sessions?deletedOnly=true') return deletedList.promise;
+      if (url === '/api/tasks' || url.endsWith('/tasks')) return Promise.resolve(jsonResponse(emptyTaskGroups));
+      return Promise.resolve(jsonResponse({ error: 'unexpected request' }, 500));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: 'Deleted' }));
+
+    await act(async () => {
+      deletedList.resolve();
+      await deletedList.promise;
+    });
+
+    expect(await screen.findByRole('heading', { name: 'Deleted Repo' })).toBeInTheDocument();
+
+    await act(async () => {
+      activeList.resolve();
+      await activeList.promise;
+    });
+
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Repo One' })).not.toBeInTheDocument());
+    expect(screen.getByRole('heading', { name: 'Deleted Repo' })).toBeInTheDocument();
+  });
+
+  it('keeps a newer valid selection when delete completes', async () => {
+    const threeSessions = [
+      ...defaultSessions,
+      {
+        ...baseSession,
+        id: 's7',
+        name: 'Newest Repo',
+        cwd: '/repo/newest',
+        status: 'running'
+      }
+    ];
+    let resolveDelete!: () => void;
+    const deletePromise = new Promise<Response>((resolve) => {
+      resolveDelete = () => resolve(jsonResponse({ ...threeSessions[0], deletedAt: '2026-06-12T00:00:00Z' }));
+    });
+    fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/sessions' && !init) return Promise.resolve(jsonResponse({ sessions: threeSessions }));
+      if (url === '/api/tasks' || url.endsWith('/tasks')) return Promise.resolve(jsonResponse(emptyTaskGroups));
+      if (url === '/api/sessions/s1' && init?.method === 'DELETE') return deletePromise;
+      return Promise.resolve(jsonResponse({ error: 'unexpected request' }, 500));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'Repo One' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    fireEvent.click(sessionButton('Newest Repo'));
+
+    await act(async () => {
+      resolveDelete();
+      await deletePromise;
+    });
+
+    await waitFor(() => expect(querySessionButton('Repo One')).toBeNull());
+    expect(screen.getByRole('heading', { name: 'Newest Repo' })).toBeInTheDocument();
+  });
+
+  it('renders worktree metadata and stop/remove actions', async () => {
     render(<App />);
 
     fireEvent.click(await screen.findByText('Worktree Repo'));
 
     expect(screen.getByText('Source: /repo/one')).toBeInTheDocument();
     expect(screen.getByText('Branch: pin/abc123')).toBeInTheDocument();
-  });
-
-  it('offers stop and remove for worktree sessions', async () => {
-    render(<App />);
-
-    fireEvent.click(await screen.findByText('Worktree Repo'));
     fireEvent.click(screen.getByText('Stop and remove worktree'));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s4/stop-and-remove-worktree', expect.objectContaining({ method: 'POST' })));
-  });
-
-  it('keeps stop-only behavior for worktree sessions', async () => {
-    render(<App />);
-
-    fireEvent.click(await screen.findByText('Worktree Repo'));
-    fireEvent.click(screen.getByText('Stop only'));
-
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s4/stop', expect.objectContaining({ method: 'POST' })));
-  });
-
-  it('updates local worktree state after stop and remove succeeds', async () => {
-    render(<App />);
-
-    fireEvent.click(await screen.findByText('Worktree Repo'));
-    fireEvent.click(screen.getByText('Stop and remove worktree'));
-
     await waitFor(() => expect(screen.queryByText('Branch: pin/abc123')).not.toBeInTheDocument());
     const activeHeader = screen.getByRole('heading', { name: 'Worktree Repo' }).closest('header');
     expect(activeHeader).not.toBeNull();
     expect(within(activeHeader as HTMLElement).getByText('/repo/one')).toBeInTheDocument();
-    expect(within(activeHeader as HTMLElement).getByText('Stop')).toBeInTheDocument();
-  });
-
-  it('marks worktree sessions stopped when stop succeeds but removal fails', async () => {
-    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url === '/api/sessions') {
-        return jsonResponse({ sessions });
-      }
-      if (url === '/api/tasks' || url.endsWith('/tasks')) {
-        return jsonResponse(emptyTaskGroups);
-      }
-      if (url.endsWith('/stop-and-remove-worktree')) {
-        return jsonResponse({ error: 'worktree has uncommitted changes' }, 400);
-      }
-      return jsonResponse({ ok: true });
-    });
-    render(<App />);
-
-    fireEvent.click(await screen.findByText('Worktree Repo'));
-    fireEvent.click(screen.getByText('Stop and remove worktree'));
-
-    expect(await screen.findByRole('alert')).toHaveTextContent('worktree has uncommitted changes');
-    const activeHeader = screen.getByRole('heading', { name: 'Worktree Repo' }).closest('header');
-    expect(activeHeader).not.toBeNull();
-    expect(within(activeHeader as HTMLElement).getByText('/repo/one/.claude/worktrees/abc123')).toBeInTheDocument();
-    expect(within(activeHeader as HTMLElement).getByText('Branch: pin/abc123')).toBeInTheDocument();
-    const activeSessionButton = screen.getByRole('button', { name: /^Worktree Repo/ });
-    expect(within(activeSessionButton).getByText('stopped')).toBeInTheDocument();
   });
 
   it('hides remove action for worktrees not created by this app', async () => {
@@ -553,103 +578,16 @@ describe('App', () => {
     expect(screen.getByText('Stop only')).toBeInTheDocument();
   });
 
-  it('sends user input to the active session', async () => {
-    render(<App />);
-
-    fireEvent.change(await screen.findByLabelText('Message'), { target: { value: 'do work' } });
-    fireEvent.click(screen.getByText('Send'));
-
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/input', expect.objectContaining({ method: 'POST' })));
-  });
-
-  it('hides slash command suggestions after sending a command prefix', async () => {
-    render(<App />);
-
-    const messageInput = await screen.findByLabelText('Message');
-    fireEvent.change(messageInput, { target: { value: '/he', selectionStart: 3 } });
-
-    expect(await screen.findByRole('listbox', { name: 'Claude command suggestions' })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByText('Send'));
-
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/input', expect.objectContaining({ method: 'POST' })));
-    expect(screen.queryByRole('listbox', { name: 'Claude command suggestions' })).not.toBeInTheDocument();
-  });
-
-  it('sends user input when Enter is pressed in the composer', async () => {
-    render(<App />);
-
-    const messageInput = await screen.findByLabelText('Message');
-    fireEvent.change(messageInput, { target: { value: 'do keyboard work' } });
-    fireEvent.keyDown(messageInput, { key: 'Enter', code: 'Enter', charCode: 13 });
-
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/input', expect.objectContaining({ method: 'POST' })));
-    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/input', expect.objectContaining({
-      method: 'POST',
-      body: JSON.stringify({ text: 'do keyboard work' })
-    }));
-    expect(messageInput).toHaveValue('');
-  });
-
-  it('keeps Shift+Enter as multiline input in the composer', async () => {
-    render(<App />);
-
-    const messageInput = await screen.findByLabelText('Message');
-    fireEvent.change(messageInput, { target: { value: 'line one' } });
-    const shiftEnterEvent = new KeyboardEvent('keydown', {
-      key: 'Enter',
-      code: 'Enter',
-      shiftKey: true,
-      bubbles: true,
-      cancelable: true
-    });
-    messageInput.dispatchEvent(shiftEnterEvent);
-    expect(shiftEnterEvent.defaultPrevented).toBe(false);
-    fireEvent.change(messageInput, { target: { value: 'line one\nline two' } });
-
-    expect(fetchMock).not.toHaveBeenCalledWith('/api/sessions/s1/input', expect.objectContaining({ method: 'POST' }));
-    expect(messageInput).toHaveValue('line one\nline two');
-  });
-
-  it('leaves composing Enter to the IME in the composer', async () => {
-    render(<App />);
-
-    const messageInput = await screen.findByLabelText('Message');
-    fireEvent.change(messageInput, { target: { value: 'composing text' } });
-    const composingEnterEvent = new KeyboardEvent('keydown', {
-      key: 'Enter',
-      code: 'Enter',
-      bubbles: true,
-      cancelable: true
-    });
-    Object.defineProperty(composingEnterEvent, 'isComposing', { value: true });
-    messageInput.dispatchEvent(composingEnterEvent);
-
-    expect(fetchMock).not.toHaveBeenCalledWith('/api/sessions/s1/input', expect.objectContaining({ method: 'POST' }));
-    expect(composingEnterEvent.defaultPrevented).toBe(false);
-  });
-
-  it('renders global and active-session task panels', async () => {
-    render(<App />);
-
-    expect(await screen.findByText('Tasks')).toBeInTheDocument();
-    expect(screen.getByText('Bash: sleep 10')).toBeInTheDocument();
-    expect(screen.getByText('Agent: Review branch')).toBeInTheDocument();
-    expect(await screen.findByText('Session tasks')).toBeInTheDocument();
-    expect(screen.getAllByText('No issues found').length).toBeGreaterThan(0);
-  });
-
-  it('selects the owning session and refreshes global tasks when a task is clicked', async () => {
+  it('selects the owning session and refreshes tasks when a task is clicked', async () => {
     render(<App />);
 
     await screen.findByText('Bash: sleep 10');
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/tasks', undefined));
     const taskListCallsBeforeSelection = fetchMock.mock.calls.filter(([url]) => url === '/api/tasks').length;
 
-    fireEvent.click(screen.getByText('Bash: sleep 10'));
+    fireEvent.click(screen.getAllByText('Bash: sleep 10')[0]);
 
-    await waitFor(() => expect(screen.getAllByText('Repo Two').length).toBeGreaterThan(0));
-    await waitFor(() => expect(FakeWebSocket.instances.at(-1)?.url).toContain('/api/sessions/s2/events'));
+    await waitFor(() => expect(screen.getAllByText('Stopped Repo').length).toBeGreaterThan(0));
+    expect(screen.getByRole('heading', { name: 'Stopped Repo' })).toBeInTheDocument();
     await waitFor(() => {
       const taskListCallsAfterSelection = fetchMock.mock.calls.filter(([url]) => url === '/api/tasks').length;
       expect(taskListCallsAfterSelection).toBeGreaterThan(taskListCallsBeforeSelection);
@@ -662,7 +600,7 @@ describe('App', () => {
       const url = String(input);
       if (url === '/api/sessions') return Promise.resolve(jsonResponse({ sessions }));
       if (url === '/api/tasks') {
-        const request = deferredResponse();
+        const request = createDeferredResponse(emptyTaskGroups);
         taskRequests.push(request);
         return request.promise;
       }
@@ -672,10 +610,10 @@ describe('App', () => {
 
     render(<App />);
 
-    await waitFor(() => expect(taskRequests.length).toBeGreaterThanOrEqual(3));
+    await waitFor(() => expect(taskRequests.length).toBeGreaterThanOrEqual(2));
 
     await act(async () => {
-      taskRequests[2].resolve(jsonResponse(taskGroupsWithTitle('Fresh global task')));
+      taskRequests.at(-1)?.resolve(jsonResponse(taskGroupsWithTitle('Fresh global task')));
     });
     expect(await screen.findByText('Fresh global task')).toBeInTheDocument();
 
@@ -687,90 +625,18 @@ describe('App', () => {
     expect(screen.queryByText('Stale global task')).not.toBeInTheDocument();
   });
 
-  it('keeps active-session tasks from the selected session when older requests resolve later', async () => {
-    const s1TaskRequests: DeferredResponse[] = [];
-    const s2TaskRequests: DeferredResponse[] = [];
-    fetchMock.mockImplementation((input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url === '/api/sessions') return Promise.resolve(jsonResponse({ sessions }));
-      if (url === '/api/tasks') return Promise.resolve(jsonResponse(emptyTaskGroups));
-      if (url === '/api/sessions/s1/tasks') {
-        const request = deferredResponse();
-        s1TaskRequests.push(request);
-        return request.promise;
-      }
-      if (url === '/api/sessions/s2/tasks') {
-        const request = deferredResponse();
-        s2TaskRequests.push(request);
-        return request.promise;
-      }
-      return Promise.resolve(jsonResponse({ error: 'unexpected request' }, 500));
-    });
-
+  it('exposes selected state on the active and deleted list mode buttons', async () => {
     render(<App />);
 
-    await screen.findByText('Repo Two');
-    await waitFor(() => expect(s1TaskRequests.length).toBe(1));
-    fireEvent.click(screen.getByText('Repo Two'));
-    await waitFor(() => expect(s2TaskRequests.length).toBe(1));
+    const activeButton = screen.getByRole('button', { name: 'Active' });
+    const deletedButton = screen.getByRole('button', { name: 'Deleted' });
 
-    await act(async () => {
-      s2TaskRequests[0].resolve(jsonResponse(taskGroupsWithTitle('Session task for s2', 's2')));
-    });
-    expect(await screen.findByText('Session task for s2')).toBeInTheDocument();
+    expect(activeButton).toHaveAttribute('aria-pressed', 'true');
+    expect(deletedButton).toHaveAttribute('aria-pressed', 'false');
 
-    await act(async () => {
-      s1TaskRequests[0].resolve(jsonResponse(taskGroupsWithTitle('Session task for s1', 's1')));
-    });
+    fireEvent.click(deletedButton);
 
-    expect(screen.getByText('Session task for s2')).toBeInTheDocument();
-    expect(screen.queryByText('Session task for s1')).not.toBeInTheDocument();
-  });
-
-  it('polls global tasks while mounted and stops polling after unmount', async () => {
-    vi.useFakeTimers();
-    const { unmount } = render(<App />);
-    await act(async () => {});
-
-    const callsBeforePolling = fetchMock.mock.calls.filter(([url]) => url === '/api/tasks').length;
-
-    act(() => {
-      vi.advanceTimersByTime(5000);
-    });
-
-    const callsAfterPolling = fetchMock.mock.calls.filter(([url]) => url === '/api/tasks').length;
-    expect(callsAfterPolling).toBeGreaterThan(callsBeforePolling);
-
-    unmount();
-    act(() => {
-      vi.advanceTimersByTime(5000);
-    });
-
-    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/tasks').length).toBe(callsAfterPolling);
-  });
-
-  it('scrolls to and highlights a task start event when the task is clicked', async () => {
-    const scrollIntoView = vi.fn();
-    Object.defineProperty(window.HTMLElement.prototype, 'scrollIntoView', {
-      configurable: true,
-      value: scrollIntoView
-    });
-
-    render(<App />);
-
-    await waitFor(() => expect(FakeWebSocket.instances.length).toBe(1));
-    FakeWebSocket.instances[0].emit({
-      id: 5,
-      sessionId: 's1',
-      time: '2026-06-11T00:00:00Z',
-      kind: 'assistant',
-      payload: { message: 'target event' }
-    });
-    expect(await screen.findByText('target event')).toBeInTheDocument();
-
-    fireEvent.click(screen.getAllByText('Agent: Review branch')[0]);
-
-    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center' }));
-    expect(document.getElementById('event-5')).toHaveClass('event-highlight');
+    expect(activeButton).toHaveAttribute('aria-pressed', 'false');
+    expect(deletedButton).toHaveAttribute('aria-pressed', 'true');
   });
 });

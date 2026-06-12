@@ -21,6 +21,7 @@ pub struct ClaudeProcessConfig {
     pub cwd: PathBuf,
     pub permission_mode: String,
     pub resume_session_id: Option<String>,
+    pub starting_event_id: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -31,6 +32,7 @@ pub enum ProcessEvent {
     Exited(Option<i32>),
 }
 
+#[derive(Clone)]
 pub struct ClaudeProcess {
     child_id: Option<u32>,
     stdin: Arc<Mutex<tokio::process::ChildStdin>>,
@@ -81,7 +83,7 @@ impl ClaudeProcess {
             .ok_or_else(|| crate::AppError::Process("missing child stderr".to_string()))?;
 
         let (tx, rx) = mpsc::channel(256);
-        let event_id = Arc::new(AtomicU64::new(1));
+        let event_id = Arc::new(AtomicU64::new(config.starting_event_id));
 
         spawn_stdout_reader(session_id, stdout, tx.clone(), event_id.clone());
         spawn_stderr_reader(stderr, tx.clone());
@@ -218,6 +220,7 @@ done
                 cwd: temp.path().to_path_buf(),
                 permission_mode: "acceptEdits".to_string(),
                 resume_session_id: None,
+                starting_event_id: 1,
             },
         )
         .await
@@ -283,6 +286,7 @@ done
                 cwd: temp.path().to_path_buf(),
                 permission_mode: "acceptEdits".to_string(),
                 resume_session_id: Some("resume-id".to_string()),
+                starting_event_id: 1,
             },
         )
         .await
@@ -305,6 +309,7 @@ done
                 cwd: temp.path().to_path_buf(),
                 permission_mode: "acceptEdits".to_string(),
                 resume_session_id: None,
+                starting_event_id: 1,
             },
         )
         .await
@@ -321,5 +326,35 @@ done
         }
 
         assert!(saw_exit);
+    }
+
+    #[tokio::test]
+    async fn starts_stdout_event_ids_at_configured_id() {
+        let temp = tempfile::tempdir().unwrap();
+        let bin = fake_claude(temp.path());
+        let session_id = Uuid::new_v4();
+        let (process, mut rx) = ClaudeProcess::spawn(
+            session_id,
+            ClaudeProcessConfig {
+                launcher: vec![bin.to_string_lossy().to_string()],
+                cwd: temp.path().to_path_buf(),
+                permission_mode: "acceptEdits".to_string(),
+                resume_session_id: None,
+                starting_event_id: 42,
+            },
+        )
+        .await
+        .unwrap();
+
+        let mut first_ui_event_id = None;
+        for _ in 0..4 {
+            if let Some(ProcessEvent::UiEvent(event)) = rx.recv().await {
+                first_ui_event_id = Some(event.id);
+                break;
+            }
+        }
+
+        assert_eq!(first_ui_event_id, Some(42));
+        process.kill().await.unwrap();
     }
 }

@@ -363,6 +363,7 @@ mod tests {
             status,
             claude_session_id: Some("claude-session".to_string()),
             worktree: None,
+            deleted_at: None,
             created_at: now,
             updated_at: now,
         }

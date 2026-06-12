@@ -1,4 +1,4 @@
-use crate::{AppResult, UiEvent, WorktreeMeta};
+use crate::{AppError, AppResult, UiEvent, WorktreeMeta};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -27,9 +27,29 @@ pub struct SessionMeta {
     pub permission_mode: String,
     pub status: SessionStatus,
     pub claude_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree: Option<WorktreeMeta>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionListFilter {
+    Active,
+    Deleted,
+    All,
+}
+
+impl SessionListFilter {
+    fn includes(self, meta: &SessionMeta) -> bool {
+        match self {
+            SessionListFilter::Active => meta.deleted_at.is_none(),
+            SessionListFilter::Deleted => meta.deleted_at.is_some(),
+            SessionListFilter::All => true,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -67,25 +87,42 @@ impl EventStore {
     }
 
     pub async fn load_meta(&self, session_id: Uuid) -> AppResult<SessionMeta> {
-        let content = fs::read(self.session_dir(session_id).join("meta.json")).await?;
-        Ok(serde_json::from_slice(&content)?)
+        let _guard = self.write_lock.lock().await;
+        self.load_meta_unlocked(session_id).await
     }
 
     pub async fn update_meta<F>(&self, session_id: Uuid, update: F) -> AppResult<SessionMeta>
     where
-        F: FnOnce(&mut SessionMeta),
+        F: FnOnce(&mut SessionMeta) -> AppResult<()>,
     {
         let _guard = self.write_lock.lock().await;
-        let path = self.session_dir(session_id).join("meta.json");
-        let content = fs::read(&path).await?;
-        let mut meta: SessionMeta = serde_json::from_slice(&content)?;
-        update(&mut meta);
+        let mut meta = self.load_meta_unlocked(session_id).await?;
+        update(&mut meta)?;
+        let dir = self.ensure_session_dir(meta.id).await?;
         let content = serde_json::to_vec_pretty(&meta)?;
-        fs::write(path, content).await?;
+        fs::write(dir.join("meta.json"), content).await?;
         Ok(meta)
     }
 
-    pub async fn list_meta(&self) -> AppResult<Vec<SessionMeta>> {
+    pub async fn update_claude_session_id(
+        &self,
+        session_id: Uuid,
+        claude_session_id: String,
+    ) -> AppResult<()> {
+        self.update_meta(session_id, |meta| {
+            if meta.claude_session_id.as_deref() == Some(claude_session_id.as_str()) {
+                return Ok(());
+            }
+            meta.claude_session_id = Some(claude_session_id);
+            meta.updated_at = Utc::now();
+            Ok(())
+        })
+        .await?;
+        Ok(())
+    }
+
+    pub async fn list_meta(&self, filter: SessionListFilter) -> AppResult<Vec<SessionMeta>> {
+        let _guard = self.write_lock.lock().await;
         let mut entries = fs::read_dir(self.root.join("sessions")).await?;
         let mut sessions: Vec<SessionMeta> = Vec::new();
 
@@ -93,12 +130,24 @@ impl EventStore {
             let meta_path = entry.path().join("meta.json");
             if fs::try_exists(&meta_path).await? {
                 let content = fs::read(meta_path).await?;
-                sessions.push(serde_json::from_slice(&content)?);
+                let meta: SessionMeta = serde_json::from_slice(&content)?;
+                if filter.includes(&meta) {
+                    sessions.push(meta);
+                }
             }
         }
 
         sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
         Ok(sessions)
+    }
+
+    pub async fn remove_session_dir(&self, session_id: Uuid) -> AppResult<()> {
+        let _guard = self.write_lock.lock().await;
+        let dir = self.session_dir(session_id);
+        if fs::try_exists(&dir).await? {
+            fs::remove_dir_all(dir).await?;
+        }
+        Ok(())
     }
 
     pub async fn append_event(&self, event: &UiEvent) -> AppResult<()> {
@@ -107,12 +156,47 @@ impl EventStore {
             .await
     }
 
+    pub async fn append_event_with_next_id(&self, event: &mut UiEvent) -> AppResult<()> {
+        let _guard = self.write_lock.lock().await;
+        event.id = self.next_event_id_unlocked(event.session_id).await?;
+        let line = serde_json::to_string(event)?;
+        self.append_line_unlocked(event.session_id, "events.jsonl", &line)
+            .await
+    }
+
     pub async fn next_event_id(&self, session_id: Uuid) -> AppResult<u64> {
-        let events = self.load_events_after(session_id, 0).await?;
-        Ok(events.iter().map(|event| event.id).max().unwrap_or(0) + 1)
+        let _guard = self.write_lock.lock().await;
+        self.next_event_id_unlocked(session_id).await
     }
 
     pub async fn load_events_after(
+        &self,
+        session_id: Uuid,
+        after_id: u64,
+    ) -> AppResult<Vec<UiEvent>> {
+        let _guard = self.write_lock.lock().await;
+        self.load_events_after_unlocked(session_id, after_id).await
+    }
+
+    pub async fn append_raw_stdout(&self, session_id: Uuid, line: &str) -> AppResult<()> {
+        self.append_line(session_id, "raw-stdout.jsonl", line).await
+    }
+
+    pub async fn append_stderr(&self, session_id: Uuid, line: &str) -> AppResult<()> {
+        self.append_line(session_id, "stderr.log", line).await
+    }
+
+    async fn load_meta_unlocked(&self, session_id: Uuid) -> AppResult<SessionMeta> {
+        let content = fs::read(self.session_dir(session_id).join("meta.json")).await?;
+        Ok(serde_json::from_slice(&content)?)
+    }
+
+    async fn next_event_id_unlocked(&self, session_id: Uuid) -> AppResult<u64> {
+        let events = self.load_events_after_unlocked(session_id, 0).await?;
+        Ok(events.iter().map(|event| event.id).max().unwrap_or(0) + 1)
+    }
+
+    async fn load_events_after_unlocked(
         &self,
         session_id: Uuid,
         after_id: u64,
@@ -133,17 +217,21 @@ impl EventStore {
         Ok(events)
     }
 
-    pub async fn append_raw_stdout(&self, session_id: Uuid, line: &str) -> AppResult<()> {
-        self.append_line(session_id, "raw-stdout.jsonl", line).await
-    }
-
-    pub async fn append_stderr(&self, session_id: Uuid, line: &str) -> AppResult<()> {
-        self.append_line(session_id, "stderr.log", line).await
-    }
-
     async fn append_line(&self, session_id: Uuid, file_name: &str, line: &str) -> AppResult<()> {
         let _guard = self.write_lock.lock().await;
-        let dir = self.ensure_session_dir(session_id).await?;
+        self.append_line_unlocked(session_id, file_name, line).await
+    }
+
+    async fn append_line_unlocked(
+        &self,
+        session_id: Uuid,
+        file_name: &str,
+        line: &str,
+    ) -> AppResult<()> {
+        let dir = self.session_dir(session_id);
+        if !fs::try_exists(&dir).await? {
+            return Err(AppError::NotFound(format!("session {session_id}")));
+        }
         let path = dir.join(file_name);
         let mut content = line.to_string();
         content.push('\n');
@@ -168,6 +256,22 @@ mod tests {
     use super::*;
     use crate::EventKind;
     use serde_json::json;
+    use std::time::Duration;
+
+    fn meta(id: Uuid, name: &str, updated_at: DateTime<Utc>) -> SessionMeta {
+        SessionMeta {
+            id,
+            name: Some(name.to_string()),
+            cwd: PathBuf::from(format!("/tmp/{name}")),
+            permission_mode: "acceptEdits".to_string(),
+            status: SessionStatus::Stopped,
+            claude_session_id: None,
+            worktree: None,
+            deleted_at: None,
+            created_at: updated_at,
+            updated_at,
+        }
+    }
 
     #[tokio::test]
     async fn saves_and_loads_session_meta() {
@@ -187,6 +291,7 @@ mod tests {
                 branch: "pin/abc123".to_string(),
                 created_by_claude_remote_web: true,
             }),
+            deleted_at: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
@@ -201,6 +306,130 @@ mod tests {
         assert_eq!(loaded.status, SessionStatus::Running);
         assert_eq!(loaded.claude_session_id, Some("claude-session".to_string()));
         assert_eq!(loaded.worktree.as_ref().unwrap().branch, "pin/abc123");
+        assert_eq!(loaded.deleted_at, None);
+    }
+
+    #[tokio::test]
+    async fn loads_legacy_meta_without_deleted_at_or_worktree_as_active() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = EventStore::new(temp.path()).await.unwrap();
+        let id = Uuid::new_v4();
+        let dir = temp.path().join("sessions").join(id.to_string());
+        fs::create_dir_all(&dir).await.unwrap();
+        fs::write(
+            dir.join("meta.json"),
+            serde_json::json!({
+                "id": id,
+                "name": "legacy",
+                "cwd": "/tmp/legacy",
+                "permissionMode": "acceptEdits",
+                "status": "stopped",
+                "claudeSessionId": null,
+                "createdAt": "2026-06-11T00:00:00Z",
+                "updatedAt": "2026-06-11T00:00:00Z"
+            })
+            .to_string(),
+        )
+        .await
+        .unwrap();
+
+        let loaded = store.load_meta(id).await.unwrap();
+
+        assert_eq!(loaded.worktree, None);
+        assert_eq!(loaded.deleted_at, None);
+    }
+
+    #[tokio::test]
+    async fn filters_session_meta_by_deleted_state() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = EventStore::new(temp.path()).await.unwrap();
+        let now = Utc::now();
+        let active = meta(Uuid::new_v4(), "active", now);
+        let mut deleted = meta(
+            Uuid::new_v4(),
+            "deleted",
+            now + chrono::TimeDelta::seconds(1),
+        );
+        deleted.deleted_at = Some(now);
+        store.save_meta(&active).await.unwrap();
+        store.save_meta(&deleted).await.unwrap();
+
+        let active_only = store.list_meta(SessionListFilter::Active).await.unwrap();
+        let deleted_only = store.list_meta(SessionListFilter::Deleted).await.unwrap();
+        let all = store.list_meta(SessionListFilter::All).await.unwrap();
+
+        assert_eq!(
+            active_only.iter().map(|meta| meta.id).collect::<Vec<_>>(),
+            vec![active.id]
+        );
+        assert_eq!(
+            deleted_only.iter().map(|meta| meta.id).collect::<Vec<_>>(),
+            vec![deleted.id]
+        );
+        assert_eq!(
+            all.iter().map(|meta| meta.id).collect::<Vec<_>>(),
+            vec![deleted.id, active.id]
+        );
+    }
+
+    #[tokio::test]
+    async fn metadata_reads_wait_for_in_progress_meta_writes() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = EventStore::new(temp.path()).await.unwrap();
+        let id = Uuid::new_v4();
+        let meta = meta(id, "race", Utc::now());
+        store.save_meta(&meta).await.unwrap();
+
+        let write_guard = store.write_lock.lock().await;
+        let dir = store.ensure_session_dir(id).await.unwrap();
+        fs::write(dir.join("meta.json"), b"{").await.unwrap();
+
+        let load_store = store.clone();
+        let load = tokio::spawn(async move { load_store.load_meta(id).await });
+        let list_store = store.clone();
+        let list = tokio::spawn(async move { list_store.list_meta(SessionListFilter::All).await });
+
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        assert!(!load.is_finished());
+        assert!(!list.is_finished());
+
+        fs::write(
+            dir.join("meta.json"),
+            serde_json::to_vec_pretty(&meta).unwrap(),
+        )
+        .await
+        .unwrap();
+        drop(write_guard);
+
+        let loaded = load.await.unwrap().unwrap();
+        let listed = list.await.unwrap().unwrap();
+        assert_eq!(loaded.id, id);
+        assert_eq!(
+            listed.iter().map(|meta| meta.id).collect::<Vec<_>>(),
+            vec![id]
+        );
+    }
+
+    #[tokio::test]
+    async fn updates_claude_session_id_without_overwriting_lifecycle_changes() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = EventStore::new(temp.path()).await.unwrap();
+        let id = Uuid::new_v4();
+        let now = Utc::now();
+        let mut meta = meta(id, "lifecycle", now);
+        meta.deleted_at = Some(now);
+        store.save_meta(&meta).await.unwrap();
+
+        store
+            .update_claude_session_id(id, "claude-session".to_string())
+            .await
+            .unwrap();
+
+        let loaded = store.load_meta(id).await.unwrap();
+        assert_eq!(loaded.status, SessionStatus::Stopped);
+        assert_eq!(loaded.deleted_at, Some(now));
+        assert_eq!(loaded.claude_session_id, Some("claude-session".to_string()));
+        assert!(loaded.updated_at >= now);
     }
 
     #[tokio::test]
@@ -215,17 +444,10 @@ mod tests {
             branch: "pin/abc123".to_string(),
             created_by_claude_remote_web: true,
         };
-        let meta = SessionMeta {
-            id,
-            name: Some("demo".to_string()),
-            cwd: worktree.worktree_cwd.clone(),
-            permission_mode: "acceptEdits".to_string(),
-            status: SessionStatus::Running,
-            claude_session_id: None,
-            worktree: Some(worktree.clone()),
-            created_at: now,
-            updated_at: now,
-        };
+        let mut meta = meta(id, "demo", now);
+        meta.cwd = worktree.worktree_cwd.clone();
+        meta.status = SessionStatus::Running;
+        meta.worktree = Some(worktree.clone());
         store.save_meta(&meta).await.unwrap();
 
         store
@@ -233,14 +455,12 @@ mod tests {
                 meta.cwd = worktree.source_cwd.clone();
                 meta.worktree = None;
                 meta.updated_at = Utc::now();
+                Ok(())
             })
             .await
             .unwrap();
         store
-            .update_meta(id, |meta| {
-                meta.claude_session_id = Some("late-session".to_string());
-                meta.updated_at = Utc::now();
-            })
+            .update_claude_session_id(id, "late-session".to_string())
             .await
             .unwrap();
 
@@ -248,6 +468,41 @@ mod tests {
         assert_eq!(loaded.worktree, None);
         assert_eq!(loaded.cwd, PathBuf::from("/tmp/source"));
         assert_eq!(loaded.claude_session_id, Some("late-session".to_string()));
+    }
+
+    #[tokio::test]
+    async fn removes_session_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = EventStore::new(temp.path()).await.unwrap();
+        let session_id = Uuid::new_v4();
+        let dir = store.ensure_session_dir(session_id).await.unwrap();
+        fs::write(dir.join("events.jsonl"), "{}").await.unwrap();
+
+        store.remove_session_dir(session_id).await.unwrap();
+
+        assert!(
+            !fs::try_exists(temp.path().join("sessions").join(session_id.to_string()))
+                .await
+                .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn append_after_remove_session_dir_does_not_recreate_session_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = EventStore::new(temp.path()).await.unwrap();
+        let session_id = Uuid::new_v4();
+        store.ensure_session_dir(session_id).await.unwrap();
+
+        store.remove_session_dir(session_id).await.unwrap();
+        let append_result = store.append_stderr(session_id, "late stderr").await;
+
+        assert!(append_result.is_err());
+        assert!(
+            !fs::try_exists(temp.path().join("sessions").join(session_id.to_string()))
+                .await
+                .unwrap()
+        );
     }
 
     #[tokio::test]

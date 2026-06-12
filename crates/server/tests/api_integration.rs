@@ -146,6 +146,7 @@ async fn seed_task_session(store: &EventStore, name: &str) -> Uuid {
         status: SessionStatus::Running,
         claude_session_id: Some(format!("claude-{name}")),
         worktree: None,
+        deleted_at: None,
         created_at: now,
         updated_at: now,
     };

@@ -15,6 +15,7 @@ export type SessionInfo = {
   status: SessionStatus;
   claudeSessionId?: string | null;
   worktree?: WorktreeInfo | null;
+  deletedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 };

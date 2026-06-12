@@ -1,12 +1,17 @@
 use crate::{
     AppError, AppResult, ClaudeProcess, ClaudeProcessConfig, EventKind, EventStore, ProcessEvent,
     SessionMeta, SessionStatus, TaskGroups, UiEvent, WorktreeConfig, WorktreeManager, WorktreeMeta,
-    extract_claude_session_id, group_tasks, project_session_tasks,
+    extract_claude_session_id, group_tasks, project_session_tasks, store::SessionListFilter,
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    io::ErrorKind,
+    path::PathBuf,
+    sync::Arc,
+};
 use tokio::sync::{Mutex, broadcast};
 use uuid::Uuid;
 
@@ -35,6 +40,7 @@ pub struct SessionInfo {
     pub status: SessionStatus,
     pub claude_session_id: Option<String>,
     pub worktree: Option<WorktreeMeta>,
+    pub deleted_at: Option<chrono::DateTime<Utc>>,
     pub created_at: chrono::DateTime<Utc>,
     pub updated_at: chrono::DateTime<Utc>,
 }
@@ -51,6 +57,7 @@ pub struct SessionManager {
     default_permission_mode: String,
     worktree_manager: WorktreeManager,
     running: Arc<Mutex<HashMap<Uuid, RunningSession>>>,
+    starting: Arc<Mutex<HashSet<Uuid>>>,
 }
 
 impl SessionManager {
@@ -66,6 +73,7 @@ impl SessionManager {
             default_permission_mode,
             worktree_manager: WorktreeManager::new(worktree_config),
             running: Arc::new(Mutex::new(HashMap::new())),
+            starting: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
@@ -116,6 +124,7 @@ impl SessionManager {
             status: SessionStatus::Starting,
             claude_session_id: None,
             worktree,
+            deleted_at: None,
             created_at: now,
             updated_at: now,
         };
@@ -134,23 +143,27 @@ impl SessionManager {
                 } else {
                     false
                 };
-                let mut failed_meta = meta;
-                if removed_worktree {
-                    failed_meta.cwd = cwd;
-                    failed_meta.worktree = None;
-                }
-                failed_meta.status = SessionStatus::Failed;
-                failed_meta.updated_at = Utc::now();
-                let _ = self.store.save_meta(&failed_meta).await;
+                let _ = self
+                    .store
+                    .update_meta(meta.id, |failed_meta| {
+                        if removed_worktree {
+                            failed_meta.cwd = cwd;
+                            failed_meta.worktree = None;
+                        }
+                        failed_meta.status = SessionStatus::Failed;
+                        failed_meta.updated_at = Utc::now();
+                        Ok(())
+                    })
+                    .await;
                 Err(err)
             }
         }
     }
 
-    pub async fn list_sessions(&self) -> AppResult<Vec<SessionInfo>> {
+    pub async fn list_sessions(&self, filter: SessionListFilter) -> AppResult<Vec<SessionInfo>> {
         Ok(self
             .store
-            .list_meta()
+            .list_meta(filter)
             .await?
             .into_iter()
             .map(SessionInfo::from)
@@ -162,7 +175,7 @@ impl SessionManager {
     }
 
     pub async fn list_tasks(&self) -> AppResult<TaskGroups> {
-        let metas = self.store.list_meta().await?;
+        let metas = self.store.list_meta(SessionListFilter::Active).await?;
         let mut tasks = Vec::new();
         for meta in metas {
             let events = self.store.load_events_after(meta.id, 0).await?;
@@ -172,40 +185,46 @@ impl SessionManager {
     }
 
     pub async fn tasks_for_session(&self, session_id: Uuid) -> AppResult<TaskGroups> {
-        let meta = self.store.load_meta(session_id).await?;
+        let meta = self.load_active_meta(session_id).await?;
         let events = self.store.load_events_after(session_id, 0).await?;
         Ok(project_session_tasks(&meta, &events))
     }
 
-    pub async fn send_input(&self, session_id: Uuid, text: String) -> AppResult<()> {
-        let event_id = self.store.next_event_id(session_id).await?;
-        let event = UiEvent::new(
-            event_id,
-            session_id,
-            EventKind::User,
-            json!({ "text": text }),
-        );
-        self.store.append_event(&event).await?;
+    async fn load_active_meta(&self, session_id: Uuid) -> AppResult<SessionMeta> {
+        let meta = self.store.load_meta(session_id).await?;
+        if meta.deleted_at.is_some() {
+            return Err(AppError::InvalidRequest(format!(
+                "session {session_id} is deleted; restore it before continuing"
+            )));
+        }
+        Ok(meta)
+    }
 
-        let running = self.running.lock().await;
-        let session = running
-            .get(&session_id)
-            .ok_or_else(|| AppError::NotFound(format!("running session {session_id}")))?;
-        let _ = session.tx.send(event);
-        session.process.send_input(&text).await
+    pub async fn send_input(&self, session_id: Uuid, text: String) -> AppResult<()> {
+        let _meta = self.load_active_meta(session_id).await?;
+        let mut event = UiEvent::new(0, session_id, EventKind::User, json!({ "text": text }));
+        self.store.append_event_with_next_id(&mut event).await?;
+
+        let (process, tx) = {
+            let running = self.running.lock().await;
+            let session = running
+                .get(&session_id)
+                .ok_or_else(|| AppError::NotFound(format!("running session {session_id}")))?;
+            (session.process.clone(), session.tx.clone())
+        };
+        let _ = tx.send(event);
+        process.send_input(&text).await
     }
 
     pub async fn stop_session(&self, session_id: Uuid) -> AppResult<()> {
-        let running = self.running.lock().await.remove(&session_id);
-        if let Some(session) = running {
-            session.process.kill().await?;
-        }
+        let _meta = self.load_active_meta(session_id).await?;
+        self.stop_running_process(session_id).await?;
         self.update_status(session_id, SessionStatus::Stopped).await
     }
 
     pub async fn stop_and_remove_worktree(&self, session_id: Uuid) -> AppResult<()> {
-        let _ = self.stop_session(session_id).await;
-        let meta = self.store.load_meta(session_id).await?;
+        self.stop_session(session_id).await?;
+        let meta = self.load_active_meta(session_id).await?;
         let worktree = meta.worktree.clone().ok_or_else(|| {
             AppError::InvalidRequest("session has no app-created worktree".to_string())
         })?;
@@ -221,19 +240,83 @@ impl SessionManager {
                 meta.cwd = worktree.source_cwd;
                 meta.worktree = None;
                 meta.updated_at = Utc::now();
+                Ok(())
             })
             .await?;
         Ok(())
     }
 
     pub async fn restart_session(&self, session_id: Uuid) -> AppResult<SessionInfo> {
-        let _ = self.stop_session(session_id).await;
-        let meta = self.store.load_meta(session_id).await?;
-        self.start_or_resume_process(meta).await
+        let _meta = self.load_active_meta(session_id).await?;
+        let _ = self.stop_running_process(session_id).await;
+        self.update_status(session_id, SessionStatus::Stopped)
+            .await?;
+        self.resume_session(session_id).await
+    }
+
+    pub async fn resume_session(&self, session_id: Uuid) -> AppResult<SessionInfo> {
+        let meta = self.load_active_meta(session_id).await?;
+        self.reserve_starting(session_id).await?;
+        let result = self.resume_reserved_session(meta).await;
+        self.starting.lock().await.remove(&session_id);
+        result
+    }
+
+    pub async fn delete_session(&self, session_id: Uuid) -> AppResult<SessionInfo> {
+        let _meta = self.load_active_meta(session_id).await?;
+        self.stop_running_process(session_id).await?;
+        let meta = self
+            .store
+            .update_meta(session_id, |meta| {
+                if meta.deleted_at.is_some() {
+                    return Err(AppError::InvalidRequest(format!(
+                        "session {session_id} is deleted; restore it before continuing"
+                    )));
+                }
+                let now = Utc::now();
+                meta.deleted_at = Some(now);
+                meta.status = SessionStatus::Stopped;
+                meta.updated_at = now;
+                Ok(())
+            })
+            .await?;
+        Ok(SessionInfo::from(meta))
+    }
+
+    pub async fn restore_session(&self, session_id: Uuid) -> AppResult<SessionInfo> {
+        let meta = self
+            .store
+            .update_meta(session_id, |meta| {
+                if meta.deleted_at.is_none() {
+                    return Err(AppError::InvalidRequest(format!(
+                        "session {session_id} is not deleted"
+                    )));
+                }
+                meta.deleted_at = None;
+                meta.updated_at = Utc::now();
+                Ok(())
+            })
+            .await?;
+        Ok(SessionInfo::from(meta))
+    }
+
+    pub async fn permanently_delete_session(&self, session_id: Uuid) -> AppResult<()> {
+        let meta = match self.store.load_meta(session_id).await {
+            Ok(meta) => meta,
+            Err(AppError::Io(error)) if error.kind() == ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+        };
+        if meta.deleted_at.is_none() {
+            return Err(AppError::InvalidRequest(format!(
+                "session {session_id} must be deleted before permanent removal"
+            )));
+        }
+        self.stop_running_process(session_id).await?;
+        self.store.remove_session_dir(session_id).await
     }
 
     pub async fn restore_active_sessions(&self) -> AppResult<()> {
-        let sessions = self.store.list_meta().await?;
+        let sessions = self.store.list_meta(SessionListFilter::Active).await?;
         for meta in sessions {
             if !matches!(
                 meta.status,
@@ -243,7 +326,7 @@ impl SessionManager {
             }
 
             let session_id = meta.id;
-            if let Err(err) = self.start_or_resume_process(meta).await {
+            if let Err(err) = self.start_or_resume(meta).await {
                 tracing::warn!(%session_id, error = %err, "failed to restore session");
                 let _ = self.mark_restore_failed(session_id, err.to_string()).await;
             }
@@ -252,6 +335,7 @@ impl SessionManager {
     }
 
     pub async fn subscribe(&self, session_id: Uuid) -> AppResult<broadcast::Receiver<UiEvent>> {
+        let _meta = self.load_active_meta(session_id).await?;
         let running = self.running.lock().await;
         let session = running
             .get(&session_id)
@@ -260,45 +344,105 @@ impl SessionManager {
     }
 
     pub async fn events_after(&self, session_id: Uuid, after_id: u64) -> AppResult<Vec<UiEvent>> {
+        let _meta = self.load_active_meta(session_id).await?;
         self.store.load_events_after(session_id, after_id).await
     }
 
-    async fn start_or_resume_process(&self, meta: SessionMeta) -> AppResult<SessionInfo> {
+    async fn stop_running_process(&self, session_id: Uuid) -> AppResult<()> {
+        let running = self.running.lock().await.remove(&session_id);
+        if let Some(session) = running {
+            session.process.kill().await?;
+        }
+        Ok(())
+    }
+
+    async fn broadcast_event(&self, session_id: Uuid, event: UiEvent) -> AppResult<()> {
+        let running = self.running.lock().await;
+        if let Some(session) = running.get(&session_id) {
+            let _ = session.tx.send(event);
+        }
+        Ok(())
+    }
+
+    async fn reserve_starting(&self, session_id: Uuid) -> AppResult<()> {
+        let mut starting = self.starting.lock().await;
+        let running = self.running.lock().await;
+        if running.contains_key(&session_id) || starting.contains(&session_id) {
+            return Err(AppError::InvalidRequest(format!(
+                "session {session_id} is already running"
+            )));
+        }
+        starting.insert(session_id);
+        Ok(())
+    }
+
+    async fn resume_reserved_session(&self, meta: SessionMeta) -> AppResult<SessionInfo> {
+        if matches!(
+            meta.status,
+            SessionStatus::Starting | SessionStatus::Running
+        ) {
+            return Err(AppError::InvalidRequest(format!(
+                "session {} cannot be resumed from status {:?}",
+                meta.id, meta.status
+            )));
+        }
+        self.start_or_resume(meta).await
+    }
+
+    async fn start_or_resume(&self, mut meta: SessionMeta) -> AppResult<SessionInfo> {
         let resume = meta.claude_session_id.clone();
+        meta = self
+            .store
+            .update_meta(meta.id, |latest| {
+                if latest.deleted_at.is_some() {
+                    return Err(AppError::InvalidRequest(format!(
+                        "session {} is deleted; restore it before continuing",
+                        latest.id
+                    )));
+                }
+                latest.status = SessionStatus::Starting;
+                latest.updated_at = Utc::now();
+                Ok(())
+            })
+            .await?;
+
         if resume.is_none() {
-            let event_id = self.store.next_event_id(meta.id).await?;
-            let event = UiEvent::new(
-                event_id,
+            let mut event = UiEvent::new(
+                0,
                 meta.id,
                 EventKind::System,
                 json!({ "message": "no claude session id found; started fresh" }),
             );
-            self.store.append_event(&event).await?;
+            self.store.append_event_with_next_id(&mut event).await?;
+            let _ = self.broadcast_event(meta.id, event).await;
         }
         self.start_process(meta, resume).await
     }
 
     async fn mark_restore_failed(&self, session_id: Uuid, error: String) -> AppResult<()> {
-        let mut meta = self.store.load_meta(session_id).await?;
-        meta.status = SessionStatus::Failed;
-        meta.updated_at = Utc::now();
-        self.store.save_meta(&meta).await?;
+        self.store
+            .update_meta(session_id, |meta| {
+                meta.status = SessionStatus::Failed;
+                meta.updated_at = Utc::now();
+                Ok(())
+            })
+            .await?;
 
-        let event_id = self.store.next_event_id(session_id).await?;
-        let event = UiEvent::new(
-            event_id,
+        let mut event = UiEvent::new(
+            0,
             session_id,
             EventKind::Error,
             json!({ "message": "failed to restore session", "error": error }),
         );
-        self.store.append_event(&event).await
+        self.store.append_event_with_next_id(&mut event).await
     }
 
     async fn start_process(
         &self,
-        meta: SessionMeta,
+        mut meta: SessionMeta,
         resume_session_id: Option<String>,
     ) -> AppResult<SessionInfo> {
+        let starting_event_id = self.store.next_event_id(meta.id).await?;
         let (process, mut rx) = ClaudeProcess::spawn(
             meta.id,
             ClaudeProcessConfig {
@@ -306,29 +450,36 @@ impl SessionManager {
                 cwd: meta.cwd.clone(),
                 permission_mode: meta.permission_mode.clone(),
                 resume_session_id,
+                starting_event_id,
             },
         )
         .await?;
 
-        let updated_meta = match self
+        meta = match self
             .store
-            .update_meta(meta.id, |stored| {
-                stored.status = SessionStatus::Running;
-                stored.updated_at = Utc::now();
+            .update_meta(meta.id, |latest| {
+                if latest.deleted_at.is_some() || latest.status == SessionStatus::Stopped {
+                    return Err(AppError::InvalidRequest(format!(
+                        "session {} start was cancelled",
+                        latest.id
+                    )));
+                }
+                latest.status = SessionStatus::Running;
+                latest.updated_at = Utc::now();
+                Ok(())
             })
             .await
         {
             Ok(meta) => meta,
-            Err(err) => {
+            Err(error) => {
                 let _ = process.kill().await;
-                return Err(err);
+                return Err(error);
             }
         };
 
         let (tx, _) = broadcast::channel(256);
-        let session_id = updated_meta.id;
         self.running.lock().await.insert(
-            session_id,
+            meta.id,
             RunningSession {
                 process,
                 tx: tx.clone(),
@@ -337,6 +488,7 @@ impl SessionManager {
 
         let store = self.store.clone();
         let running = self.running.clone();
+        let session_id = meta.id;
         tokio::spawn(async move {
             while let Some(event) = rx.recv().await {
                 match event {
@@ -345,17 +497,12 @@ impl SessionManager {
                     }
                     ProcessEvent::StderrLine(line) => {
                         let _ = store.append_stderr(session_id, &line).await;
-                        let event_id = store.next_event_id(session_id).await.unwrap_or(1);
-                        let ui_event = UiEvent::new(
-                            event_id,
-                            session_id,
-                            EventKind::Error,
-                            json!({ "line": line }),
-                        );
-                        let _ = store.append_event(&ui_event).await;
+                        let mut ui_event =
+                            UiEvent::new(0, session_id, EventKind::Error, json!({ "line": line }));
+                        let _ = store.append_event_with_next_id(&mut ui_event).await;
                         let _ = tx.send(ui_event);
                     }
-                    ProcessEvent::UiEvent(ui_event) => {
+                    ProcessEvent::UiEvent(mut ui_event) => {
                         if let Some(claude_session_id) =
                             extract_claude_session_id(&ui_event.payload)
                         {
@@ -366,7 +513,7 @@ impl SessionManager {
                             )
                             .await;
                         }
-                        let _ = store.append_event(&ui_event).await;
+                        let _ = store.append_event_with_next_id(&mut ui_event).await;
                         let _ = tx.send(ui_event);
                     }
                     ProcessEvent::Exited(_) => {
@@ -377,23 +524,23 @@ impl SessionManager {
                                     meta.status = SessionStatus::Exited;
                                     meta.updated_at = Utc::now();
                                 }
+                                Ok(())
                             })
                             .await;
-                        let event_id = store.next_event_id(session_id).await.unwrap_or(1);
-                        let ui_event = UiEvent::new(
-                            event_id,
+                        let mut ui_event = UiEvent::new(
+                            0,
                             session_id,
                             EventKind::System,
                             json!({ "status": "exited" }),
                         );
-                        let _ = store.append_event(&ui_event).await;
+                        let _ = store.append_event_with_next_id(&mut ui_event).await;
                         let _ = tx.send(ui_event);
                     }
                 }
             }
         });
 
-        Ok(SessionInfo::from(updated_meta))
+        Ok(SessionInfo::from(meta))
     }
 
     async fn update_claude_session_id(
@@ -402,14 +549,8 @@ impl SessionManager {
         claude_session_id: String,
     ) -> AppResult<()> {
         store
-            .update_meta(session_id, |meta| {
-                if meta.claude_session_id.as_deref() != Some(claude_session_id.as_str()) {
-                    meta.claude_session_id = Some(claude_session_id);
-                    meta.updated_at = Utc::now();
-                }
-            })
-            .await?;
-        Ok(())
+            .update_claude_session_id(session_id, claude_session_id)
+            .await
     }
 
     async fn update_status(&self, session_id: Uuid, status: SessionStatus) -> AppResult<()> {
@@ -417,6 +558,7 @@ impl SessionManager {
             .update_meta(session_id, |meta| {
                 meta.status = status;
                 meta.updated_at = Utc::now();
+                Ok(())
             })
             .await?;
         Ok(())
@@ -459,6 +601,7 @@ impl From<SessionMeta> for SessionInfo {
             status: meta.status,
             claude_session_id: meta.claude_session_id,
             worktree: meta.worktree,
+            deleted_at: meta.deleted_at,
             created_at: meta.created_at,
             updated_at: meta.updated_at,
         }
@@ -470,8 +613,16 @@ mod tests {
     use super::*;
     use std::{fs, os::unix::fs::PermissionsExt};
 
+    fn worktree_config() -> crate::WorktreeConfig {
+        crate::WorktreeConfig {
+            worktrees_dir: None,
+            branch_prefix: "pin".to_string(),
+            base_ref: crate::WorktreeBaseRef::Head,
+        }
+    }
+
     fn fake_claude(dir: &std::path::Path) -> PathBuf {
-        let path = dir.join("fake-claude.sh");
+        let path = dir.join(format!("fake-claude-{}.sh", Uuid::new_v4()));
         fs::write(
             &path,
             r#"#!/usr/bin/env bash
@@ -494,7 +645,7 @@ done
     }
 
     fn fake_claude_logging_args(dir: &std::path::Path, args_log: &std::path::Path) -> PathBuf {
-        let path = dir.join("fake-claude-logging-args.sh");
+        let path = dir.join(format!("fake-claude-logging-args-{}.sh", Uuid::new_v4()));
         fs::write(
             &path,
             format!(
@@ -511,6 +662,29 @@ while IFS= read -r line; do
 done
 "#,
                 args_log.display()
+            ),
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&path, permissions).unwrap();
+        path
+    }
+
+    fn fake_claude_pid_loop(dir: &std::path::Path, pid_file: &std::path::Path) -> PathBuf {
+        let path = dir.join(format!("fake-claude-pid-loop-{}.sh", Uuid::new_v4()));
+        fs::write(
+            &path,
+            format!(
+                r#"#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$$" > '{}'
+printf '{{"type":"system","session_id":"fake-session"}}\n'
+while true; do
+  sleep 60
+done
+"#,
+                pid_file.display()
             ),
         )
         .unwrap();
@@ -537,6 +711,7 @@ done
                 status,
                 claude_session_id: claude_session_id.map(str::to_string),
                 worktree: None,
+                deleted_at: None,
                 created_at: now,
                 updated_at: now,
             })
@@ -545,27 +720,19 @@ done
         id
     }
 
-    fn fake_claude_pid_loop(dir: &std::path::Path, pid_file: &std::path::Path) -> PathBuf {
-        let path = dir.join("fake-claude-pid-loop.sh");
-        fs::write(
-            &path,
-            format!(
-                r#"#!/usr/bin/env bash
-set -euo pipefail
-printf '%s\n' "$$" > '{}'
-printf '{{"type":"system","session_id":"fake-session"}}\n'
-while true; do
-  sleep 60
-done
-"#,
-                pid_file.display()
-            ),
-        )
-        .unwrap();
-        let mut permissions = fs::metadata(&path).unwrap().permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&path, permissions).unwrap();
-        path
+    async fn wait_for_status(
+        store: &EventStore,
+        session_id: Uuid,
+        status: SessionStatus,
+    ) -> SessionMeta {
+        for _ in 0..50 {
+            let meta = store.load_meta(session_id).await.unwrap();
+            if meta.status == status {
+                return meta;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        store.load_meta(session_id).await.unwrap()
     }
 
     async fn read_pid_file(path: &std::path::Path) -> Option<u32> {
@@ -629,11 +796,7 @@ done
             store.clone(),
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
-            crate::WorktreeConfig {
-                worktrees_dir: None,
-                branch_prefix: "pin".to_string(),
-                base_ref: crate::WorktreeBaseRef::Head,
-            },
+            worktree_config(),
         );
 
         let created = manager
@@ -669,11 +832,7 @@ done
             store,
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
-            crate::WorktreeConfig {
-                worktrees_dir: None,
-                branch_prefix: "pin".to_string(),
-                base_ref: crate::WorktreeBaseRef::Head,
-            },
+            worktree_config(),
         );
 
         let created = manager
@@ -707,11 +866,7 @@ done
                     .to_string(),
             ],
             "acceptEdits".to_string(),
-            crate::WorktreeConfig {
-                worktrees_dir: None,
-                branch_prefix: "pin".to_string(),
-                base_ref: crate::WorktreeBaseRef::Head,
-            },
+            worktree_config(),
         );
 
         let result = manager
@@ -724,7 +879,7 @@ done
             .await;
 
         assert!(result.is_err());
-        let sessions = store.list_meta().await.unwrap();
+        let sessions = store.list_meta(SessionListFilter::All).await.unwrap();
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].status, SessionStatus::Failed);
         assert_eq!(sessions[0].cwd, repo.canonicalize().unwrap());
@@ -740,42 +895,6 @@ done
     }
 
     #[tokio::test]
-    async fn stop_and_remove_rejects_sessions_without_app_worktree() {
-        let temp = tempfile::tempdir().unwrap();
-        let bin = fake_claude(temp.path());
-        let store = EventStore::new(temp.path().join("data")).await.unwrap();
-        let manager = SessionManager::new(
-            store,
-            vec![bin.to_string_lossy().to_string()],
-            "acceptEdits".to_string(),
-            crate::WorktreeConfig {
-                worktrees_dir: None,
-                branch_prefix: "pin".to_string(),
-                base_ref: crate::WorktreeBaseRef::Head,
-            },
-        );
-        let session = manager
-            .create_session(CreateSessionRequest {
-                cwd: temp.path().to_path_buf(),
-                name: None,
-                permission_mode: None,
-                worktree: None,
-            })
-            .await
-            .unwrap();
-
-        let err = manager
-            .stop_and_remove_worktree(session.id)
-            .await
-            .unwrap_err();
-
-        assert!(
-            err.to_string()
-                .contains("session has no app-created worktree")
-        );
-    }
-
-    #[tokio::test]
     async fn stop_and_remove_deletes_clean_worktree() {
         let temp = tempfile::tempdir().unwrap();
         let repo = temp.path().join("repo");
@@ -786,11 +905,7 @@ done
             store.clone(),
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
-            crate::WorktreeConfig {
-                worktrees_dir: None,
-                branch_prefix: "pin".to_string(),
-                base_ref: crate::WorktreeBaseRef::Head,
-            },
+            worktree_config(),
         );
         let session = manager
             .create_session(CreateSessionRequest {
@@ -813,70 +928,6 @@ done
     }
 
     #[tokio::test]
-    async fn start_process_marks_running_without_overwriting_latest_metadata() {
-        let temp = tempfile::tempdir().unwrap();
-        let source_cwd = temp.path().join("repo");
-        let worktree_cwd = temp.path().join("repo/.claude/worktrees/abc123");
-        fs::create_dir_all(&source_cwd).unwrap();
-        fs::create_dir_all(&worktree_cwd).unwrap();
-        let pid_file = temp.path().join("fake-claude.pid");
-        let bin = fake_claude_pid_loop(temp.path(), &pid_file);
-        let store = EventStore::new(temp.path().join("data")).await.unwrap();
-        let manager = SessionManager::new(
-            store.clone(),
-            vec![bin.to_string_lossy().to_string()],
-            "acceptEdits".to_string(),
-            crate::WorktreeConfig {
-                worktrees_dir: None,
-                branch_prefix: "pin".to_string(),
-                base_ref: crate::WorktreeBaseRef::Head,
-            },
-        );
-        let now = Utc::now();
-        let worktree = WorktreeMeta {
-            source_cwd: source_cwd.clone(),
-            worktree_cwd: worktree_cwd.clone(),
-            branch: "pin/abc123".to_string(),
-            created_by_claude_remote_web: true,
-        };
-        let stale_meta = SessionMeta {
-            id: Uuid::new_v4(),
-            name: None,
-            cwd: worktree_cwd,
-            permission_mode: "acceptEdits".to_string(),
-            status: SessionStatus::Starting,
-            claude_session_id: None,
-            worktree: Some(worktree),
-            created_at: now,
-            updated_at: now,
-        };
-        store.save_meta(&stale_meta).await.unwrap();
-        store
-            .update_meta(stale_meta.id, |meta| {
-                meta.status = SessionStatus::Stopped;
-                meta.cwd = source_cwd.clone();
-                meta.worktree = None;
-                meta.updated_at = Utc::now();
-            })
-            .await
-            .unwrap();
-
-        let info = manager
-            .start_process(stale_meta.clone(), None)
-            .await
-            .unwrap();
-        let loaded = store.load_meta(stale_meta.id).await.unwrap();
-        manager.stop_session(stale_meta.id).await.unwrap();
-
-        assert_eq!(info.status, SessionStatus::Running);
-        assert_eq!(info.cwd, source_cwd);
-        assert_eq!(info.worktree, None);
-        assert_eq!(loaded.status, SessionStatus::Running);
-        assert_eq!(loaded.cwd, source_cwd);
-        assert_eq!(loaded.worktree, None);
-    }
-
-    #[tokio::test]
     async fn start_process_kills_spawned_process_when_running_meta_save_fails() {
         let temp = tempfile::tempdir().unwrap();
         let pid_file = temp.path().join("fake-claude.pid");
@@ -886,11 +937,7 @@ done
             store.clone(),
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
-            crate::WorktreeConfig {
-                worktrees_dir: None,
-                branch_prefix: "pin".to_string(),
-                base_ref: crate::WorktreeBaseRef::Head,
-            },
+            worktree_config(),
         );
         let now = Utc::now();
         let meta = SessionMeta {
@@ -901,6 +948,7 @@ done
             status: SessionStatus::Starting,
             claude_session_id: None,
             worktree: None,
+            deleted_at: None,
             created_at: now,
             updated_at: now,
         };
@@ -939,11 +987,7 @@ done
             store,
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
-            crate::WorktreeConfig {
-                worktrees_dir: None,
-                branch_prefix: "pin".to_string(),
-                base_ref: crate::WorktreeBaseRef::Head,
-            },
+            worktree_config(),
         );
 
         let created = manager
@@ -968,11 +1012,7 @@ done
             store,
             vec!["claude".to_string()],
             "acceptEdits".to_string(),
-            crate::WorktreeConfig {
-                worktrees_dir: None,
-                branch_prefix: "pin".to_string(),
-                base_ref: crate::WorktreeBaseRef::Head,
-            },
+            worktree_config(),
         );
 
         let result = manager
@@ -996,11 +1036,7 @@ done
             store,
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
-            crate::WorktreeConfig {
-                worktrees_dir: None,
-                branch_prefix: "pin".to_string(),
-                base_ref: crate::WorktreeBaseRef::Head,
-            },
+            worktree_config(),
         );
 
         let created = manager
@@ -1026,11 +1062,7 @@ done
             store,
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
-            crate::WorktreeConfig {
-                worktrees_dir: None,
-                branch_prefix: "pin".to_string(),
-                base_ref: crate::WorktreeBaseRef::Head,
-            },
+            worktree_config(),
         );
 
         let created = manager
@@ -1047,7 +1079,10 @@ done
         assert_eq!(created.permission_mode, "acceptEdits");
         assert_eq!(created.status, SessionStatus::Running);
 
-        let sessions = manager.list_sessions().await.unwrap();
+        let sessions = manager
+            .list_sessions(SessionListFilter::Active)
+            .await
+            .unwrap();
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].id, created.id);
 
@@ -1070,11 +1105,7 @@ done
             store,
             vec![bin.to_string_lossy().to_string()],
             "auto".to_string(),
-            crate::WorktreeConfig {
-                worktrees_dir: None,
-                branch_prefix: "pin".to_string(),
-                base_ref: crate::WorktreeBaseRef::Head,
-            },
+            worktree_config(),
         );
 
         let created = manager
@@ -1099,11 +1130,7 @@ done
             store.clone(),
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
-            crate::WorktreeConfig {
-                worktrees_dir: None,
-                branch_prefix: "pin".to_string(),
-                base_ref: crate::WorktreeBaseRef::Head,
-            },
+            worktree_config(),
         );
 
         let session = manager
@@ -1123,7 +1150,7 @@ done
     }
 
     #[tokio::test]
-    async fn restart_without_session_id_records_system_event() {
+    async fn restart_process_events_continue_after_existing_events() {
         let temp = tempfile::tempdir().unwrap();
         let bin = fake_claude(temp.path());
         let store = EventStore::new(temp.path().join("data")).await.unwrap();
@@ -1131,11 +1158,7 @@ done
             store.clone(),
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
-            crate::WorktreeConfig {
-                worktrees_dir: None,
-                branch_prefix: "pin".to_string(),
-                base_ref: crate::WorktreeBaseRef::Head,
-            },
+            worktree_config(),
         );
 
         let session = manager
@@ -1147,6 +1170,50 @@ done
             })
             .await
             .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        manager.stop_session(session.id).await.unwrap();
+        let before_resume_max_id = store
+            .load_events_after(session.id, 0)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|event| event.id)
+            .max()
+            .unwrap();
+
+        manager.resume_session(session.id).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+        let events = store
+            .load_events_after(session.id, before_resume_max_id)
+            .await
+            .unwrap();
+        assert!(events.iter().any(|event| event.kind == EventKind::System));
+        assert!(events.iter().all(|event| event.id > before_resume_max_id));
+    }
+
+    #[tokio::test]
+    async fn restart_without_session_id_records_system_event() {
+        let temp = tempfile::tempdir().unwrap();
+        let bin = fake_claude(temp.path());
+        let store = EventStore::new(temp.path().join("data")).await.unwrap();
+        let manager = SessionManager::new(
+            store.clone(),
+            vec![bin.to_string_lossy().to_string()],
+            "acceptEdits".to_string(),
+            worktree_config(),
+        );
+
+        let session = manager
+            .create_session(CreateSessionRequest {
+                cwd: temp.path().to_path_buf(),
+                name: None,
+                permission_mode: None,
+                worktree: None,
+            })
+            .await
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
 
         let mut meta = store.load_meta(session.id).await.unwrap();
         meta.claude_session_id = None;
@@ -1164,7 +1231,7 @@ done
     }
 
     #[tokio::test]
-    async fn restore_active_sessions_restarts_only_starting_and_running() {
+    async fn restore_active_sessions_restarts_only_starting_and_running_active_sessions() {
         let temp = tempfile::tempdir().unwrap();
         let args_log = temp.path().join("args.log");
         let bin = fake_claude_logging_args(temp.path(), &args_log);
@@ -1190,22 +1257,25 @@ done
             Some("stopped-resume"),
         )
         .await;
-        let exited_id = save_meta_with_status(
+        let deleted_id = save_meta_with_status(
             &store,
             temp.path().to_path_buf(),
-            SessionStatus::Exited,
-            Some("exited-resume"),
+            SessionStatus::Running,
+            Some("deleted-resume"),
         )
         .await;
+        store
+            .update_meta(deleted_id, |meta| {
+                meta.deleted_at = Some(Utc::now());
+                Ok(())
+            })
+            .await
+            .unwrap();
         let manager = SessionManager::new(
             store.clone(),
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
-            crate::WorktreeConfig {
-                worktrees_dir: None,
-                branch_prefix: "pin".to_string(),
-                base_ref: crate::WorktreeBaseRef::Head,
-            },
+            worktree_config(),
         );
 
         manager.restore_active_sessions().await.unwrap();
@@ -1214,23 +1284,15 @@ done
         assert!(running.contains_key(&running_id));
         assert!(running.contains_key(&starting_id));
         assert!(!running.contains_key(&stopped_id));
-        assert!(!running.contains_key(&exited_id));
+        assert!(!running.contains_key(&deleted_id));
         drop(running);
 
-        assert_eq!(
-            store.load_meta(stopped_id).await.unwrap().status,
-            SessionStatus::Stopped
-        );
-        assert_eq!(
-            store.load_meta(exited_id).await.unwrap().status,
-            SessionStatus::Exited
-        );
         tokio::time::sleep(std::time::Duration::from_millis(150)).await;
         let args = fs::read_to_string(args_log).unwrap();
         assert_eq!(args.lines().count(), 2);
         assert!(args.contains("--resume running-resume"));
         assert!(!args.contains("stopped-resume"));
-        assert!(!args.contains("exited-resume"));
+        assert!(!args.contains("deleted-resume"));
 
         manager.stop_session(running_id).await.unwrap();
         manager.stop_session(starting_id).await.unwrap();
@@ -1259,11 +1321,7 @@ done
             store.clone(),
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
-            crate::WorktreeConfig {
-                worktrees_dir: None,
-                branch_prefix: "pin".to_string(),
-                base_ref: crate::WorktreeBaseRef::Head,
-            },
+            worktree_config(),
         );
 
         manager.restore_active_sessions().await.unwrap();
@@ -1296,11 +1354,7 @@ done
             store.clone(),
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
-            crate::WorktreeConfig {
-                worktrees_dir: None,
-                branch_prefix: "pin".to_string(),
-                base_ref: crate::WorktreeBaseRef::Head,
-            },
+            worktree_config(),
         );
 
         let session = manager
@@ -1326,5 +1380,405 @@ done
                 .iter()
                 .any(|event| event.kind == EventKind::Assistant)
         );
+    }
+
+    #[tokio::test]
+    async fn runtime_user_and_process_event_ids_do_not_collide() {
+        let temp = tempfile::tempdir().unwrap();
+        let bin = fake_claude(temp.path());
+        let store = EventStore::new(temp.path().join("data")).await.unwrap();
+        let manager = SessionManager::new(
+            store.clone(),
+            vec![bin.to_string_lossy().to_string()],
+            "acceptEdits".to_string(),
+            worktree_config(),
+        );
+
+        let session = manager
+            .create_session(CreateSessionRequest {
+                cwd: temp.path().to_path_buf(),
+                name: None,
+                permission_mode: None,
+                worktree: None,
+            })
+            .await
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+        manager
+            .send_input(session.id, "hello".to_string())
+            .await
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+        let events = store.load_events_after(session.id, 0).await.unwrap();
+        let mut ids = HashSet::new();
+        for event in events {
+            assert!(ids.insert(event.id), "duplicate event id {}", event.id);
+        }
+    }
+
+    #[tokio::test]
+    async fn soft_delete_hides_session_and_restore_shows_it_again() {
+        let temp = tempfile::tempdir().unwrap();
+        let bin = fake_claude(temp.path());
+        let store = EventStore::new(temp.path().join("data")).await.unwrap();
+        let manager = SessionManager::new(
+            store.clone(),
+            vec![bin.to_string_lossy().to_string()],
+            "acceptEdits".to_string(),
+            worktree_config(),
+        );
+        let session = manager
+            .create_session(CreateSessionRequest {
+                cwd: temp.path().to_path_buf(),
+                name: Some("delete me".to_string()),
+                permission_mode: None,
+                worktree: None,
+            })
+            .await
+            .unwrap();
+
+        let deleted = manager.delete_session(session.id).await.unwrap();
+        assert!(deleted.deleted_at.is_some());
+        assert_eq!(deleted.status, SessionStatus::Stopped);
+        assert!(
+            manager
+                .list_sessions(SessionListFilter::Active)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            manager
+                .list_sessions(SessionListFilter::Deleted)
+                .await
+                .unwrap()[0]
+                .id,
+            session.id
+        );
+
+        let restored = manager.restore_session(session.id).await.unwrap();
+        assert_eq!(restored.deleted_at, None);
+        assert_eq!(
+            manager
+                .list_sessions(SessionListFilter::Active)
+                .await
+                .unwrap()[0]
+                .id,
+            session.id
+        );
+    }
+
+    #[tokio::test]
+    async fn permanently_delete_requires_soft_deleted_session_and_removes_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let bin = fake_claude(temp.path());
+        let data_dir = temp.path().join("data");
+        let store = EventStore::new(&data_dir).await.unwrap();
+        let manager = SessionManager::new(
+            store.clone(),
+            vec![bin.to_string_lossy().to_string()],
+            "acceptEdits".to_string(),
+            worktree_config(),
+        );
+        let session = manager
+            .create_session(CreateSessionRequest {
+                cwd: temp.path().to_path_buf(),
+                name: None,
+                permission_mode: None,
+                worktree: None,
+            })
+            .await
+            .unwrap();
+
+        let active_result = manager.permanently_delete_session(session.id).await;
+        assert!(matches!(active_result, Err(AppError::InvalidRequest(_))));
+
+        manager.delete_session(session.id).await.unwrap();
+        manager
+            .permanently_delete_session(session.id)
+            .await
+            .unwrap();
+
+        assert!(
+            !tokio::fs::try_exists(data_dir.join("sessions").join(session.id.to_string()))
+                .await
+                .unwrap()
+        );
+        manager
+            .permanently_delete_session(session.id)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn deleted_sessions_reject_input_resume_restart_and_events() {
+        let temp = tempfile::tempdir().unwrap();
+        let bin = fake_claude(temp.path());
+        let store = EventStore::new(temp.path().join("data")).await.unwrap();
+        let manager = SessionManager::new(
+            store,
+            vec![bin.to_string_lossy().to_string()],
+            "acceptEdits".to_string(),
+            worktree_config(),
+        );
+        let session = manager
+            .create_session(CreateSessionRequest {
+                cwd: temp.path().to_path_buf(),
+                name: None,
+                permission_mode: None,
+                worktree: None,
+            })
+            .await
+            .unwrap();
+
+        manager.delete_session(session.id).await.unwrap();
+
+        assert!(matches!(
+            manager.send_input(session.id, "hello".to_string()).await,
+            Err(AppError::InvalidRequest(_))
+        ));
+        assert!(matches!(
+            manager.resume_session(session.id).await,
+            Err(AppError::InvalidRequest(_))
+        ));
+        assert!(matches!(
+            manager.restart_session(session.id).await,
+            Err(AppError::InvalidRequest(_))
+        ));
+        assert!(matches!(
+            manager.subscribe(session.id).await,
+            Err(AppError::InvalidRequest(_))
+        ));
+        assert!(matches!(
+            manager.stop_session(session.id).await,
+            Err(AppError::InvalidRequest(_))
+        ));
+        assert!(matches!(
+            manager.events_after(session.id, 0).await,
+            Err(AppError::InvalidRequest(_))
+        ));
+        assert!(matches!(
+            manager.tasks_for_session(session.id).await,
+            Err(AppError::InvalidRequest(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn concurrent_resume_allows_only_one_starter() {
+        let temp = tempfile::tempdir().unwrap();
+        let starts_log = temp.path().join("starts.log");
+        let wrapper = temp.path().join("slow-wrapper.sh");
+        fs::write(
+            &wrapper,
+            format!(
+                "#!/usr/bin/env bash\nprintf 'start\\n' >> '{}'\nsleep 0.2\nprintf '{{\"type\":\"system\",\"session_id\":\"slow-session\"}}\\n'\nwhile IFS= read -r line; do sleep 10; done\n",
+                starts_log.display()
+            ),
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&wrapper).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&wrapper, permissions).unwrap();
+        let store = EventStore::new(temp.path().join("data")).await.unwrap();
+        let manager = SessionManager::new(
+            store,
+            vec![wrapper.to_string_lossy().to_string()],
+            "acceptEdits".to_string(),
+            worktree_config(),
+        );
+        let session = manager
+            .create_session(CreateSessionRequest {
+                cwd: temp.path().to_path_buf(),
+                name: None,
+                permission_mode: None,
+                worktree: None,
+            })
+            .await
+            .unwrap();
+        manager.stop_session(session.id).await.unwrap();
+
+        let (first, second) = tokio::join!(
+            manager.resume_session(session.id),
+            manager.resume_session(session.id)
+        );
+        let successes = [&first, &second]
+            .iter()
+            .filter(|result| result.is_ok())
+            .count();
+        let invalid_requests = [&first, &second]
+            .iter()
+            .filter(|result| matches!(result, Err(AppError::InvalidRequest(_))))
+            .count();
+
+        assert_eq!(successes, 1);
+        assert_eq!(invalid_requests, 1);
+        manager.stop_session(session.id).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn delete_during_starting_reservation_prevents_late_running_resurrection() {
+        let temp = tempfile::tempdir().unwrap();
+        let wrapper = temp.path().join("slow-wrapper.sh");
+        fs::write(
+            &wrapper,
+            "#!/usr/bin/env bash\nprintf '{\"type\":\"system\",\"session_id\":\"slow-session\"}\\n'\nwhile IFS= read -r line; do sleep 10; done\n",
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&wrapper).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&wrapper, permissions).unwrap();
+        let busy_executable = fs::OpenOptions::new().write(true).open(&wrapper).unwrap();
+        let store = EventStore::new(temp.path().join("data")).await.unwrap();
+        let manager = SessionManager::new(
+            store.clone(),
+            vec![wrapper.to_string_lossy().to_string()],
+            "acceptEdits".to_string(),
+            worktree_config(),
+        );
+        let session_id = Uuid::new_v4();
+        let now = Utc::now();
+        store
+            .save_meta(&SessionMeta {
+                id: session_id,
+                name: Some("slow".to_string()),
+                cwd: temp.path().to_path_buf(),
+                permission_mode: "acceptEdits".to_string(),
+                status: SessionStatus::Stopped,
+                claude_session_id: Some("resume-me".to_string()),
+                worktree: None,
+                deleted_at: None,
+                created_at: now,
+                updated_at: now,
+            })
+            .await
+            .unwrap();
+
+        let resume_manager = manager.clone();
+        let resume = tokio::spawn(async move { resume_manager.resume_session(session_id).await });
+        let starting = wait_for_status(&store, session_id, SessionStatus::Starting).await;
+        assert_eq!(starting.status, SessionStatus::Starting);
+
+        let deleted = manager.delete_session(session_id).await.unwrap();
+        drop(busy_executable);
+        let resume_result = resume.await.unwrap();
+        let final_meta = store.load_meta(session_id).await.unwrap();
+
+        assert!(deleted.deleted_at.is_some());
+        assert!(matches!(resume_result, Err(AppError::InvalidRequest(_))));
+        assert!(final_meta.deleted_at.is_some());
+        assert_eq!(final_meta.status, SessionStatus::Stopped);
+        assert!(manager.subscribe(session_id).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn stop_during_starting_reservation_prevents_late_running_resurrection() {
+        let temp = tempfile::tempdir().unwrap();
+        let wrapper = temp.path().join("slow-wrapper.sh");
+        fs::write(
+            &wrapper,
+            "#!/usr/bin/env bash\nprintf '{\"type\":\"system\",\"session_id\":\"slow-session\"}\\n'\nwhile IFS= read -r line; do sleep 10; done\n",
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&wrapper).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&wrapper, permissions).unwrap();
+        let busy_executable = fs::OpenOptions::new().write(true).open(&wrapper).unwrap();
+        let store = EventStore::new(temp.path().join("data")).await.unwrap();
+        let manager = SessionManager::new(
+            store.clone(),
+            vec![wrapper.to_string_lossy().to_string()],
+            "acceptEdits".to_string(),
+            worktree_config(),
+        );
+        let session_id = Uuid::new_v4();
+        let now = Utc::now();
+        store
+            .save_meta(&SessionMeta {
+                id: session_id,
+                name: Some("slow".to_string()),
+                cwd: temp.path().to_path_buf(),
+                permission_mode: "acceptEdits".to_string(),
+                status: SessionStatus::Stopped,
+                claude_session_id: Some("resume-me".to_string()),
+                worktree: None,
+                deleted_at: None,
+                created_at: now,
+                updated_at: now,
+            })
+            .await
+            .unwrap();
+
+        let resume_manager = manager.clone();
+        let resume = tokio::spawn(async move { resume_manager.resume_session(session_id).await });
+        let starting = wait_for_status(&store, session_id, SessionStatus::Starting).await;
+        assert_eq!(starting.status, SessionStatus::Starting);
+
+        manager.stop_session(session_id).await.unwrap();
+        drop(busy_executable);
+        let resume_result = resume.await.unwrap();
+        let final_meta = store.load_meta(session_id).await.unwrap();
+
+        assert!(matches!(resume_result, Err(AppError::InvalidRequest(_))));
+        assert_eq!(final_meta.status, SessionStatus::Stopped);
+        assert!(manager.subscribe(session_id).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn resume_uses_persisted_claude_session_id() {
+        let temp = tempfile::tempdir().unwrap();
+        let args_log = temp.path().join("args.log");
+        let wrapper = temp.path().join("fake-wrapper.sh");
+        fs::write(
+            &wrapper,
+            format!(
+                "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" > '{}'\nprintf '{{\"type\":\"system\",\"session_id\":\"resumed\"}}\\n'\nwhile IFS= read -r line; do exit 0; done\n",
+                args_log.display()
+            ),
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&wrapper).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&wrapper, permissions).unwrap();
+        let store = EventStore::new(temp.path().join("data")).await.unwrap();
+        let manager = SessionManager::new(
+            store.clone(),
+            vec![wrapper.to_string_lossy().to_string()],
+            "acceptEdits".to_string(),
+            worktree_config(),
+        );
+        let session = manager
+            .create_session(CreateSessionRequest {
+                cwd: temp.path().to_path_buf(),
+                name: None,
+                permission_mode: None,
+                worktree: None,
+            })
+            .await
+            .unwrap();
+        manager.stop_session(session.id).await.unwrap();
+        if let Err(error) = fs::remove_file(&args_log)
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            panic!("failed to remove pre-resume args log: {error}");
+        }
+        let mut meta = store.load_meta(session.id).await.unwrap();
+        meta.claude_session_id = Some("resume-me".to_string());
+        store.save_meta(&meta).await.unwrap();
+
+        manager.resume_session(session.id).await.unwrap();
+        let mut args = String::new();
+        for _ in 0..20 {
+            if let Ok(contents) = fs::read_to_string(&args_log)
+                && contents.contains("--resume resume-me")
+            {
+                args = contents;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+
+        assert!(args.contains("--resume resume-me"));
     }
 }
