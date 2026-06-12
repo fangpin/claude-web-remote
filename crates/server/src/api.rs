@@ -1,4 +1,6 @@
-use crate::{AppError, AppResult, CreateSessionRequest, EventStore, SessionManager};
+use crate::{
+    AppError, AppResult, CreateSessionRequest, EventStore, SessionListFilter, SessionManager,
+};
 use axum::{
     Json, Router,
     extract::{
@@ -52,7 +54,7 @@ pub fn build_router(state: AppState, web_dir: Option<PathBuf>) -> Router {
 
 async fn list_sessions(State(state): State<AppState>) -> AppResult<Json<serde_json::Value>> {
     Ok(Json(
-        json!({ "sessions": state.manager.list_sessions().await? }),
+        json!({ "sessions": state.manager.list_sessions(SessionListFilter::Active).await? }),
     ))
 }
 
