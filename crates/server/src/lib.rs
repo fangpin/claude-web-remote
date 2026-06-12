@@ -7,7 +7,7 @@ pub mod session;
 pub mod store;
 
 pub use api::{AppState, build_router};
-pub use config::Config;
+pub use config::{Config, ConfigStore, ConfigValues, ResolvedConfig};
 pub use error::{AppError, AppResult};
 pub use event::{EventKind, UiEvent, extract_claude_session_id, normalize_claude_stdout};
 pub use process::{ClaudeProcess, ClaudeProcessConfig, ProcessEvent};

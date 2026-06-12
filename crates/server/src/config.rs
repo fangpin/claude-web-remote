@@ -1,6 +1,6 @@
 use crate::{AppError, AppResult};
 use clap::Parser;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
@@ -31,7 +31,8 @@ pub struct Config {
     pub default_permission_mode: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ResolvedConfig {
     pub bind: SocketAddr,
     pub data_dir: PathBuf,
@@ -48,6 +49,32 @@ struct FileConfig {
     launcher: Option<Vec<String>>,
     web_dir: Option<PathBuf>,
     default_permission_mode: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigValues {
+    pub bind: String,
+    pub data_dir: String,
+    pub launcher: Vec<String>,
+    pub web_dir: Option<String>,
+    pub default_permission_mode: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManagedConfigResponse {
+    pub path: PathBuf,
+    pub exists: bool,
+    pub current: ConfigValues,
+    pub file: ConfigValues,
+    pub restart_required: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct ConfigStore {
+    path: PathBuf,
+    current: ResolvedConfig,
 }
 
 impl Config {
@@ -78,6 +105,143 @@ impl Config {
                 .unwrap_or_else(|| "acceptEdits".to_string()),
         })
     }
+
+    pub fn target_config_path(&self) -> PathBuf {
+        self.config.clone().unwrap_or_else(default_config_path)
+    }
+}
+
+impl ConfigStore {
+    pub fn new(path: PathBuf, current: ResolvedConfig) -> Self {
+        Self { path, current }
+    }
+
+    pub async fn get(&self) -> AppResult<ManagedConfigResponse> {
+        let exists = tokio::fs::try_exists(&self.path).await?;
+        let file = if exists {
+            let file_config = load_file_config(Some(&self.path)).await?;
+            values_from_file_config(file_config, &self.current)
+        } else {
+            ConfigValues::from(&self.current)
+        };
+
+        Ok(ManagedConfigResponse {
+            path: self.path.clone(),
+            exists,
+            current: ConfigValues::from(&self.current),
+            file,
+            restart_required: false,
+        })
+    }
+
+    pub async fn save(&self, values: ConfigValues) -> AppResult<ManagedConfigResponse> {
+        validate_config_values(&values)?;
+        if let Some(parent) = self.path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        let content = normalized_toml(&values);
+        tokio::fs::write(&self.path, content).await?;
+
+        Ok(ManagedConfigResponse {
+            path: self.path.clone(),
+            exists: true,
+            current: ConfigValues::from(&self.current),
+            file: values,
+            restart_required: true,
+        })
+    }
+}
+
+impl From<&ResolvedConfig> for ConfigValues {
+    fn from(config: &ResolvedConfig) -> Self {
+        Self {
+            bind: config.bind.to_string(),
+            data_dir: config.data_dir.to_string_lossy().to_string(),
+            launcher: config.launcher.clone(),
+            web_dir: config
+                .web_dir
+                .as_ref()
+                .map(|path| path.to_string_lossy().to_string()),
+            default_permission_mode: config.default_permission_mode.clone(),
+        }
+    }
+}
+
+fn values_from_file_config(file_config: FileConfig, current: &ResolvedConfig) -> ConfigValues {
+    ConfigValues {
+        bind: file_config
+            .bind
+            .map(|bind| bind.to_string())
+            .unwrap_or_else(|| current.bind.to_string()),
+        data_dir: file_config
+            .data_dir
+            .map(expand_home)
+            .unwrap_or_else(|| current.data_dir.clone())
+            .to_string_lossy()
+            .to_string(),
+        launcher: file_config
+            .launcher
+            .unwrap_or_else(|| current.launcher.clone()),
+        web_dir: file_config
+            .web_dir
+            .map(expand_home)
+            .or_else(|| current.web_dir.clone())
+            .map(|path| path.to_string_lossy().to_string()),
+        default_permission_mode: file_config
+            .default_permission_mode
+            .unwrap_or_else(|| current.default_permission_mode.clone()),
+    }
+}
+
+fn validate_config_values(values: &ConfigValues) -> AppResult<()> {
+    values
+        .bind
+        .parse::<SocketAddr>()
+        .map_err(|err| AppError::InvalidRequest(format!("invalid bind address: {err}")))?;
+    if values.launcher.is_empty() || values.launcher.iter().any(|value| value.trim().is_empty()) {
+        return Err(AppError::InvalidRequest(
+            "launcher must contain at least one value".to_string(),
+        ));
+    }
+    if values.data_dir.trim().is_empty() {
+        return Err(AppError::InvalidRequest("dataDir is empty".to_string()));
+    }
+    if values.default_permission_mode.trim().is_empty() {
+        return Err(AppError::InvalidRequest(
+            "defaultPermissionMode is empty".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn normalized_toml(values: &ConfigValues) -> String {
+    let mut content = String::new();
+    content.push_str(&format!("bind = {}\n", toml_string(&values.bind)));
+    content.push_str(&format!("data_dir = {}\n", toml_string(&values.data_dir)));
+    content.push_str("launcher = [");
+    content.push_str(
+        &values
+            .launcher
+            .iter()
+            .map(|value| toml_string(value))
+            .collect::<Vec<_>>()
+            .join(", "),
+    );
+    content.push_str("]\n");
+    if let Some(web_dir) = &values.web_dir
+        && !web_dir.trim().is_empty()
+    {
+        content.push_str(&format!("web_dir = {}\n", toml_string(web_dir)));
+    }
+    content.push_str(&format!(
+        "default_permission_mode = {}\n",
+        toml_string(&values.default_permission_mode)
+    ));
+    content
+}
+
+fn toml_string(value: &str) -> String {
+    toml::Value::String(value.to_string()).to_string()
 }
 
 async fn load_file_config(explicit_path: Option<&Path>) -> AppResult<FileConfig> {
@@ -361,5 +525,117 @@ launcher = ["from-file"]
         let resolved = config.resolve().await.unwrap();
 
         assert_eq!(resolved.launcher, vec!["ttadk", "claude", "-a"]);
+    }
+
+    #[tokio::test]
+    async fn config_store_returns_current_values_when_file_is_missing() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("missing-config.toml");
+        let current = ResolvedConfig {
+            bind: "127.0.0.1:8787".parse().unwrap(),
+            data_dir: temp.path().join("data"),
+            launcher: vec!["claude".to_string()],
+            web_dir: None,
+            default_permission_mode: "acceptEdits".to_string(),
+        };
+        let store = ConfigStore::new(path.clone(), current);
+
+        let response = store.get().await.unwrap();
+
+        assert_eq!(response.path, path);
+        assert!(!response.exists);
+        assert!(!response.restart_required);
+        assert_eq!(response.file.bind, "127.0.0.1:8787");
+        assert_eq!(response.file.launcher, vec!["claude".to_string()]);
+        assert_eq!(response.file.default_permission_mode, "acceptEdits");
+    }
+
+    #[tokio::test]
+    async fn config_store_writes_normalized_toml() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("nested").join("config.toml");
+        let current = ResolvedConfig {
+            bind: "127.0.0.1:8787".parse().unwrap(),
+            data_dir: temp.path().join("data"),
+            launcher: vec!["claude".to_string()],
+            web_dir: None,
+            default_permission_mode: "acceptEdits".to_string(),
+        };
+        let store = ConfigStore::new(path.clone(), current);
+
+        let saved = store
+            .save(ConfigValues {
+                bind: "127.0.0.1:9999".to_string(),
+                data_dir: "/tmp/crw-data".to_string(),
+                launcher: vec!["ttadk".to_string(), "claude".to_string(), "-a".to_string()],
+                web_dir: Some("/tmp/crw-web".to_string()),
+                default_permission_mode: "auto".to_string(),
+            })
+            .await
+            .unwrap();
+
+        assert!(saved.exists);
+        assert!(saved.restart_required);
+        assert_eq!(saved.file.bind, "127.0.0.1:9999");
+        let written = fs::read_to_string(path).unwrap();
+        assert_eq!(
+            written,
+            "bind = \"127.0.0.1:9999\"\ndata_dir = \"/tmp/crw-data\"\nlauncher = [\"ttadk\", \"claude\", \"-a\"]\nweb_dir = \"/tmp/crw-web\"\ndefault_permission_mode = \"auto\"\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn config_store_rejects_invalid_bind() {
+        let temp = tempfile::tempdir().unwrap();
+        let current = ResolvedConfig {
+            bind: "127.0.0.1:8787".parse().unwrap(),
+            data_dir: temp.path().join("data"),
+            launcher: vec!["claude".to_string()],
+            web_dir: None,
+            default_permission_mode: "acceptEdits".to_string(),
+        };
+        let store = ConfigStore::new(temp.path().join("config.toml"), current);
+
+        let err = store
+            .save(ConfigValues {
+                bind: "not-a-socket".to_string(),
+                data_dir: "/tmp/crw-data".to_string(),
+                launcher: vec!["claude".to_string()],
+                web_dir: None,
+                default_permission_mode: "acceptEdits".to_string(),
+            })
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("invalid bind address"));
+    }
+
+    #[tokio::test]
+    async fn config_store_rejects_empty_launcher() {
+        let temp = tempfile::tempdir().unwrap();
+        let current = ResolvedConfig {
+            bind: "127.0.0.1:8787".parse().unwrap(),
+            data_dir: temp.path().join("data"),
+            launcher: vec!["claude".to_string()],
+            web_dir: None,
+            default_permission_mode: "acceptEdits".to_string(),
+        };
+        let store = ConfigStore::new(temp.path().join("config.toml"), current);
+
+        let err = store
+            .save(ConfigValues {
+                bind: "127.0.0.1:8787".to_string(),
+                data_dir: "/tmp/crw-data".to_string(),
+                launcher: Vec::new(),
+                web_dir: None,
+                default_permission_mode: "acceptEdits".to_string(),
+            })
+            .await
+            .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("launcher must contain at least one value")
+        );
     }
 }
