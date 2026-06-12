@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, KeyboardEvent, useEffect, useMemo, useState } from 'react';
 import { createSession, eventsUrl, listSessions, restartSession, sendInput, stopSession } from './api';
 import EventCard from './EventCard';
 import type { SessionInfo, UiEvent } from './types';
@@ -67,6 +67,12 @@ export default function App() {
     const text = message;
     setMessage('');
     await sendInput(activeId, text);
+  }
+
+  function onMessageKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
+    event.preventDefault();
+    event.currentTarget.form?.requestSubmit();
   }
 
   async function onStop() {
@@ -141,7 +147,7 @@ export default function App() {
             <form className="composer" onSubmit={onSend}>
               <label>
                 Message
-                <textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={3} />
+                <textarea value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={onMessageKeyDown} rows={3} />
               </label>
               <button type="submit">Send</button>
             </form>
