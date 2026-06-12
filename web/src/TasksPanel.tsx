@@ -1,5 +1,7 @@
 import type { TaskGroups, TaskInfo } from './types';
 
+const TASK_SECTION_LIMIT = 8;
+
 type Props = {
   title: string;
   tasks: TaskGroups;
@@ -22,6 +24,9 @@ function TaskSection({
   tasks: TaskInfo[];
   onSelectTask: (task: TaskInfo) => void;
 }) {
+  const visibleTasks = tasks.slice(-TASK_SECTION_LIMIT);
+  const hiddenTaskCount = tasks.length - visibleTasks.length;
+
   return (
     <section className="task-section">
       <h4>{heading}</h4>
@@ -29,7 +34,12 @@ function TaskSection({
         <p className="task-empty">None.</p>
       ) : (
         <div className="task-list">
-          {tasks.map((task) => {
+          {hiddenTaskCount > 0 && (
+            <p className="task-limit-note">
+              Showing latest {TASK_SECTION_LIMIT}. {hiddenTaskCount} older hidden.
+            </p>
+          )}
+          {visibleTasks.map((task) => {
             const time = formatTime(task.finishedAt ?? task.startedAt);
             return (
               <button

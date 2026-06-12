@@ -18,6 +18,7 @@ import type { SessionInfo, TaskGroups, TaskInfo, UiEvent } from './types';
 import './App.css';
 
 const emptyTaskGroups: TaskGroups = { background: [], finished: [] };
+const EVENT_RENDER_LIMIT = 80;
 
 export default function App() {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
@@ -39,6 +40,8 @@ export default function App() {
   const [sessionTaskError, setSessionTaskError] = useState<string | null>(null);
   const [pendingEventId, setPendingEventId] = useState<number | null>(null);
   const activeIdRef = useRef<string | null>(null);
+  const composerRef = useRef<HTMLFormElement | null>(null);
+  const eventsRef = useRef<HTMLDivElement | null>(null);
   const taskRefreshIdRef = useRef(0);
   const sessionTaskRefreshIdRef = useRef(0);
 
@@ -50,10 +53,15 @@ export default function App() {
     () => (activeId ? events[activeId] ?? [] : []),
     [activeId, events]
   );
-  const activeBlocks = useMemo(
-    () => buildConversationBlocks(activeEvents),
+  const visibleEvents = useMemo(
+    () => activeEvents.slice(-EVENT_RENDER_LIMIT),
     [activeEvents]
   );
+  const activeBlocks = useMemo(
+    () => buildConversationBlocks(visibleEvents),
+    [visibleEvents]
+  );
+  const hiddenEventCount = activeEvents.length - visibleEvents.length;
 
   const recentDirectories = useMemo(() => {
     const seen = new Set<string>();
@@ -160,6 +168,17 @@ export default function App() {
     socket.onclose = () => undefined;
     return () => socket.close();
   }, [activeId, refreshTasks, refreshSessionTasks]);
+
+  useEffect(() => {
+    if (!activeId) return;
+    composerRef.current?.scrollIntoView({ block: 'end' });
+  }, [activeId]);
+
+  useEffect(() => {
+    const eventsElement = eventsRef.current;
+    if (!eventsElement) return;
+    eventsElement.scrollTop = eventsElement.scrollHeight;
+  }, [activeId, visibleEvents.length]);
 
   useEffect(() => {
     if (pendingEventId === null) return;
@@ -337,8 +356,8 @@ export default function App() {
               onClick={() => setActiveId(session.id)}
             >
               <strong>{session.name || session.cwd}</strong>
-              <span>{session.cwd}</span>
-              {session.worktree && <span>{session.worktree.branch}</span>}
+              <span className="session-path" title={session.cwd}>{session.cwd}</span>
+              {session.worktree && <span className="session-path" title={session.worktree.branch}>{session.worktree.branch}</span>}
               <em>{session.status}</em>
             </button>
           ))}
@@ -352,7 +371,7 @@ export default function App() {
             <header className="conversation-header">
               <div>
                 <h2>{activeSession.name || activeSession.cwd}</h2>
-                <p>{activeSession.cwd}</p>
+                <p title={activeSession.cwd}>{activeSession.cwd}</p>
                 {activeSession.worktree && (
                   <div className="worktree-meta">
                     <span>Source: {activeSession.worktree.sourceCwd}</span>
@@ -381,10 +400,15 @@ export default function App() {
               compact
               onSelectTask={onSelectTask}
             />
-            <div className="events">
+            <div className="events" ref={eventsRef}>
+              {hiddenEventCount > 0 && (
+                <div className="event-limit-note">
+                  Showing latest {EVENT_RENDER_LIMIT} events. {hiddenEventCount} older events hidden.
+                </div>
+              )}
               <ConversationBlockList blocks={activeBlocks} />
             </div>
-            <form className="composer" onSubmit={onSend}>
+            <form className="composer" onSubmit={onSend} ref={composerRef}>
               <div className="composer-input">
                 <label>
                   Message
