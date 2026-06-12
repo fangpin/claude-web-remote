@@ -14,7 +14,7 @@ use axum::{
 use serde::Deserialize;
 use serde_json::json;
 use std::path::PathBuf;
-use tower_http::{cors::CorsLayer, services::ServeDir};
+use tower_http::services::ServeDir;
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -45,8 +45,7 @@ pub fn build_router(state: AppState, web_dir: Option<PathBuf>) -> Router {
         .route("/api/sessions/{id}/restart", post(restart_session))
         .route("/api/sessions/{id}/events", get(events_ws))
         .route("/api/config", get(get_config).merge(put(update_config)))
-        .with_state(state)
-        .layer(CorsLayer::permissive());
+        .with_state(state);
 
     if let Some(web_dir) = web_dir {
         api.fallback_service(ServeDir::new(web_dir))

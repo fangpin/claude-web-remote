@@ -249,6 +249,30 @@ async fn config_api_get_returns_current_values_for_missing_file() {
 }
 
 #[tokio::test]
+async fn config_api_get_requires_restart_when_file_differs_from_current() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.toml");
+    fs::write(&config_path, r#"launcher = ["ttadk", "claude"]"#).unwrap();
+    let addr = spawn_app_with_config(&temp, vec!["claude".to_string()], config_path).await;
+    let client = reqwest::Client::new();
+
+    let response: Value = client
+        .get(format!("http://{addr}/api/config"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(response["current"]["launcher"], json!(["claude"]));
+    assert_eq!(response["file"]["launcher"], json!(["ttadk", "claude"]));
+    assert_eq!(response["restartRequired"], true);
+}
+
+#[tokio::test]
 async fn config_api_put_writes_normalized_config() {
     let temp = tempfile::tempdir().unwrap();
     let config_path = temp.path().join("nested").join("config.toml");

@@ -125,18 +125,23 @@ impl ConfigStore {
             ConfigValues::from(&self.current)
         };
 
+        let current = ConfigValues::from(&self.current);
+        let restart_required = file != current;
+
         Ok(ManagedConfigResponse {
             path: self.path.clone(),
             exists,
-            current: ConfigValues::from(&self.current),
+            current,
             file,
-            restart_required: false,
+            restart_required,
         })
     }
 
     pub async fn save(&self, values: ConfigValues) -> AppResult<ManagedConfigResponse> {
         validate_config_values(&values)?;
-        if let Some(parent) = self.path.parent() {
+        if let Some(parent) = self.path.parent()
+            && !parent.as_os_str().is_empty()
+        {
             tokio::fs::create_dir_all(parent).await?;
         }
         let content = normalized_toml(&values);
@@ -585,6 +590,58 @@ launcher = []
             response.file.launcher,
             vec![home.join("bin/claude").to_string_lossy().to_string()]
         );
+    }
+
+    #[tokio::test]
+    async fn config_store_get_requires_restart_when_file_differs_from_current() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("config.toml");
+        fs::write(&path, r#"launcher = ["ttadk", "claude"]"#).unwrap();
+        let current = ResolvedConfig {
+            bind: "127.0.0.1:8787".parse().unwrap(),
+            data_dir: temp.path().join("data"),
+            launcher: vec!["claude".to_string()],
+            web_dir: None,
+            default_permission_mode: "acceptEdits".to_string(),
+        };
+        let store = ConfigStore::new(path, current);
+
+        let response = store.get().await.unwrap();
+
+        assert!(response.exists);
+        assert_eq!(response.current.launcher, vec!["claude".to_string()]);
+        assert_eq!(response.file.launcher, vec!["ttadk", "claude"]);
+        assert!(response.restart_required);
+    }
+
+    #[tokio::test]
+    async fn config_store_saves_relative_config_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = PathBuf::from("config_store_relative_save_test.toml");
+        let _ = fs::remove_file(&path);
+        let current = ResolvedConfig {
+            bind: "127.0.0.1:8787".parse().unwrap(),
+            data_dir: temp.path().join("data"),
+            launcher: vec!["claude".to_string()],
+            web_dir: None,
+            default_permission_mode: "acceptEdits".to_string(),
+        };
+        let store = ConfigStore::new(path.clone(), current);
+
+        let saved = store
+            .save(ConfigValues {
+                bind: "127.0.0.1:8787".to_string(),
+                data_dir: temp.path().join("data").to_string_lossy().to_string(),
+                launcher: vec!["claude".to_string()],
+                web_dir: None,
+                default_permission_mode: "acceptEdits".to_string(),
+            })
+            .await;
+        let exists = path.exists();
+        let _ = fs::remove_file(&path);
+
+        assert!(saved.unwrap().exists);
+        assert!(exists);
     }
 
     #[tokio::test]
