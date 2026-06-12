@@ -129,10 +129,16 @@ impl SessionManager {
         match self.start_process(meta.clone(), None).await {
             Ok(info) => Ok(info),
             Err(err) => {
-                if let Some(worktree) = meta.worktree.as_ref() {
-                    let _ = self.worktree_manager.remove(worktree).await;
-                }
+                let removed_worktree = if let Some(worktree) = meta.worktree.as_ref() {
+                    self.worktree_manager.remove(worktree).await.is_ok()
+                } else {
+                    false
+                };
                 let mut failed_meta = meta;
+                if removed_worktree {
+                    failed_meta.cwd = cwd;
+                    failed_meta.worktree = None;
+                }
                 failed_meta.status = SessionStatus::Failed;
                 failed_meta.updated_at = Utc::now();
                 let _ = self.store.save_meta(&failed_meta).await;
@@ -228,7 +234,10 @@ impl SessionManager {
 
         meta.status = SessionStatus::Running;
         meta.updated_at = Utc::now();
-        self.store.save_meta(&meta).await?;
+        if let Err(err) = self.store.save_meta(&meta).await {
+            let _ = process.kill().await;
+            return Err(err);
+        }
 
         let (tx, _) = broadcast::channel(256);
         self.running.lock().await.insert(
@@ -392,6 +401,55 @@ done
         path
     }
 
+    fn fake_claude_pid_loop(dir: &std::path::Path, pid_file: &std::path::Path) -> PathBuf {
+        let path = dir.join("fake-claude-pid-loop.sh");
+        fs::write(
+            &path,
+            format!(
+                r#"#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$$" > '{}'
+printf '{{"type":"system","session_id":"fake-session"}}\n'
+while true; do
+  sleep 60
+done
+"#,
+                pid_file.display()
+            ),
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&path, permissions).unwrap();
+        path
+    }
+
+    async fn read_pid_file(path: &std::path::Path) -> Option<u32> {
+        for _ in 0..100 {
+            if let Ok(content) = fs::read_to_string(path)
+                && let Ok(pid) = content.trim().parse()
+            {
+                return Some(pid);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        None
+    }
+
+    fn process_is_alive(pid: u32) -> bool {
+        unsafe { libc::kill(pid as i32, 0) == 0 }
+    }
+
+    async fn wait_until_process_exits(pid: u32) -> bool {
+        for _ in 0..100 {
+            if !process_is_alive(pid) {
+                return true;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        false
+    }
+
     fn git(root: &std::path::Path, args: &[&str]) {
         let output = std::process::Command::new("git")
             .current_dir(root)
@@ -525,6 +583,8 @@ done
         let sessions = store.list_meta().await.unwrap();
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].status, SessionStatus::Failed);
+        assert_eq!(sessions[0].cwd, repo.canonicalize().unwrap());
+        assert_eq!(sessions[0].worktree, None);
         let output = std::process::Command::new("git")
             .current_dir(&repo)
             .args(["worktree", "list", "--porcelain"])
@@ -533,6 +593,60 @@ done
         assert!(output.status.success());
         let worktrees = String::from_utf8_lossy(&output.stdout);
         assert!(!worktrees.contains(".claude/worktrees"));
+    }
+
+    #[tokio::test]
+    async fn start_process_kills_spawned_process_when_running_meta_save_fails() {
+        let temp = tempfile::tempdir().unwrap();
+        let pid_file = temp.path().join("fake-claude.pid");
+        let bin = fake_claude_pid_loop(temp.path(), &pid_file);
+        let store = EventStore::new(temp.path().join("data")).await.unwrap();
+        let manager = SessionManager::new(
+            store.clone(),
+            vec![bin.to_string_lossy().to_string()],
+            "acceptEdits".to_string(),
+            crate::WorktreeConfig {
+                worktrees_dir: None,
+                branch_prefix: "pin".to_string(),
+                base_ref: crate::WorktreeBaseRef::Head,
+            },
+        );
+        let now = Utc::now();
+        let meta = SessionMeta {
+            id: Uuid::new_v4(),
+            name: None,
+            cwd: temp.path().to_path_buf(),
+            permission_mode: "acceptEdits".to_string(),
+            status: SessionStatus::Starting,
+            claude_session_id: None,
+            worktree: None,
+            created_at: now,
+            updated_at: now,
+        };
+        store.save_meta(&meta).await.unwrap();
+        let meta_path = store
+            .root()
+            .join("sessions")
+            .join(meta.id.to_string())
+            .join("meta.json");
+        fs::remove_file(&meta_path).unwrap();
+        fs::create_dir(&meta_path).unwrap();
+
+        let result = manager.start_process(meta, None).await;
+
+        assert!(result.is_err());
+        if let Some(pid) = read_pid_file(&pid_file).await {
+            let exited = wait_until_process_exits(pid).await;
+            if !exited {
+                unsafe {
+                    libc::kill(pid as i32, libc::SIGKILL);
+                }
+            }
+            assert!(
+                exited,
+                "spawned process should be killed after save_meta failure"
+            );
+        }
     }
 
     #[tokio::test]
