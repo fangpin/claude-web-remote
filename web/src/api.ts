@@ -20,8 +20,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export async function listSessions(): Promise<SessionInfo[]> {
-  const result = await request<{ sessions: SessionInfo[] }>('/api/sessions');
+export async function listSessions(options: { deletedOnly?: boolean; includeDeleted?: boolean } = {}): Promise<SessionInfo[]> {
+  const params = new URLSearchParams();
+  if (options.deletedOnly) params.set('deletedOnly', 'true');
+  if (options.includeDeleted) params.set('includeDeleted', 'true');
+  const query = params.toString();
+  const result = await request<{ sessions: SessionInfo[] }>(`/api/sessions${query ? `?${query}` : ''}`);
   return result.sessions;
 }
 
@@ -45,6 +49,22 @@ export async function stopSession(sessionId: string): Promise<void> {
 
 export async function restartSession(sessionId: string): Promise<SessionInfo> {
   return request<SessionInfo>(`/api/sessions/${sessionId}/restart`, { method: 'POST' });
+}
+
+export async function resumeSession(sessionId: string): Promise<SessionInfo> {
+  return request<SessionInfo>(`/api/sessions/${sessionId}/resume`, { method: 'POST' });
+}
+
+export async function deleteSession(sessionId: string): Promise<SessionInfo> {
+  return request<SessionInfo>(`/api/sessions/${sessionId}`, { method: 'DELETE' });
+}
+
+export async function restoreSession(sessionId: string): Promise<SessionInfo> {
+  return request<SessionInfo>(`/api/sessions/${sessionId}/restore`, { method: 'POST' });
+}
+
+export async function permanentlyDeleteSession(sessionId: string): Promise<void> {
+  await request<{ ok: true }>(`/api/sessions/${sessionId}?permanent=true`, { method: 'DELETE' });
 }
 
 export function eventsUrl(sessionId: string, afterId = 0): string {

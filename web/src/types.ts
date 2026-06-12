@@ -7,6 +7,7 @@ export type SessionInfo = {
   permissionMode: string;
   status: SessionStatus;
   claudeSessionId?: string | null;
+  deletedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 };
