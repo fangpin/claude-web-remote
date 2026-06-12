@@ -128,18 +128,26 @@ impl SessionManager {
     pub async fn restart_session(&self, session_id: Uuid) -> AppResult<SessionInfo> {
         let _ = self.stop_session(session_id).await;
         let meta = self.store.load_meta(session_id).await?;
-        let resume = meta.claude_session_id.clone();
-        if resume.is_none() {
-            let event_id = self.store.next_event_id(session_id).await?;
-            let event = UiEvent::new(
-                event_id,
-                session_id,
-                EventKind::System,
-                json!({ "message": "no claude session id found; started fresh" }),
-            );
-            self.store.append_event(&event).await?;
+        self.start_or_resume_process(meta).await
+    }
+
+    pub async fn restore_active_sessions(&self) -> AppResult<()> {
+        let sessions = self.store.list_meta().await?;
+        for meta in sessions {
+            if !matches!(
+                meta.status,
+                SessionStatus::Running | SessionStatus::Starting
+            ) {
+                continue;
+            }
+
+            let session_id = meta.id;
+            if let Err(err) = self.start_or_resume_process(meta).await {
+                tracing::warn!(%session_id, error = %err, "failed to restore session");
+                let _ = self.mark_restore_failed(session_id, err.to_string()).await;
+            }
         }
-        self.start_process(meta, resume).await
+        Ok(())
     }
 
     pub async fn subscribe(&self, session_id: Uuid) -> AppResult<broadcast::Receiver<UiEvent>> {
@@ -152,6 +160,37 @@ impl SessionManager {
 
     pub async fn events_after(&self, session_id: Uuid, after_id: u64) -> AppResult<Vec<UiEvent>> {
         self.store.load_events_after(session_id, after_id).await
+    }
+
+    async fn start_or_resume_process(&self, meta: SessionMeta) -> AppResult<SessionInfo> {
+        let resume = meta.claude_session_id.clone();
+        if resume.is_none() {
+            let event_id = self.store.next_event_id(meta.id).await?;
+            let event = UiEvent::new(
+                event_id,
+                meta.id,
+                EventKind::System,
+                json!({ "message": "no claude session id found; started fresh" }),
+            );
+            self.store.append_event(&event).await?;
+        }
+        self.start_process(meta, resume).await
+    }
+
+    async fn mark_restore_failed(&self, session_id: Uuid, error: String) -> AppResult<()> {
+        let mut meta = self.store.load_meta(session_id).await?;
+        meta.status = SessionStatus::Failed;
+        meta.updated_at = Utc::now();
+        self.store.save_meta(&meta).await?;
+
+        let event_id = self.store.next_event_id(session_id).await?;
+        let event = UiEvent::new(
+            event_id,
+            session_id,
+            EventKind::Error,
+            json!({ "message": "failed to restore session", "error": error }),
+        );
+        self.store.append_event(&event).await
     }
 
     async fn start_process(
@@ -324,6 +363,57 @@ done
         path
     }
 
+    fn fake_claude_logging_args(dir: &std::path::Path, args_log: &std::path::Path) -> PathBuf {
+        let path = dir.join("fake-claude-logging-args.sh");
+        fs::write(
+            &path,
+            format!(
+                r#"#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> '{}'
+printf '{{"type":"system","session_id":"fake-session"}}\n'
+while IFS= read -r line; do
+  text=$(python3 -c 'import json,sys; msg=json.loads(sys.argv[1]); print(msg["message"]["content"][0]["text"])' "$line")
+  printf '{{"type":"assistant","message":"ack:%s"}}\n' "$text"
+  if [[ "$text" == "exit" ]]; then
+    exit 0
+  fi
+done
+"#,
+                args_log.display()
+            ),
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&path, permissions).unwrap();
+        path
+    }
+
+    async fn save_meta_with_status(
+        store: &EventStore,
+        cwd: PathBuf,
+        status: SessionStatus,
+        claude_session_id: Option<&str>,
+    ) -> Uuid {
+        let now = Utc::now();
+        let id = Uuid::new_v4();
+        store
+            .save_meta(&SessionMeta {
+                id,
+                name: None,
+                cwd,
+                permission_mode: "acceptEdits".to_string(),
+                status,
+                claude_session_id: claude_session_id.map(str::to_string),
+                created_at: now,
+                updated_at: now,
+            })
+            .await
+            .unwrap();
+        id
+    }
+
     #[tokio::test]
     async fn rejects_missing_cwd() {
         let temp = tempfile::tempdir().unwrap();
@@ -486,6 +576,120 @@ done
                 .to_string()
                 .contains("no claude session id found")
         }));
+    }
+
+    #[tokio::test]
+    async fn restore_active_sessions_restarts_only_starting_and_running() {
+        let temp = tempfile::tempdir().unwrap();
+        let args_log = temp.path().join("args.log");
+        let bin = fake_claude_logging_args(temp.path(), &args_log);
+        let store = EventStore::new(temp.path().join("data")).await.unwrap();
+        let running_id = save_meta_with_status(
+            &store,
+            temp.path().to_path_buf(),
+            SessionStatus::Running,
+            Some("running-resume"),
+        )
+        .await;
+        let starting_id = save_meta_with_status(
+            &store,
+            temp.path().to_path_buf(),
+            SessionStatus::Starting,
+            None,
+        )
+        .await;
+        let stopped_id = save_meta_with_status(
+            &store,
+            temp.path().to_path_buf(),
+            SessionStatus::Stopped,
+            Some("stopped-resume"),
+        )
+        .await;
+        let exited_id = save_meta_with_status(
+            &store,
+            temp.path().to_path_buf(),
+            SessionStatus::Exited,
+            Some("exited-resume"),
+        )
+        .await;
+        let manager = SessionManager::new(
+            store.clone(),
+            vec![bin.to_string_lossy().to_string()],
+            "acceptEdits".to_string(),
+        );
+
+        manager.restore_active_sessions().await.unwrap();
+
+        let running = manager.running.lock().await;
+        assert!(running.contains_key(&running_id));
+        assert!(running.contains_key(&starting_id));
+        assert!(!running.contains_key(&stopped_id));
+        assert!(!running.contains_key(&exited_id));
+        drop(running);
+
+        assert_eq!(
+            store.load_meta(stopped_id).await.unwrap().status,
+            SessionStatus::Stopped
+        );
+        assert_eq!(
+            store.load_meta(exited_id).await.unwrap().status,
+            SessionStatus::Exited
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        let args = fs::read_to_string(args_log).unwrap();
+        assert_eq!(args.lines().count(), 2);
+        assert!(args.contains("--resume running-resume"));
+        assert!(!args.contains("stopped-resume"));
+        assert!(!args.contains("exited-resume"));
+
+        manager.stop_session(running_id).await.unwrap();
+        manager.stop_session(starting_id).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn restore_active_sessions_marks_failed_session_and_continues() {
+        let temp = tempfile::tempdir().unwrap();
+        let bin = fake_claude(temp.path());
+        let store = EventStore::new(temp.path().join("data")).await.unwrap();
+        let good_id = save_meta_with_status(
+            &store,
+            temp.path().to_path_buf(),
+            SessionStatus::Running,
+            Some("good-resume"),
+        )
+        .await;
+        let failed_id = save_meta_with_status(
+            &store,
+            temp.path().join("missing"),
+            SessionStatus::Running,
+            Some("failed-resume"),
+        )
+        .await;
+        let manager = SessionManager::new(
+            store.clone(),
+            vec![bin.to_string_lossy().to_string()],
+            "acceptEdits".to_string(),
+        );
+
+        manager.restore_active_sessions().await.unwrap();
+
+        let running = manager.running.lock().await;
+        assert!(running.contains_key(&good_id));
+        assert!(!running.contains_key(&failed_id));
+        drop(running);
+        assert_eq!(
+            store.load_meta(failed_id).await.unwrap().status,
+            SessionStatus::Failed
+        );
+        let events = store.load_events_after(failed_id, 0).await.unwrap();
+        assert!(events.iter().any(|event| {
+            event
+                .payload
+                .to_string()
+                .contains("failed to restore session")
+        }));
+
+        manager.stop_session(good_id).await.unwrap();
     }
 
     #[tokio::test]
