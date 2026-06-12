@@ -16,9 +16,11 @@ fn fake_claude(dir: &Path) -> PathBuf {
     fs::write(
         &path,
         r#"#!/usr/bin/env bash
+set -euo pipefail
 printf '{"type":"system","session_id":"fake-session"}\n'
 while IFS= read -r line; do
-  printf '{"type":"assistant","message":"ack:%s"}\n' "$line"
+  text=$(python3 -c 'import json,sys; msg=json.loads(sys.argv[1]); print(msg["message"]["content"][0]["text"])' "$line")
+  printf '{"type":"assistant","message":"ack:%s"}\n' "$text"
 done
 "#,
     )
@@ -35,10 +37,12 @@ fn fake_claude_recording_args(dir: &Path, args_log: &Path) -> PathBuf {
         &path,
         format!(
             r#"#!/usr/bin/env bash
+set -euo pipefail
 printf '%s\n' "$*" >> '{}'
 printf '{{"type":"system","session_id":"resume-session"}}\n'
 while IFS= read -r line; do
-  printf '{{"type":"assistant","message":"ack:%s"}}\n' "$line"
+  text=$(python3 -c 'import json,sys; msg=json.loads(sys.argv[1]); print(msg["message"]["content"][0]["text"])' "$line")
+  printf '{{"type":"assistant","message":"ack:%s"}}\n' "$text"
 done
 "#,
             args_log.display()
