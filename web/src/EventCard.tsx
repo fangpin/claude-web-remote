@@ -1,64 +1,92 @@
+import { formatRawPayload, parseDisplayEvents, type DisplayEvent } from './eventDisplay';
 import type { UiEvent } from './types';
 
-type ObjectPayload = Record<string, unknown>;
-
-function isObject(value: unknown): value is ObjectPayload {
-  return typeof value === 'object' && value !== null;
+function JsonDetails({ raw }: { raw: unknown }) {
+  return (
+    <details className="event-json">
+      <summary>JSON payload</summary>
+      <pre>{formatRawPayload(raw)}</pre>
+    </details>
+  );
 }
 
-function stringField(payload: ObjectPayload, keys: string[]): string | null {
-  for (const key of keys) {
-    const value = payload[key];
-    if (typeof value === 'string' && value.trim()) return value;
+function TextBlock({ children }: { children: string }) {
+  return <div className="event-text">{children}</div>;
+}
+
+function eventStateClass(state: string) {
+  return state === 'error' ? 'is-error' : state;
+}
+
+function DisplayArticle({ display }: { display: DisplayEvent }) {
+  if (display.kind === 'message') {
+    return (
+      <article className={`event event-message ${display.role}`}>
+        <header className="event-header">
+          <span>{display.label}</span>
+        </header>
+        <TextBlock>{display.text}</TextBlock>
+        <JsonDetails raw={display.raw} />
+      </article>
+    );
   }
-  return null;
-}
 
-function summarize(value: unknown): string {
-  if (typeof value === 'string') return value;
-  if (value === undefined || value === null) return '';
-  return JSON.stringify(value, null, 2);
-}
+  if (display.kind === 'tool') {
+    return (
+      <article className={`event event-tool ${eventStateClass(display.status)}`}>
+        <header className="event-header">
+          <span>tool</span>
+          <strong>{display.name}</strong>
+          <em>{display.status}</em>
+        </header>
+        <details className="event-tool-details" open={display.defaultOpen}>
+          <summary>Details</summary>
+          {display.input && (
+            <section className="event-section">
+              <strong>Input</strong>
+              <pre>{display.input}</pre>
+            </section>
+          )}
+          {display.output && (
+            <section className="event-section">
+              <strong>Output</strong>
+              <pre>{display.output}</pre>
+            </section>
+          )}
+          {display.error && (
+            <section className="event-section">
+              <strong>Error</strong>
+              <pre>{display.error}</pre>
+            </section>
+          )}
+        </details>
+        <JsonDetails raw={display.raw} />
+      </article>
+    );
+  }
 
-function toolName(payload: ObjectPayload): string | null {
-  return stringField(payload, ['name', 'tool_name', 'toolName']);
-}
+  if (display.kind === 'status') {
+    return (
+      <article className={`event event-status ${eventStateClass(display.tone)}`}>
+        <header className="event-header">
+          <span>{display.label}</span>
+        </header>
+        {display.text && <TextBlock>{display.text}</TextBlock>}
+        <JsonDetails raw={display.raw} />
+      </article>
+    );
+  }
 
-function textContent(payload: ObjectPayload): string | null {
-  return stringField(payload, ['message', 'text', 'content', 'status', 'error']);
+  return (
+    <article className="event event-status raw">
+      <header className="event-header">
+        <span>{display.label}</span>
+      </header>
+      <JsonDetails raw={display.raw} />
+    </article>
+  );
 }
 
 export default function EventCard({ event }: { event: UiEvent }) {
-  const payload = isObject(event.payload) ? event.payload : { value: event.payload };
-  const type = typeof payload.type === 'string' ? payload.type : event.kind;
-  const text = textContent(payload);
-  const name = toolName(payload);
-  const isTool = event.kind === 'tool' || type === 'tool_use' || type === 'tool_result';
-
-  return (
-    <article className={`event ${event.kind}`}>
-      <header className="event-header">
-        <span>{event.kind}</span>
-        {type !== event.kind && <em>{type}</em>}
-      </header>
-
-      {isTool && (
-        <div className="event-section">
-          <strong>{name ?? 'tool'}</strong>
-          {payload.input !== undefined && <pre>{summarize(payload.input)}</pre>}
-          {payload.result !== undefined && <pre>{summarize(payload.result)}</pre>}
-          {payload.content !== undefined && !text && <pre>{summarize(payload.content)}</pre>}
-        </div>
-      )}
-
-      {!isTool && text && <pre>{text}</pre>}
-
-      {(!text || event.kind === 'raw') && (
-        <details className="event-json" open={event.kind === 'raw'}>
-          <summary>JSON payload</summary>
-          <pre>{JSON.stringify(event.payload, null, 2)}</pre>
-        </details>
-      )}
-    </article>
-  );
+  return <>{parseDisplayEvents(event).map((display, index) => <DisplayArticle key={index} display={display} />)}</>;
 }
