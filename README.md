@@ -34,14 +34,45 @@ model provider
 
 The daemon binds to loopback by default. Do not expose it publicly.
 
-## Requirements
+## Runtime requirements
 
-- Rust toolchain with `cargo` and `rustfmt`
-- Node.js and npm
+Release users need:
+
 - A working Claude Code CLI or compatible wrapper on the devbox
 - SSH access to the devbox if accessing from another machine
 
+## Download a release
+
+GitHub Releases provide ready-to-run packages for:
+
+- Linux x86_64
+- Linux arm64
+- macOS x86_64
+- macOS arm64
+
+Download the package that matches your machine, extract it, and run the binary:
+
+```bash
+tar -xzf claude-remote-web-v0.1.0-linux-x86_64.tar.gz
+cd claude-remote-web-v0.1.0-linux-x86_64
+./claude-remote-web --check
+./claude-remote-web
+```
+
+Release binaries include the Web UI, so `web_dir` is optional. Keep the default `bind = "127.0.0.1:8787"` and use SSH port forwarding when accessing a remote devbox.
+
+macOS binaries are not signed or notarized in the initial release pipeline. If macOS blocks first launch, right-click the binary in Finder and choose Open, or run:
+
+```bash
+xattr -dr com.apple.quarantine claude-remote-web
+```
+
 ## Build
+
+Build requirements:
+
+- Rust toolchain with `cargo` and `rustfmt`
+- Node.js and npm
 
 From the project root:
 
@@ -66,8 +97,15 @@ Native Claude example:
 bind = "127.0.0.1:8787"
 data_dir = "~/.claude-remote-web"
 launcher = ["claude"]
-web_dir = "/data00/home/fangpin.brave/repos/claude-remote-web/web/dist"
 default_permission_mode = "acceptEdits"
+```
+
+`web_dir` is optional for release binaries because the Web UI is embedded. Set `web_dir` when running from source or when you want to serve a custom frontend build.
+
+Source/custom frontend only:
+
+```toml
+web_dir = "/absolute/path/to/web/dist"
 ```
 
 `ttadk` wrapper example:
@@ -76,7 +114,6 @@ default_permission_mode = "acceptEdits"
 bind = "127.0.0.1:8787"
 data_dir = "~/.claude-remote-web"
 launcher = ["ttadk", "claude", "-m", "gpt-5.5", "--skip-check", "-a"]
-web_dir = "/data00/home/fangpin.brave/repos/claude-remote-web/web/dist"
 default_permission_mode = "acceptEdits"
 ```
 
@@ -95,18 +132,24 @@ The daemon appends native Claude arguments after the launcher prefix:
 You can also pass a config file explicitly:
 
 ```bash
+./claude-remote-web --config /path/to/config.toml
+```
+
+When running from source:
+
+```bash
 cargo run --release --manifest-path Cargo.toml -- --config /path/to/config.toml
 ```
 
-## Run
+## Run from source
 
-Start the daemon on the devbox:
+Start the daemon from the project root on the devbox:
 
 ```bash
 scripts/start-server.sh
 ```
 
-Useful variants:
+Useful source-tree variants:
 
 ```bash
 scripts/start-server.sh --config /path/to/config.toml
@@ -114,7 +157,7 @@ scripts/start-server.sh --skip-web-build
 scripts/start-server.sh --check --config /path/to/config.toml
 ```
 
-The script builds `web/dist` unless `--skip-web-build` is set, then starts the Rust backend with `cargo run --release`.
+The source-tree helper script builds `web/dist` unless `--skip-web-build` is set, then starts the Rust backend with `cargo run --release`.
 
 If accessing from another machine, open an SSH tunnel:
 

@@ -12,6 +12,9 @@ pub struct Config {
     #[arg(long, env = "CRW_CONFIG")]
     pub config: Option<PathBuf>,
 
+    #[arg(long)]
+    pub check: bool,
+
     #[arg(long, env = "CRW_BIND")]
     pub bind: Option<SocketAddr>,
 
@@ -158,6 +161,17 @@ mod tests {
     use super::*;
     use std::fs;
 
+    #[test]
+    fn check_flag_parses_without_runtime_config_changes() {
+        let config = Config::parse_from(["claude-remote-web", "--check"]);
+
+        assert!(config.check);
+        assert_eq!(config.bind, None);
+        assert_eq!(config.data_dir, None);
+        assert_eq!(config.web_dir, None);
+        assert!(config.launcher.is_empty());
+    }
+
     #[tokio::test]
     async fn uses_built_in_defaults_when_config_file_is_empty() {
         let temp = tempfile::tempdir().unwrap();
@@ -165,6 +179,7 @@ mod tests {
         fs::write(&config_path, "").unwrap();
         let config = Config {
             config: Some(config_path),
+            check: false,
             bind: None,
             data_dir: None,
             claude_bin: None,
@@ -203,6 +218,7 @@ default_permission_mode = "auto"
 
         let config = Config {
             config: Some(config_path),
+            check: false,
             bind: None,
             data_dir: None,
             claude_bin: None,
@@ -242,6 +258,7 @@ default_permission_mode = "auto"
 
         let config = Config {
             config: Some(config_path),
+            check: false,
             bind: Some("127.0.0.1:7777".parse().unwrap()),
             data_dir: Some(temp.path().join("data")),
             claude_bin: Some(PathBuf::from("custom-claude")),
@@ -267,6 +284,7 @@ default_permission_mode = "auto"
         let temp = tempfile::tempdir().unwrap();
         let config = Config {
             config: Some(temp.path().join("missing.toml")),
+            check: false,
             bind: None,
             data_dir: None,
             claude_bin: None,
@@ -287,6 +305,7 @@ default_permission_mode = "auto"
 
         let config = Config {
             config: Some(config_path),
+            check: false,
             bind: None,
             data_dir: None,
             claude_bin: None,
@@ -319,6 +338,7 @@ launcher = ["ttadk", "claude", "-m", "gpt-5.5", "--skip-check", "-a"]
 
         let config = Config {
             config: Some(config_path),
+            check: false,
             bind: None,
             data_dir: None,
             claude_bin: None,
@@ -350,6 +370,7 @@ launcher = ["from-file"]
 
         let config = Config {
             config: Some(config_path),
+            check: false,
             bind: None,
             data_dir: None,
             claude_bin: None,

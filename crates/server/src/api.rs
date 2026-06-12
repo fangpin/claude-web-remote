@@ -1,10 +1,13 @@
-use crate::{AppError, AppResult, CreateSessionRequest, EventStore, SessionManager};
+use crate::{
+    AppError, AppResult, CreateSessionRequest, EventStore, SessionManager, embedded_assets,
+};
 use axum::{
     Json, Router,
     extract::{
         Path, Query, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
+    http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
 };
@@ -34,20 +37,27 @@ pub struct EventsQuery {
 
 pub fn build_router(state: AppState, web_dir: Option<PathBuf>) -> Router {
     let api = Router::new()
-        .route("/api/sessions", get(list_sessions).post(create_session))
-        .route("/api/sessions/{id}", get(get_session))
-        .route("/api/sessions/{id}/input", post(send_input))
-        .route("/api/sessions/{id}/stop", post(stop_session))
-        .route("/api/sessions/{id}/restart", post(restart_session))
-        .route("/api/sessions/{id}/events", get(events_ws))
+        .route("/sessions", get(list_sessions).post(create_session))
+        .route("/sessions/{id}", get(get_session))
+        .route("/sessions/{id}/input", post(send_input))
+        .route("/sessions/{id}/stop", post(stop_session))
+        .route("/sessions/{id}/restart", post(restart_session))
+        .route("/sessions/{id}/events", get(events_ws))
+        .fallback(api_not_found)
         .with_state(state)
         .layer(CorsLayer::permissive());
 
+    let app = Router::new().nest("/api", api);
+
     if let Some(web_dir) = web_dir {
-        api.fallback_service(ServeDir::new(web_dir))
+        app.fallback_service(ServeDir::new(web_dir))
     } else {
-        api
+        app.fallback(get(embedded_assets::serve))
     }
+}
+
+async fn api_not_found() -> StatusCode {
+    StatusCode::NOT_FOUND
 }
 
 async fn list_sessions(State(state): State<AppState>) -> AppResult<Json<serde_json::Value>> {

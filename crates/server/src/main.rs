@@ -10,7 +10,29 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    let config = Config::parse().resolve().await?;
+    let cli = Config::parse();
+    let check = cli.check;
+    let config = cli.resolve().await?;
+
+    if check {
+        println!("bind = {}", config.bind);
+        println!("data_dir = {}", config.data_dir.display());
+        println!("launcher = {:?}", config.launcher);
+        println!(
+            "web_dir = {}",
+            config
+                .web_dir
+                .as_ref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "<embedded>".to_string())
+        );
+        println!(
+            "default_permission_mode = {}",
+            config.default_permission_mode
+        );
+        return Ok(());
+    }
+
     let store = EventStore::new(&config.data_dir).await?;
     let manager = SessionManager::new(
         store.clone(),

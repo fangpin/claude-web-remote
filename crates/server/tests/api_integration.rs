@@ -56,10 +56,18 @@ done
 }
 
 async fn spawn_app(temp: &tempfile::TempDir, launcher: Vec<String>) -> SocketAddr {
+    spawn_app_with_web_dir(temp, launcher, None).await
+}
+
+async fn spawn_app_with_web_dir(
+    temp: &tempfile::TempDir,
+    launcher: Vec<String>,
+    web_dir: Option<PathBuf>,
+) -> SocketAddr {
     let store = EventStore::new(temp.path().join("data")).await.unwrap();
     let manager = SessionManager::new(store.clone(), launcher, "acceptEdits".to_string());
     let state = AppState { manager, store };
-    let app: Router = build_router(state, None);
+    let app: Router = build_router(state, web_dir);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
@@ -198,4 +206,110 @@ async fn wrapper_launcher_receives_native_args_after_prefix() {
     let args = fs::read_to_string(args_log).unwrap();
     assert!(args.contains("claude -m gpt-5.5 --skip-check -a --input-format stream-json"));
     assert!(args.contains("--resume resume-session"));
+}
+
+#[tokio::test]
+async fn unknown_api_routes_return_404_instead_of_frontend() {
+    let temp = tempfile::tempdir().unwrap();
+    let bin = fake_claude(temp.path());
+    let addr = spawn_app(&temp, vec![bin.to_string_lossy().to_string()]).await;
+    let client = reqwest::Client::new();
+
+    let response = client
+        .get(format!("http://{addr}/api/does-not-exist"))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), reqwest::StatusCode::NOT_FOUND);
+    assert!(!response.text().await.unwrap().contains("Claude Remote Web"));
+}
+
+#[tokio::test]
+async fn serves_embedded_web_assets_without_web_dir() {
+    let temp = tempfile::tempdir().unwrap();
+    let bin = fake_claude(temp.path());
+    let addr = spawn_app(&temp, vec![bin.to_string_lossy().to_string()]).await;
+    let client = reqwest::Client::new();
+
+    let response = client
+        .get(format!("http://{addr}/"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    let body = response.text().await.unwrap();
+
+    assert!(content_type.starts_with("text/html"));
+    assert!(body.contains("Claude Remote Web"));
+}
+
+#[tokio::test]
+async fn configured_web_dir_takes_priority_over_embedded_assets() {
+    let temp = tempfile::tempdir().unwrap();
+    let web_dir = temp.path().join("web-dist");
+    fs::create_dir(&web_dir).unwrap();
+    fs::write(
+        web_dir.join("index.html"),
+        "<!doctype html><html><body>external web dir wins</body></html>",
+    )
+    .unwrap();
+
+    let bin = fake_claude(temp.path());
+    let addr = spawn_app_with_web_dir(
+        &temp,
+        vec![bin.to_string_lossy().to_string()],
+        Some(web_dir),
+    )
+    .await;
+    let client = reqwest::Client::new();
+
+    let body = client
+        .get(format!("http://{addr}/"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+
+    assert!(body.contains("external web dir wins"));
+}
+
+#[tokio::test]
+async fn frontend_paths_still_use_embedded_assets() {
+    let temp = tempfile::tempdir().unwrap();
+    let bin = fake_claude(temp.path());
+    let addr = spawn_app(&temp, vec![bin.to_string_lossy().to_string()]).await;
+    let client = reqwest::Client::new();
+
+    let response = client
+        .get(format!("http://{addr}/client-side-route"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    let body = response.text().await.unwrap();
+
+    assert!(content_type.starts_with("text/html"));
+    assert!(body.contains("Claude Remote Web"));
 }
