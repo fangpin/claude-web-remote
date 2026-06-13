@@ -15,13 +15,13 @@ const appCss = () => {
 describe('ConversationBlockList', () => {
   beforeEach(() => cleanup());
 
-  it('renders assistant messages as readable text including code blocks', () => {
+  it('renders assistant messages as Markdown', () => {
     const blocks: ConversationBlock[] = [
       {
         id: 'message-1',
         type: 'message',
         role: 'assistant',
-        text: 'Here is a snippet:\n\n```ts\nconst answer = 42;\n```',
+        text: '## Summary\n\n- Read `api.rs`\n\n```ts\nconst answer = 42;\n```',
         eventIds: [1],
         rawEvents: [rawEvent(1, { message: 'Here is a snippet' })]
       }
@@ -32,7 +32,10 @@ describe('ConversationBlockList', () => {
     const article = screen.getByRole('article');
     expect(article).toHaveClass('conversation-block', 'message-block', 'assistant');
     expect(within(article).getByText('Claude').closest('header')).toHaveClass('block-header');
-    expect(within(article).getByText(/const answer = 42/)).toHaveClass('message-text');
+    expect(within(article).getByRole('heading', { name: 'Summary', level: 2 })).toBeInTheDocument();
+    expect(within(article).getByRole('listitem')).toHaveTextContent('Read api.rs');
+    expect(within(article).getByText('api.rs')).toHaveClass('inline-code');
+    expect(within(article).getByText(/const answer = 42/).closest('code')).not.toBeNull();
     expect(within(article).getByText('Raw events')).toBeInTheDocument();
   });
 

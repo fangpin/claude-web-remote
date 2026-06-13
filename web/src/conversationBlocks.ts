@@ -1,3 +1,4 @@
+import { toolPresentation } from './presentationPolicy';
 import type { EventKind, UiEvent } from './types';
 
 type ObjectPayload = Record<string, unknown>;
@@ -168,10 +169,10 @@ function hasFailedResult(resultPayload: ObjectPayload | undefined, result: strin
 }
 
 function toolResultDisplay(name: string, status: ToolBlock['status'], result: string): ToolBlock['resultDisplay'] {
-  if (!result.trim()) return 'visible';
-  if (status === 'failed') return 'visible';
-  if (['Read', 'Glob', 'Grep'].includes(name)) return 'hidden';
-  return 'collapsed';
+  const presentation = toolPresentation(name, status, result);
+  if (presentation.detail === 'expanded') return 'visible';
+  if (presentation.detail === 'collapsed') return 'collapsed';
+  return 'hidden';
 }
 
 function isBackgroundBash(name: string, input: unknown, result: string): boolean {
@@ -324,9 +325,9 @@ function normalizedItems(event: UiEvent): NormalizedItem[] | null {
   const isClaudeUserPayload = payload.type === 'user';
 
   if (event.kind === 'error' || type === 'error') {
-    return isIgnorableErrorPayload(payload) ? [{ type: 'raw', event }] : [{ type: 'error', event, payload }];
+    return isIgnorableErrorPayload(payload) ? [] : [{ type: 'error', event, payload }];
   }
-  if (event.kind === 'raw' || event.kind === 'system') return [{ type: 'raw', event }];
+  if (event.kind === 'raw' || event.kind === 'system') return [];
 
   const role = roleFromEvent(event, payload);
   const items: NormalizedItem[] = [];
@@ -419,13 +420,23 @@ export function buildConversationBlocks(events: UiEvent[]): ConversationBlock[] 
       if (id) {
         const pending = pendingTools.get(id);
         if (pending) {
-          blocks[pending.blockIndex] = makeToolBlock(pending.event, pending.payload, item.event, item.payload);
+          const block = makeToolBlock(pending.event, pending.payload, item.event, item.payload);
+          if (block.type === 'tool' && toolPresentation(block.name, block.status, block.resultSummary).visibility === 'hidden') {
+            blocks.splice(pending.blockIndex, 1);
+            for (const pendingTool of pendingTools.values()) {
+              if (pendingTool.blockIndex > pending.blockIndex) pendingTool.blockIndex -= 1;
+            }
+          } else {
+            blocks[pending.blockIndex] = block;
+          }
           pendingTools.delete(id);
         } else {
-          blocks.push(makeStandaloneToolResult(item.event, item.payload));
+          const block = makeStandaloneToolResult(item.event, item.payload);
+          if (toolPresentation(block.name, block.status, block.resultSummary).visibility === 'visible') blocks.push(block);
         }
       } else {
-        blocks.push(makeStandaloneToolResult(item.event, item.payload));
+        const block = makeStandaloneToolResult(item.event, item.payload);
+        if (toolPresentation(block.name, block.status, block.resultSummary).visibility === 'visible') blocks.push(block);
       }
     }
   }

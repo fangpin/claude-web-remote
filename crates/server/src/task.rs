@@ -60,6 +60,15 @@ pub fn project_session_tasks(meta: &SessionMeta, events: &[UiEvent]) -> TaskGrou
         let finishes = task_finishes(meta, event);
         let has_finishes = !finishes.is_empty();
         for finish in finishes {
+            if tasks
+                .get(&finish.task_id)
+                .is_some_and(|task| is_read_only_inspection_tool(&task.tool_kind))
+                && finish.status == TaskStatus::Completed
+            {
+                tasks.remove(&finish.task_id);
+                continue;
+            }
+
             if let Some(task) = tasks.get_mut(&finish.task_id) {
                 task.status = finish.status;
                 task.finished_at = Some(event.time);
@@ -92,6 +101,10 @@ pub fn project_session_tasks(meta: &SessionMeta, events: &[UiEvent]) -> TaskGrou
             "session ended before task completed".to_string(),
         );
     }
+
+    tasks.retain(|_, task| {
+        !is_read_only_inspection_tool(&task.tool_kind) || task.status == TaskStatus::Failed
+    });
 
     group_tasks(tasks.into_values().collect())
 }
@@ -267,6 +280,11 @@ fn scoped_task_id(session_id: Uuid, raw_id: &str) -> String {
     format!("{session_id}:{raw_id}")
 }
 
+// Keep this list in sync with web/src/presentationPolicy.ts.
+fn is_read_only_inspection_tool(tool_kind: &str) -> bool {
+    matches!(tool_kind, "Read" | "Glob" | "Grep")
+}
+
 fn string_field(payload: &Value, keys: &[&str]) -> Option<String> {
     for key in keys {
         if let Some(value) = payload.get(*key).and_then(Value::as_str) {
@@ -435,6 +453,140 @@ mod tests {
         assert_eq!(tasks.finished[0].status, TaskStatus::Completed);
         assert_eq!(tasks.finished[0].finish_event_id, Some(2));
         assert_eq!(tasks.finished[0].summary, Some("/repo/demo".to_string()));
+    }
+
+    #[test]
+    fn read_only_inspection_tools_do_not_create_tasks() {
+        for (tool_kind, input) in [
+            ("Read", json!({ "file_path": "/repo/demo/src/main.rs" })),
+            ("Glob", json!({ "pattern": "**/*.rs" })),
+            (
+                "Grep",
+                json!({ "pattern": "fn main", "path": "/repo/demo" }),
+            ),
+        ] {
+            let session_id = Uuid::new_v4();
+            let meta = meta(session_id, SessionStatus::Running);
+            let tool_use_id = format!("toolu_{}", tool_kind.to_lowercase());
+            let events = vec![
+                event(
+                    1,
+                    session_id,
+                    EventKind::Tool,
+                    json!({
+                        "type": "tool_use",
+                        "id": tool_use_id,
+                        "name": tool_kind,
+                        "input": input
+                    }),
+                ),
+                event(
+                    2,
+                    session_id,
+                    EventKind::Tool,
+                    json!({
+                        "type": "tool_result",
+                        "tool_use_id": tool_use_id,
+                        "content": "inspection result"
+                    }),
+                ),
+            ];
+
+            let tasks = project_session_tasks(&meta, &events);
+
+            assert_eq!(
+                tasks.background.len(),
+                0,
+                "{tool_kind} should not create a background task"
+            );
+            assert_eq!(
+                tasks.finished.len(),
+                0,
+                "{tool_kind} should not create a finished task"
+            );
+        }
+    }
+
+    #[test]
+    fn unfinished_read_only_inspection_tool_is_dropped_when_session_exits() {
+        for (status, exit_event) in [
+            (SessionStatus::Exited, None),
+            (
+                SessionStatus::Running,
+                Some(event(
+                    2,
+                    Uuid::nil(),
+                    EventKind::System,
+                    json!({ "status": "exited" }),
+                )),
+            ),
+        ] {
+            let session_id = Uuid::new_v4();
+            let meta = meta(session_id, status);
+            let mut events = vec![event(
+                1,
+                session_id,
+                EventKind::Tool,
+                json!({
+                    "type": "tool_use",
+                    "id": "toolu_read",
+                    "name": "Read",
+                    "input": { "file_path": "/repo/demo/src/main.rs" }
+                }),
+            )];
+            if let Some(mut exit_event) = exit_event {
+                exit_event.session_id = session_id;
+                events.push(exit_event);
+            }
+
+            let tasks = project_session_tasks(&meta, &events);
+
+            assert_eq!(tasks.background.len(), 0);
+            assert_eq!(tasks.finished.len(), 0);
+        }
+    }
+
+    #[test]
+    fn failed_read_only_inspection_tool_creates_failed_finished_task() {
+        let session_id = Uuid::new_v4();
+        let meta = meta(session_id, SessionStatus::Running);
+        let events = vec![
+            event(
+                1,
+                session_id,
+                EventKind::Tool,
+                json!({
+                    "type": "tool_use",
+                    "id": "toolu_read",
+                    "name": "Read",
+                    "input": { "file_path": "/repo/demo/missing.rs" }
+                }),
+            ),
+            event(
+                2,
+                session_id,
+                EventKind::Tool,
+                json!({
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_read",
+                    "is_error": true,
+                    "content": "file not found"
+                }),
+            ),
+        ];
+
+        let tasks = project_session_tasks(&meta, &events);
+
+        assert_eq!(tasks.background.len(), 0);
+        assert_eq!(tasks.finished.len(), 1);
+        assert_eq!(tasks.finished[0].id, format!("{session_id}:toolu_read"));
+        assert_eq!(tasks.finished[0].tool_kind, "Read");
+        assert_eq!(tasks.finished[0].status, TaskStatus::Failed);
+        assert_eq!(tasks.finished[0].finish_event_id, Some(2));
+        assert_eq!(
+            tasks.finished[0].summary,
+            Some("file not found".to_string())
+        );
     }
 
     #[test]

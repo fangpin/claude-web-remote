@@ -324,7 +324,7 @@ describe('App', () => {
     expect(await screen.findByText('hello from claude')).toBeInTheDocument();
   });
 
-  it('preserves raw and system events as raw details without rendering them as messages', async () => {
+  it('hides raw and system events without rendering conversation cards', async () => {
     render(<App />);
 
     await screen.findAllByText('Repo One');
@@ -355,7 +355,7 @@ describe('App', () => {
     expect(await screen.findByText('visible error event')).toBeInTheDocument();
     expect(screen.queryByText('raw event should stay hidden')).not.toBeInTheDocument();
     expect(screen.queryByText('system event should stay hidden')).not.toBeInTheDocument();
-    expect(screen.getAllByText('Raw events').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText('Raw events')).toHaveLength(1);
   });
 
   it('creates a session from the form and can include worktree request data', async () => {

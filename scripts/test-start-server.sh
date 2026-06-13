@@ -25,4 +25,32 @@ default_output=$("$SCRIPT" --check --skip-web-build)
 [[ "$default_output" == *"Config: default"* ]]
 [[ "$default_output" == *"Command: cargo run --release --manifest-path $ROOT_DIR/Cargo.toml"* ]]
 
+missing_deps_root=$(mktemp -d)
+trap 'rm -rf "$missing_deps_root"' EXIT
+mkdir -p "$missing_deps_root/scripts" "$missing_deps_root/web"
+cp "$SCRIPT" "$missing_deps_root/scripts/start-server.sh"
+chmod +x "$missing_deps_root/scripts/start-server.sh"
+
+set +e
+missing_deps_output=$(NPM_BIN=/usr/bin/true CARGO_BIN=/usr/bin/true "$missing_deps_root/scripts/start-server.sh" 2>&1)
+missing_deps_status=$?
+set -e
+
+if [[ "$missing_deps_status" -eq 0 ]]; then
+  echo "start-server.sh should fail when web dependencies are missing" >&2
+  exit 1
+fi
+
+if [[ "$missing_deps_output" != *"Web dependencies are not installed"* ]]; then
+  echo "missing web dependency error should explain the problem" >&2
+  echo "$missing_deps_output" >&2
+  exit 1
+fi
+
+if [[ "$missing_deps_output" != *"npm --prefix web install"* ]]; then
+  echo "missing web dependency error should suggest npm --prefix web install" >&2
+  echo "$missing_deps_output" >&2
+  exit 1
+fi
+
 echo "start-server.sh checks passed"

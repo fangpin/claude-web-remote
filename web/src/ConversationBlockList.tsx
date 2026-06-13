@@ -1,3 +1,4 @@
+import ReactMarkdown from 'react-markdown';
 import RawEventDetails from './RawEventDetails';
 import type { ConversationBlock, ErrorBlock, MessageBlock, RawBlock, TaskBlock, ToolBlock } from './conversationBlocks';
 
@@ -18,7 +19,21 @@ function MessageBlockView({ block }: { block: MessageBlock }) {
       <header className="block-header">
         <span>{roleLabel(block.role)}</span>
       </header>
-      <pre className="message-text">{block.text}</pre>
+      <div className="message-text">
+        <ReactMarkdown
+          components={{
+            code({ className, children, ...props }) {
+              return (
+                <code className={className ?? 'inline-code'} {...props}>
+                  {children}
+                </code>
+              );
+            }
+          }}
+        >
+          {block.text}
+        </ReactMarkdown>
+      </div>
       <RawEventDetails rawEvents={block.rawEvents} />
     </article>
   );
