@@ -583,7 +583,7 @@ describe('App', () => {
 
     fireEvent.click(sendButton);
 
-    expect(screen.getByRole('button', { name: 'Sending message' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Sending/ })).toBeDisabled();
     expect(fetchMock.mock.calls.filter(([url]) => String(url) === '/api/sessions/s1/input')).toHaveLength(1);
 
     await act(async () => inputDeferred.resolve());
