@@ -178,14 +178,13 @@ If accessing from another machine, run the printed SSH tunnel command on your lo
 
 ## Create a session
 
-In the Web UI:
+Open the Web UI and click **New chat**. The start screen lets you choose a recent project or enter a devbox path:
 
 ```text
 Working directory: /path/to/remote/repo
-Permission mode: bypassPermissions
 ```
 
-The daemon starts the configured launcher in that working directory, streams events back to the browser, and names the session from the first user message.
+Permission mode and git worktree creation live under **Advanced options**. The daemon starts the configured launcher in the selected working directory, streams events back to the browser, and names the session from the first user message.
 
 ## Session History API
 

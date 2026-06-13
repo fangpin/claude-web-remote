@@ -33,6 +33,7 @@ type Props = {
   isComposerSession: boolean;
   isSending: boolean;
   isSessionListLoading: boolean;
+  isStartSurfaceOpen: boolean;
   listMode: SessionListMode;
   message: string;
   messageInputRef: RefObject<HTMLTextAreaElement | null>;
@@ -40,6 +41,7 @@ type Props = {
   suggestions: ClaudeCommand[];
   view: AppView;
   actions: ReactNode;
+  startSurface: ReactNode;
   onCompleteSuggestion: (suggestion: ClaudeCommand) => void;
   onMessageChange: (value: string, element: HTMLTextAreaElement) => void;
   onMessageKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
@@ -113,6 +115,7 @@ export default function ConversationWorkspace({
   isComposerSession,
   isSending,
   isSessionListLoading,
+  isStartSurfaceOpen,
   listMode,
   message,
   messageInputRef,
@@ -120,6 +123,7 @@ export default function ConversationWorkspace({
   suggestions,
   view,
   actions,
+  startSurface,
   onCompleteSuggestion,
   onMessageChange,
   onMessageKeyDown,
@@ -142,7 +146,9 @@ export default function ConversationWorkspace({
   return (
     <main className={listMode === 'archived' ? 'workspace conversation-workspace with-deleted-note' : 'workspace conversation-workspace'} aria-label="Conversation workspace">
       {error && <ApiErrorBanner error={error} onDismiss={onDismissError} />}
-      {activeSession ? (
+      {(!activeSession || isStartSurfaceOpen) && !isSessionListLoading && listMode === 'active' ? (
+        startSurface
+      ) : activeSession ? (
         <>
           <header className="conversation-header">
             <div>

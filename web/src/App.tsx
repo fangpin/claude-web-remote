@@ -3,6 +3,7 @@ import AppShell, { type AppView } from './AppShell';
 import { buildActivityTimeline, waitingCopy, type ActivityItem } from './activityTimeline';
 import ConversationWorkspace from './ConversationWorkspace';
 import InspectorPanel, { type InspectorTab } from './InspectorPanel';
+import ProjectHome from './ProjectHome';
 import SessionSidebar from './SessionSidebar';
 import type { TaskInfo } from './types';
 import { useComposerState } from './useComposerState';
@@ -230,26 +231,16 @@ export default function App() {
       sidebar={
         <SessionSidebar
           activeId={sessionState.activeId}
-          cwd={sessionState.cwd}
           isListLoading={sessionState.isListLoading}
-          isNewSessionOpen={sessionState.isNewSessionOpen}
           listError={sessionState.listError}
           listMode={sessionState.listMode}
-          permissionMode={sessionState.permissionMode}
-          recentDirectories={sessionState.recentDirectories}
           sessionSearch={sessionState.sessionSearch}
           sessions={sessionState.sessions}
-          useWorktree={sessionState.useWorktree}
           visibleSessions={sessionState.visibleSessions}
-          onCreateSession={sessionState.onCreateSession}
+          onNewChat={() => sessionState.openStartSurface()}
           onSelectSession={sessionState.selectSession}
-          onSetCwd={sessionState.setCwd}
-          onSetIsNewSessionOpen={sessionState.setIsNewSessionOpen}
           onSetListMode={sessionState.setListMode}
-          onSetPermissionMode={sessionState.setPermissionMode}
           onSetSessionSearch={sessionState.setSessionSearch}
-          onSetUseWorktree={sessionState.setUseWorktree}
-          onToggleNewSession={sessionState.toggleNewSession}
           onRetryList={() => {
             reportApiError(null);
             void sessionState.refreshSessions(sessionState.listMode, { reset: true });
@@ -277,6 +268,7 @@ export default function App() {
           isComposerSession={isComposerSession}
           isSending={composerState.isSending}
           isSessionListLoading={sessionState.isListLoading}
+          isStartSurfaceOpen={sessionState.isStartSurfaceOpen}
           listMode={sessionState.listMode}
           message={composerState.message}
           messageInputRef={composerState.messageInputRef}
@@ -284,6 +276,20 @@ export default function App() {
           suggestions={composerState.suggestions}
           view={view}
           actions={renderActions()}
+          startSurface={(
+            <ProjectHome
+              cwd={sessionState.cwd}
+              permissionMode={sessionState.permissionMode}
+              recentProjects={sessionState.recentProjects}
+              recentSessions={sessionState.recentSessions}
+              useWorktree={sessionState.useWorktree}
+              onCreateSession={sessionState.onCreateSession}
+              onSelectSession={sessionState.selectSession}
+              onSetCwd={sessionState.setCwd}
+              onSetPermissionMode={sessionState.setPermissionMode}
+              onSetUseWorktree={sessionState.setUseWorktree}
+            />
+          )}
           onCompleteSuggestion={composerState.completeSuggestion}
           onMessageChange={composerState.onMessageChange}
           onMessageKeyDown={composerState.onMessageKeyDown}

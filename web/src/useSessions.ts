@@ -20,6 +20,21 @@ type UseSessionsOptions = {
   onDeleteSessionEvents?: (sessionId: string) => void;
 };
 
+export type RecentProject = {
+  cwd: string;
+  latestSession: SessionInfo;
+  sessionCount: number;
+  runningCount: number;
+};
+
+function projectCwdForSession(session: SessionInfo): string {
+  return session.worktree?.sourceCwd ?? session.cwd;
+}
+
+function isLiveRuntime(session: SessionInfo): boolean {
+  return ['starting', 'running', 'waiting'].includes(session.runtimeStatus ?? session.status);
+}
+
 export function useSessions({
   setError,
   onTasksChanged,
@@ -30,7 +45,7 @@ export function useSessions({
   const [activeId, setActiveId] = useState<string | null>(null);
   const [listModeState, setListModeState] = useState<SessionListMode>('active');
   const [sessionSearch, setSessionSearch] = useState('');
-  const [isNewSessionOpen, setIsNewSessionOpen] = useState(false);
+  const [isStartSurfaceOpen, setIsStartSurfaceOpen] = useState(false);
   const [cwd, setCwd] = useState('');
   const [permissionMode, setPermissionMode] = useState('bypassPermissions');
   const [useWorktree, setUseWorktree] = useState(false);
@@ -38,6 +53,7 @@ export function useSessions({
   const [listError, setListError] = useState<string | null>(null);
   const listRefreshIdRef = useRef(0);
   const skipNextListRefresh = useRef(false);
+  const isStartSurfaceOpenRef = useRef(false);
   const callbacksRef = useRef({
     setError,
     onTasksChanged,
@@ -45,25 +61,40 @@ export function useSessions({
     onDeleteSessionEvents
   });
   callbacksRef.current = { setError, onTasksChanged, onSessionTasksChanged, onDeleteSessionEvents };
+  isStartSurfaceOpenRef.current = isStartSurfaceOpen;
 
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeId) ?? null,
     [sessions, activeId]
   );
 
-  const recentDirectories = useMemo(() => {
-    const seen = new Set<string>();
-    return [...sessions]
+  const recentProjects = useMemo<RecentProject[]>(() => {
+    const byCwd = new Map<string, RecentProject>();
+    [...sessions]
       .filter((session) => !session.deletedAt)
       .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
-      .filter((session) => {
-        if (seen.has(session.cwd)) return false;
-        seen.add(session.cwd);
-        return true;
-      })
-      .slice(0, 5)
-      .map((session) => session.cwd);
+      .forEach((session) => {
+        const projectCwd = projectCwdForSession(session);
+        const existing = byCwd.get(projectCwd);
+        if (existing) {
+          existing.sessionCount += 1;
+          if (isLiveRuntime(session)) existing.runningCount += 1;
+          return;
+        }
+        byCwd.set(projectCwd, {
+          cwd: projectCwd,
+          latestSession: session,
+          sessionCount: 1,
+          runningCount: isLiveRuntime(session) ? 1 : 0
+        });
+      });
+    return [...byCwd.values()].slice(0, 6);
   }, [sessions]);
+
+  const recentSessions = useMemo(() => [...sessions]
+    .filter((session) => !session.deletedAt)
+    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+    .slice(0, 6), [sessions]);
 
   const visibleSessions = useMemo(() => {
     const query = sessionSearch.trim().toLocaleLowerCase();
@@ -103,9 +134,16 @@ export function useSessions({
       setListError(null);
       setSessions(loaded);
       if (options.reset) {
-        setActiveId(loaded[0]?.id ?? null);
+        if (isStartSurfaceOpenRef.current) {
+          setActiveId(null);
+          setIsStartSurfaceOpen(mode === 'active');
+        } else {
+          setActiveId(loaded[0]?.id ?? null);
+          setIsStartSurfaceOpen(loaded.length === 0 && mode === 'active');
+        }
       } else {
         setActiveId((currentActiveId) => {
+          if (isStartSurfaceOpenRef.current) return currentActiveId;
           if (!currentActiveId) return loaded[0]?.id ?? null;
           return loaded.some((session) => session.id === currentActiveId) ? currentActiveId : loaded[0]?.id ?? null;
         });
@@ -127,8 +165,19 @@ export function useSessions({
   }, []);
 
   const selectSession = useCallback((sessionId: string) => {
+    isStartSurfaceOpenRef.current = false;
     setActiveId(sessionId);
+    setIsStartSurfaceOpen(false);
   }, []);
+
+  const openStartSurface = useCallback((defaultCwd?: string) => {
+    isStartSurfaceOpenRef.current = true;
+    setListError(null);
+    setListModeState('active');
+    setActiveId(null);
+    setIsStartSurfaceOpen(true);
+    setCwd((currentCwd) => defaultCwd ?? (currentCwd || recentProjects[0]?.cwd || ''));
+  }, [recentProjects]);
 
   const removeSessionFromCurrentList = useCallback((removedId: string) => {
     setSessions((current) => {
@@ -176,10 +225,11 @@ export function useSessions({
       } else {
         setSessions((current) => [created, ...current]);
       }
+      isStartSurfaceOpenRef.current = false;
       setActiveId(created.id);
+      setIsStartSurfaceOpen(false);
       setCwd('');
       setUseWorktree(false);
-      setIsNewSessionOpen(false);
       callbacksRef.current.onTasksChanged?.();
       callbacksRef.current.onSessionTasksChanged?.(created.id);
     } catch (err: unknown) {
@@ -297,11 +347,12 @@ export function useSessions({
     cwd,
     isActiveSessionMode,
     isListLoading,
-    isNewSessionOpen,
+    isStartSurfaceOpen,
     listError,
     listMode: listModeState,
     permissionMode,
-    recentDirectories,
+    recentProjects,
+    recentSessions,
     sessionSearch,
     useWorktree,
     visibleSessions,
@@ -312,14 +363,13 @@ export function useSessions({
     onResume,
     onStop,
     onUnarchive,
+    openStartSurface,
     refreshSessions,
     selectSession,
     setCwd,
-    setIsNewSessionOpen,
     setListMode,
     setPermissionMode,
     setSessionSearch,
-    setUseWorktree,
-    toggleNewSession: () => setIsNewSessionOpen((open) => !open)
+    setUseWorktree
   };
 }

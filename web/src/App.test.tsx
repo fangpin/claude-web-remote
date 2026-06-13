@@ -515,12 +515,14 @@ describe('App', () => {
     render(<App />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'New chat' }));
-    expect(await screen.findByRole('heading', { name: 'Start a session' })).toBeInTheDocument();
-    expect(screen.getByText('Pick a repo, isolation style, and permission mode.')).toBeInTheDocument();
-    expect(screen.getByText('Skip prompts for trusted local repos.')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Where should Claude work?' })).toBeInTheDocument();
+    expect(screen.getByText('Start from a recent project, continue a nearby conversation, or choose a directory on the devbox.')).toBeInTheDocument();
+    expect(screen.getByText('Advanced options').closest('details')).not.toHaveAttribute('open');
     fireEvent.change(await screen.findByLabelText('Working directory'), { target: { value: '/repo/two' } });
+    fireEvent.click(screen.getByText('Advanced options'));
+    expect(screen.getByText('Skip prompts for trusted local repos.')).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText('Use git worktree'));
-    fireEvent.click(screen.getByText('Create session'));
+    fireEvent.click(screen.getByText('Start chat'));
 
     expect(await screen.findByRole('heading', { name: '/repo/two' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Working directory')).not.toBeInTheDocument();
@@ -540,8 +542,8 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { name: 'Archived Repo' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
-    fireEvent.change(screen.getByLabelText('Working directory'), { target: { value: '/repo/two' } });
-    fireEvent.click(screen.getByText('Create session'));
+    fireEvent.change(await screen.findByLabelText('Working directory'), { target: { value: '/repo/two' } });
+    fireEvent.click(screen.getByText('Start chat'));
 
     expect(await screen.findByRole('heading', { name: '/repo/two' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Active' })).toHaveAttribute('aria-pressed', 'true');
@@ -554,23 +556,27 @@ describe('App', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'New chat' }));
     fireEvent.change(await screen.findByLabelText('Working directory'), { target: { value: '~' } });
-    fireEvent.click(screen.getByText('Create session'));
+    fireEvent.click(screen.getByText('Start chat'));
 
     expect(await screen.findByText('invalid request: cwd does not exist: ~')).toBeInTheDocument();
   });
 
-  it('shows recent working directory suggestions and fills the input', async () => {
+  it('shows recent projects and fills the launch directory', async () => {
     render(<App />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'New chat' }));
-    const suggestions = await screen.findByLabelText('Recent working directories');
-    expect(within(suggestions).getByText('one')).toBeInTheDocument();
-    expect(within(suggestions).getAllByText('/repo').length).toBeGreaterThan(0);
-    expect(within(suggestions).getByText('stopped')).toBeInTheDocument();
+    const recentProjects = await screen.findByLabelText('Recent projects');
+    expect(within(recentProjects).getByText('external')).toBeInTheDocument();
+    expect(within(recentProjects).getAllByText('/repo').length).toBeGreaterThan(0);
+    expect(within(recentProjects).getByText('stopped')).toBeInTheDocument();
+    expect(within(recentProjects).getByText('one')).toBeInTheDocument();
+    expect(within(recentProjects).queryByText('external-worktree')).not.toBeInTheDocument();
+    expect(within(recentProjects).queryByText('abc123')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Use /repo/stopped' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Use /repo/stopped as working directory' }));
 
     expect(screen.getByLabelText('Working directory')).toHaveValue('/repo/stopped');
+    expect(screen.getByText('Claude will start in /repo/stopped.')).toBeInTheDocument();
   });
 
   it('shows a calmer empty state for search misses', async () => {
@@ -965,6 +971,16 @@ describe('App', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s3?permanent=true', expect.objectContaining({ method: 'DELETE' })));
     await waitFor(() => expect(screen.queryByRole('button', { name: /Archived Repo/ })).not.toBeInTheDocument());
     expect(screen.getByRole('heading', { name: 'No archived sessions.' })).toBeInTheDocument();
+  });
+
+  it('keeps the archived empty workspace separate from the project home', async () => {
+    deletedSessions = [];
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Archived' }));
+
+    expect(await screen.findByRole('heading', { name: 'No archived chat selected.' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Where should Claude work?' })).not.toBeInTheDocument();
   });
 
   it('ignores stale active list responses after switching to archived mode', async () => {
