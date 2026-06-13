@@ -5,6 +5,7 @@ import Composer from './Composer';
 import type { AppView, SessionListMode } from './AppShell';
 import type { ClaudeCommand, SlashCommandToken } from './autocomplete';
 import type { ConversationBlock } from './conversationBlocks';
+import { getContinuityLabel, getSessionRuntimeLabel } from './sessionContinuity';
 import type { EventConnectionState } from './useSessionEvents';
 import type { SessionInfo } from './types';
 
@@ -93,6 +94,24 @@ function ApiErrorBanner({
   );
 }
 
+function SessionContinuitySummary({
+  session,
+  listMode
+}: {
+  session: SessionInfo;
+  listMode: SessionListMode;
+}) {
+  const runtimeLabel = getSessionRuntimeLabel(session, listMode);
+  const continuityLabel = getContinuityLabel(session, listMode);
+
+  return (
+    <div className="session-continuity-summary" aria-label="Session continuity">
+      <span>{runtimeLabel}</span>
+      {continuityLabel && <span>{continuityLabel}</span>}
+    </div>
+  );
+}
+
 export default function ConversationWorkspace({
   activeBlocks,
   activeSession,
@@ -148,6 +167,7 @@ export default function ConversationWorkspace({
             <div>
               <span className="eyebrow">{listMode === 'archived' ? 'Archived Claude session' : 'Remote Claude session'}</span>
               <h2>{activeSession.name || activeSession.cwd}</h2>
+              <SessionContinuitySummary session={activeSession} listMode={listMode} />
               <p title={activeSession.cwd}>{activeSession.cwd}</p>
               {activeSession.worktree && (
                 <div className="worktree-meta">
@@ -159,7 +179,7 @@ export default function ConversationWorkspace({
             {actions}
           </header>
           {listMode === 'archived' && (
-            <p className="deleted-note">This session is archived. Unarchive it before resuming work or sending messages.</p>
+            <p className="deleted-note">This session is archived and read-only. Unarchive it before resuming work or sending messages.</p>
           )}
           <div className="events" ref={eventsRef}>
             <div className="conversation-content">

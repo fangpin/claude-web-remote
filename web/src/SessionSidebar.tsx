@@ -1,5 +1,6 @@
 import type { FormEvent } from 'react';
 import { runtimeStatusLabels, type SessionListMode } from './AppShell';
+import { getContinuityLabel, getRuntimeStatus } from './sessionContinuity';
 import type { SessionInfo } from './types';
 
 type RuntimeStatusKey = keyof typeof runtimeStatusLabels;
@@ -50,8 +51,8 @@ const permissionModeDescriptions: Record<string, string> = {
   default: 'Use the daemon or Claude CLI default.'
 };
 
-function getRuntimeStatus(session: SessionInfo): RuntimeStatusKey {
-  return (session.runtimeStatus ?? session.status) as RuntimeStatusKey;
+function getSidebarRuntimeStatus(session: SessionInfo): RuntimeStatusKey {
+  return getRuntimeStatus(session) as RuntimeStatusKey;
 }
 
 function projectPathForSession(session: SessionInfo): string {
@@ -83,10 +84,10 @@ function buildSessionSections(sessions: SessionInfo[], listMode: SessionListMode
       : [];
   }
 
-  const waiting = sessions.filter((session) => getRuntimeStatus(session) === 'waiting');
-  const running = sessions.filter((session) => ['starting', 'running'].includes(getRuntimeStatus(session)));
+  const waiting = sessions.filter((session) => getSidebarRuntimeStatus(session) === 'waiting');
+  const running = sessions.filter((session) => ['starting', 'running'].includes(getSidebarRuntimeStatus(session)));
   const recent = sessions.filter((session) => {
-    const runtimeStatus = getRuntimeStatus(session);
+    const runtimeStatus = getSidebarRuntimeStatus(session);
     return !['waiting', 'starting', 'running'].includes(runtimeStatus);
   });
 
@@ -324,9 +325,10 @@ export default function SessionSidebar({
                       <span title={group.path}>{group.path}</span>
                     </div>
                     {group.sessions.map((session) => {
-                      const runtimeStatus = getRuntimeStatus(session);
+                      const runtimeStatus = getSidebarRuntimeStatus(session);
                       const statusClass = listMode === 'archived' ? 'archived' : runtimeStatus;
                       const statusLabel = runtimeStatusLabels[runtimeStatus];
+                      const continuityLabel = getContinuityLabel(session, listMode);
                       return (
                         <button
                           key={session.id}
@@ -339,6 +341,7 @@ export default function SessionSidebar({
                             <em className={`status status-${statusClass}`}>{statusLabel}</em>
                           </span>
                           <span className="session-path" title={session.cwd}>{session.cwd}</span>
+                          {continuityLabel && <span className="session-continuity">{continuityLabel}</span>}
                           {session.worktree && (
                             <span className="session-worktree-row">
                               <span>Worktree</span>

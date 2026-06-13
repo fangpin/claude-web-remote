@@ -563,6 +563,7 @@ button.danger:hover {
 
 .session-path,
 .session em,
+.session-continuity,
 .session-worktree-row span {
   color: var(--muted);
   font-size: 12px;
@@ -804,7 +805,8 @@ button.danger:hover {
   text-transform: uppercase;
 }
 
-.worktree-meta {
+.worktree-meta,
+.session-continuity-summary {
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
@@ -812,6 +814,7 @@ button.danger:hover {
 }
 
 .worktree-meta span,
+.session-continuity-summary span,
 .composer-context-chip,
 .composer-status-pill {
   max-width: 100%;

@@ -4,6 +4,7 @@ import { buildActivityTimeline, waitingCopy, type ActivityItem } from './activit
 import ConversationWorkspace from './ConversationWorkspace';
 import InspectorPanel, { type InspectorTab } from './InspectorPanel';
 import SessionSidebar from './SessionSidebar';
+import { getContinueActionLabel } from './sessionContinuity';
 import type { TaskInfo } from './types';
 import { useComposerState } from './useComposerState';
 import { useDiagnostics } from './useDiagnostics';
@@ -207,7 +208,7 @@ export default function App() {
 
     return (
       <div className="actions">
-        <button onClick={sessionState.onResume}>Resume</button>
+        <button className="primary-action" onClick={sessionState.onResume}>{getContinueActionLabel(activeSession)}</button>
         <button className="danger" onClick={sessionState.onArchive}>Archive</button>
       </div>
     );
