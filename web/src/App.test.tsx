@@ -372,7 +372,7 @@ describe('App', () => {
     expect(querySessionButton('Repo One')).toBeInTheDocument();
   });
 
-  it('preserves raw events as details and renders system text as readable conversation content', async () => {
+  it('hides raw and system events without rendering conversation cards', async () => {
     render(<App />);
 
     await screen.findAllByText('Repo One');
@@ -402,8 +402,8 @@ describe('App', () => {
 
     expect(await screen.findByText('visible error event')).toBeInTheDocument();
     expect(screen.queryByText('raw event should stay hidden')).not.toBeInTheDocument();
-    expect(screen.getByText('system event should stay hidden')).toBeInTheDocument();
-    expect(screen.getAllByText('Raw events').length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByText('system event should stay hidden')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Raw events')).toHaveLength(1);
   });
 
   it('creates a session from the form and can include worktree request data', async () => {
@@ -663,7 +663,7 @@ describe('App', () => {
 
     fireEvent.click(sessionButton('Stopped Repo'));
     expect(await screen.findByRole('heading', { name: 'Stopped Repo' })).toBeInTheDocument();
-    expect(screen.queryByLabelText('Message')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Message')).toBeDisabled();
 
     const socketsBeforeResume = FakeWebSocket.instances.length;
     fireEvent.click(screen.getByRole('button', { name: 'Resume' }));
@@ -738,7 +738,7 @@ describe('App', () => {
 
     expect(await screen.findByRole('heading', { name: 'Archived Repo' })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith('/api/sessions?deletedOnly=true', undefined);
-    expect(screen.queryByLabelText('Message')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Message')).toBeDisabled();
     const inspector = screen.getByRole('complementary', { name: 'Session inspector' });
     const sessionPanel = within(inspector).getByRole('tabpanel', { name: 'Session tasks' });
     expect(within(sessionPanel).queryByText('Agent: Review branch')).not.toBeInTheDocument();

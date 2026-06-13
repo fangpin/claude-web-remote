@@ -15,7 +15,7 @@ const appCss = () => {
 describe('ConversationBlockList', () => {
   beforeEach(() => cleanup());
 
-  it('renders assistant messages as readable text including code blocks', () => {
+  it('renders assistant messages as Markdown', () => {
     const blocks: ConversationBlock[] = [
       {
         id: 'message-1',

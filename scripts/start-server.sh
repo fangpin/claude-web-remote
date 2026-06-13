@@ -87,6 +87,11 @@ if [[ "$CHECK_ONLY" -eq 1 ]]; then
 fi
 
 if [[ "$SKIP_WEB_BUILD" -ne 1 ]]; then
+  if [[ ! -d "$ROOT_DIR/web/node_modules" ]]; then
+    echo "Web dependencies are not installed." >&2
+    echo "Run: npm --prefix web install" >&2
+    exit 1
+  fi
   "$NPM_BIN" --prefix "$ROOT_DIR/web" run build
 fi
 

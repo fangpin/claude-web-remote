@@ -55,28 +55,16 @@ describe('buildConversationBlocks', () => {
     ]);
   });
 
-  it('renders direct system text events as readable message blocks', () => {
+  it('hides system text events from conversation blocks', () => {
     const blocks = buildConversationBlocks([
       event(1, 'system', { message: 'daemon notice' }),
       event(2, 'system', { status: 'session resumed' })
     ]);
 
-    expect(blocks).toEqual([
-      {
-        id: 'message-system-1',
-        type: 'message',
-        role: 'system',
-        text: 'daemon notice\n\nsession resumed',
-        eventIds: [1, 2],
-        rawEvents: [
-          { id: 1, kind: 'system', payload: { message: 'daemon notice' } },
-          { id: 2, kind: 'system', payload: { status: 'session resumed' } }
-        ]
-      }
-    ]);
+    expect(blocks).toEqual([]);
   });
 
-  it('extracts assistant text and preserves Claude stream-json system content as raw details only', () => {
+  it('extracts assistant text and hides Claude stream-json system content', () => {
     const assistantPayload = { type: 'assistant', message: { content: [{ type: 'text', text: 'done' }] } };
     const systemPayload = { type: 'system', content: [{ type: 'text', text: 'session ready' }] };
     const blocks = buildConversationBlocks([
@@ -92,13 +80,6 @@ describe('buildConversationBlocks', () => {
         text: 'done',
         eventIds: [1],
         rawEvents: [{ id: 1, kind: 'assistant', payload: assistantPayload }]
-      },
-      {
-        id: 'raw-2',
-        type: 'raw',
-        label: 'system',
-        eventIds: [2],
-        rawEvents: [{ id: 2, kind: 'system', payload: systemPayload }]
       }
     ]);
   });
@@ -164,7 +145,7 @@ describe('buildConversationBlocks', () => {
     });
   });
 
-  it('marks Read Glob and Grep tool results as hidden by default', () => {
+  it('hides completed Read Glob and Grep tool blocks', () => {
     const blocks = buildConversationBlocks([
       event(1, 'tool', { type: 'tool_use', id: 'toolu_read', name: 'Read', input: { file_path: '/tmp/a.txt' } }),
       event(2, 'tool', { type: 'tool_result', tool_use_id: 'toolu_read', content: 'file contents' }),
@@ -174,38 +155,10 @@ describe('buildConversationBlocks', () => {
       event(6, 'tool', { type: 'tool_result', tool_use_id: 'toolu_grep', content: 'line 1\nline 2' })
     ]);
 
-    expect(blocks).toMatchObject([
-      {
-        id: 'tool-toolu_read',
-        type: 'tool',
-        name: 'Read',
-        inputSummary: '/tmp/a.txt',
-        resultDisplay: 'hidden',
-        resultSummary: 'Read output hidden (13 chars)',
-        resultLabel: 'Read output hidden (13 chars)'
-      },
-      {
-        id: 'tool-toolu_glob',
-        type: 'tool',
-        name: 'Glob',
-        inputSummary: '**/*.ts',
-        resultDisplay: 'hidden',
-        resultSummary: 'Matched 2 paths',
-        resultLabel: 'Matched 2 paths'
-      },
-      {
-        id: 'tool-toolu_grep',
-        type: 'tool',
-        name: 'Grep',
-        inputSummary: '"TODO"',
-        resultDisplay: 'hidden',
-        resultSummary: 'Matched 2 lines',
-        resultLabel: 'Matched 2 lines'
-      }
-    ]);
+    expect(blocks).toEqual([]);
   });
 
-  it('pairs nested Claude tool_use and tool_result content blocks', () => {
+  it('hides completed nested Claude Read tool_use and tool_result content blocks', () => {
     const assistantPayload = {
       type: 'assistant',
       message: { content: [{ type: 'tool_use', id: 'toolu_1', name: 'Read', input: { file_path: '/tmp/a.txt' } }] }
@@ -216,22 +169,59 @@ describe('buildConversationBlocks', () => {
     };
     const blocks = buildConversationBlocks([event(1, 'assistant', assistantPayload), event(2, 'user', userPayload)]);
 
-    expect(blocks).toEqual([
+    expect(blocks).toEqual([]);
+  });
+
+  it('adjusts pending tool indexes after hiding a completed read-only tool', () => {
+    const blocks = buildConversationBlocks([
+      event(1, 'tool', { type: 'tool_use', id: 'toolu_read', name: 'Read', input: { file_path: '/tmp/a.txt' } }),
+      event(2, 'tool', { type: 'tool_use', id: 'toolu_bash', name: 'Bash', input: { command: 'npm test' } }),
+      event(3, 'tool', { type: 'tool_result', tool_use_id: 'toolu_read', content: 'file contents' }),
+      event(4, 'tool', { type: 'tool_result', tool_use_id: 'toolu_bash', content: 'tests passed' })
+    ]);
+
+    expect(blocks).toMatchObject([
       {
-        id: 'tool-toolu_1',
+        id: 'tool-toolu_bash',
         type: 'tool',
-        name: 'Read',
+        name: 'Bash',
         status: 'completed',
-        inputSummary: '/tmp/a.txt',
-        resultSummary: 'Read output hidden (8 chars)',
-        resultDisplay: 'hidden',
-        resultLabel: 'Read output hidden (8 chars)',
-        eventIds: [1, 2],
-        rawEvents: [
-          { id: 1, kind: 'assistant', payload: assistantPayload },
-          { id: 2, kind: 'user', payload: userPayload }
-        ]
+        resultSummary: 'tests passed',
+        resultDisplay: 'collapsed',
+        eventIds: [2, 4]
       }
+    ]);
+  });
+
+  it('skips hidden standalone tool results', () => {
+    const blocks = buildConversationBlocks([
+      event(1, 'tool', { type: 'tool_result', name: 'Read', content: 'file contents' }),
+      event(2, 'tool', { type: 'tool_result', name: 'Bash', content: 'tests passed' })
+    ]);
+
+    expect(blocks).toMatchObject([
+      {
+        id: 'tool-result-2',
+        type: 'tool',
+        name: 'Bash',
+        status: 'completed',
+        resultSummary: 'tests passed',
+        resultDisplay: 'collapsed'
+      }
+    ]);
+  });
+
+  it('collapses successful Bash output and expands failed Bash output', () => {
+    const blocks = buildConversationBlocks([
+      event(1, 'tool', { type: 'tool_use', id: 'toolu_ok', name: 'Bash', input: { command: 'npm test' } }),
+      event(2, 'tool', { type: 'tool_result', tool_use_id: 'toolu_ok', content: 'tests passed' }),
+      event(3, 'tool', { type: 'tool_use', id: 'toolu_fail', name: 'Bash', input: { command: 'npm test' } }),
+      event(4, 'tool', { type: 'tool_result', tool_use_id: 'toolu_fail', content: 'Command failed with exit code 1' })
+    ]);
+
+    expect(blocks).toMatchObject([
+      { id: 'tool-toolu_ok', type: 'tool', status: 'completed', resultDisplay: 'collapsed' },
+      { id: 'tool-toolu_fail', type: 'tool', status: 'failed', resultDisplay: 'visible' }
     ]);
   });
 
@@ -292,51 +282,10 @@ describe('buildConversationBlocks', () => {
     ]);
 
     expect(blocks).toMatchObject([
-      {
-        id: 'tool-toolu_success_text',
-        type: 'tool',
-        status: 'completed',
-        inputSummary: '$ npm test',
-        resultSummary: 'Found 0 errors',
-        resultDisplay: 'collapsed',
-        resultLabel: 'Result collapsed (14 chars)'
-      },
-      {
-        id: 'tool-toolu_no_errors',
-        type: 'tool',
-        status: 'completed',
-        inputSummary: '/tmp/report.txt',
-        resultSummary: 'Read output hidden (18 chars)',
-        resultDisplay: 'hidden',
-        resultLabel: 'Read output hidden (18 chars)'
-      },
-      {
-        id: 'tool-toolu_structured_error',
-        type: 'tool',
-        status: 'failed',
-        inputSummary: '/tmp/missing.txt',
-        resultSummary: 'file missing',
-        resultDisplay: 'visible',
-        resultLabel: 'Failed result shown (12 chars)'
-      },
-      {
-        id: 'tool-toolu_status_error',
-        type: 'tool',
-        status: 'failed',
-        inputSummary: '/tmp/missing2.txt',
-        resultSummary: 'missing2',
-        resultDisplay: 'visible',
-        resultLabel: 'Failed result shown (8 chars)'
-      },
-      {
-        id: 'tool-toolu_failed_text',
-        type: 'tool',
-        status: 'failed',
-        inputSummary: '$ npm test',
-        resultSummary: 'Command failed with exit code 1',
-        resultDisplay: 'visible',
-        resultLabel: 'Failed result shown (31 chars)'
-      }
+      { id: 'tool-toolu_success_text', type: 'tool', status: 'completed', resultSummary: 'Found 0 errors', resultDisplay: 'collapsed' },
+      { id: 'tool-toolu_structured_error', type: 'tool', status: 'failed', resultSummary: 'file missing', resultDisplay: 'visible' },
+      { id: 'tool-toolu_status_error', type: 'tool', status: 'failed', resultSummary: 'missing2', resultDisplay: 'visible' },
+      { id: 'tool-toolu_failed_text', type: 'tool', status: 'failed', resultSummary: 'Command failed with exit code 1', resultDisplay: 'visible' }
     ]);
   });
 
@@ -577,7 +526,7 @@ describe('buildConversationBlocks', () => {
     ]);
   });
 
-  it('preserves Node TLS warning stderr lines as raw details only', () => {
+  it('hides Node TLS warning stderr lines from conversation blocks', () => {
     const firstPayload = {
       line: "(node:3972575) Warning: Setting the NODE_TLS_REJECT_UNAUTHORIZED environment variable to '0' makes TLS connections and HTTPS requests insecure by disabling certificate verification."
     };
@@ -587,35 +536,15 @@ describe('buildConversationBlocks', () => {
       event(2, 'error', secondPayload)
     ]);
 
-    expect(blocks).toEqual([
-      {
-        id: 'raw-1',
-        type: 'raw',
-        label: 'error',
-        eventIds: [1],
-        rawEvents: [{ id: 1, kind: 'error', payload: firstPayload }]
-      },
-      {
-        id: 'raw-2',
-        type: 'raw',
-        label: 'error',
-        eventIds: [2],
-        rawEvents: [{ id: 2, kind: 'error', payload: secondPayload }]
-      }
-    ]);
+    expect(blocks).toEqual([]);
   });
 
-  it('preserves unknown events as raw blocks', () => {
-    const blocks = buildConversationBlocks([event(1, 'raw', { unexpected: { nested: true } })]);
-
-    expect(blocks).toEqual([
-      {
-        id: 'raw-1',
-        type: 'raw',
-        label: 'raw',
-        eventIds: [1],
-        rawEvents: [{ id: 1, kind: 'raw', payload: { unexpected: { nested: true } } }]
-      }
+  it('hides standalone raw and system events from conversation blocks', () => {
+    const blocks = buildConversationBlocks([
+      event(1, 'raw', { message: 'transport detail' }),
+      event(2, 'system', { message: 'session detail' })
     ]);
+
+    expect(blocks).toEqual([]);
   });
 });
