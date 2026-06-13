@@ -1,8 +1,8 @@
 /// <reference types="node" />
 
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ConversationBlockList from './ConversationBlockList';
 import type { ConversationBlock } from './conversationBlocks';
 
@@ -14,6 +14,7 @@ const appCss = () => {
 
 describe('ConversationBlockList', () => {
   beforeEach(() => cleanup());
+  afterEach(() => vi.unstubAllGlobals());
 
   it('renders assistant messages as Markdown', () => {
     const blocks: ConversationBlock[] = [
@@ -220,6 +221,7 @@ describe('ConversationBlockList', () => {
     expect(article).toHaveClass('tool-block', 'failed', 'result-text');
     expect(within(article).getByText('Failure').closest('section')).toHaveClass('visible-result');
     expect(within(article).getByText('Command failed with exit code 1').closest('pre')).toHaveClass('tool-result-pre', 'text');
+    expect(within(article).getByRole('button', { name: 'Copy code' })).toHaveClass('copy-button');
   });
 
   it('renders diff, code, and path tool results with semantic containers', () => {
@@ -285,7 +287,7 @@ describe('ConversationBlockList', () => {
     expect(within(articles[2]).getByRole('button', { name: 'Copy paths' })).toHaveClass('copy-button');
   });
 
-  it('copies message code without interfering with raw payload visibility', async () => {
+  it('copies rendered code, diffs, and paths without exposing raw details by default', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
@@ -293,22 +295,98 @@ describe('ConversationBlockList', () => {
     });
     const blocks: ConversationBlock[] = [
       {
-        id: 'message-copy-code',
+        id: 'message-copy',
         type: 'message',
         role: 'assistant',
         text: '```ts\nconst copied = true;\n```',
-        eventIds: [1],
-        rawEvents: [rawEvent(1, { content: '```ts\nconst copied = true;\n```', rawOnly: true })]
+        eventIds: [19],
+        rawEvents: [rawEvent(19, { content: '```ts\nconst copied = true;\n```', rawOnly: true })]
+      },
+      {
+        id: 'tool-copy-diff',
+        type: 'tool',
+        name: 'Bash',
+        status: 'completed',
+        inputSummary: '$ git diff',
+        resultSummary: 'diff --git a/a.ts b/a.ts\n@@ -1 +1 @@\n-old\n+new',
+        resultKind: 'diff',
+        resultLanguage: 'diff',
+        resultDisplay: 'visible',
+        resultLabel: 'Result shown (51 chars)',
+        eventIds: [20],
+        rawEvents: [rawEvent(20, { content: 'raw diff payload' })]
+      },
+      {
+        id: 'tool-copy-paths',
+        type: 'tool',
+        name: 'Glob',
+        status: 'completed',
+        inputSummary: '**/*.tsx',
+        resultSummary: 'web/src/App.tsx\nweb/src/ConversationBlockList.tsx',
+        resultKind: 'paths',
+        resultDisplay: 'visible',
+        resultLabel: 'Result shown (49 chars)',
+        eventIds: [21],
+        rawEvents: [rawEvent(21, { content: 'raw paths payload' })]
       }
     ];
 
     render(<ConversationBlockList blocks={blocks} />);
 
-    screen.getByRole('button', { name: 'Copy code' }).click();
+    const articles = screen.getAllByRole('article');
+    articles.forEach((article) => {
+      expect(within(article).getByText('Raw events').closest('details')).not.toHaveAttribute('open');
+    });
 
+    fireEvent.click(within(articles[0]).getByRole('button', { name: 'Copy code' }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('const copied = true;'));
-    expect(screen.getByText('Raw events').closest('details')).not.toHaveAttribute('open');
-    expect(await screen.findByText('Copied')).toBeInTheDocument();
+    expect(within(articles[0]).getByRole('button', { name: 'Copy code' })).toHaveTextContent('Copied');
+
+    fireEvent.click(within(articles[1]).getByRole('button', { name: 'Copy code' }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('diff --git a/a.ts b/a.ts\n@@ -1 +1 @@\n-old\n+new'));
+
+    fireEvent.click(within(articles[2]).getByRole('button', { name: 'Copy paths' }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('web/src/App.tsx\nweb/src/ConversationBlockList.tsx'));
+  });
+
+  it('falls back to textarea copy when clipboard permissions fail', async () => {
+    const writeText = vi.fn(async () => {
+      throw new Error('not allowed');
+    });
+    const execCommand = vi.fn(() => true);
+    const originalExecCommand = document.execCommand;
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText }
+    });
+    Object.defineProperty(document, 'execCommand', { configurable: true, value: execCommand });
+
+    const blocks: ConversationBlock[] = [
+      {
+        id: 'message-copy-fallback',
+        type: 'message',
+        role: 'assistant',
+        text: '```ts\nconst fallback = true;\n```',
+        eventIds: [22],
+        rawEvents: [rawEvent(22, { message: 'copy fallback raw' })]
+      }
+    ];
+
+    try {
+      render(<ConversationBlockList blocks={blocks} />);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Copy code' }));
+
+      await waitFor(() => expect(execCommand).toHaveBeenCalledWith('copy'));
+      expect(writeText).toHaveBeenCalledWith('const fallback = true;');
+      expect(screen.getByRole('button', { name: 'Copy code' })).toHaveTextContent('Copied');
+    } finally {
+      if (originalExecCommand) {
+        Object.defineProperty(document, 'execCommand', { configurable: true, value: originalExecCommand });
+      } else {
+        Reflect.deleteProperty(document, 'execCommand');
+      }
+    }
   });
 
   it('renders task activity with output path when present', () => {
@@ -505,6 +583,7 @@ describe('ConversationBlockList', () => {
     articles.forEach((article, index) => {
       const details = within(article).getByText('Raw events').closest('details');
       expect(details).toHaveClass('raw-event-details');
+      expect(details).not.toHaveAttribute('open');
       expectedRawFragments[index].forEach((fragment) => {
         expect(details).toHaveTextContent(fragment);
       });

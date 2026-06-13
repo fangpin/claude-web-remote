@@ -51,8 +51,12 @@ function prettyLanguage(language?: string): string {
 
 async function copyToClipboard(text: string): Promise<void> {
   if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // Browser clipboard permission can be denied even for a user click; try the legacy path below.
+    }
   }
 
   const textarea = document.createElement('textarea');
