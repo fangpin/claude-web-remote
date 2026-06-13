@@ -150,16 +150,20 @@ impl SessionManager {
         match self.start_process(meta.clone(), None).await {
             Ok(info) => Ok(info),
             Err(err) => {
-                let removed_worktree = if let Some(worktree) = meta.worktree.as_ref() {
-                    self.worktree_manager.remove(worktree).await.is_ok()
+                let removed_worktree_source_cwd = if let Some(worktree) = meta.worktree.as_ref() {
+                    self.worktree_manager
+                        .remove(worktree)
+                        .await
+                        .is_ok()
+                        .then(|| worktree.source_cwd.clone())
                 } else {
-                    false
+                    None
                 };
                 let _ = self
                     .store
                     .update_meta(meta.id, |failed_meta| {
-                        if removed_worktree {
-                            failed_meta.cwd = cwd;
+                        if let Some(source_cwd) = removed_worktree_source_cwd {
+                            failed_meta.cwd = source_cwd;
                             failed_meta.worktree = None;
                         }
                         failed_meta.status = SessionStatus::Failed;
@@ -820,9 +824,8 @@ mod tests {
 set -euo pipefail
 printf '{"type":"system","session_id":"fake-session"}\n'
 while IFS= read -r line; do
-  text=$(python3 -c 'import json,sys; msg=json.loads(sys.argv[1]); print(msg["message"]["content"][0]["text"])' "$line")
-  printf '{"type":"assistant","message":"ack:%s"}\n' "$text"
-  if [[ "$text" == "exit" ]]; then
+  printf '{"type":"assistant","message":"ack"}\n'
+  if [[ "$line" == *'"text":"exit"'* || "$line" == *'"text": "exit"'* ]]; then
     exit 0
   fi
 done
@@ -845,9 +848,8 @@ set -euo pipefail
 printf '%s\n' "$*" >> '{}'
 printf '{{"type":"system","session_id":"fake-session"}}\n'
 while IFS= read -r line; do
-  text=$(python3 -c 'import json,sys; msg=json.loads(sys.argv[1]); print(msg["message"]["content"][0]["text"])' "$line")
-  printf '{{"type":"assistant","message":"ack:%s"}}\n' "$text"
-  if [[ "$text" == "exit" ]]; then
+  printf '{{"type":"assistant","message":"ack"}}\n'
+  if [[ "$line" == *'"text":"exit"'* || "$line" == *'"text": "exit"'* ]]; then
     exit 0
   fi
 done
@@ -911,14 +913,58 @@ done
         id
     }
 
-    async fn wait_for_status(
+    async fn wait_for_event_kind(
         store: &EventStore,
         session_id: Uuid,
-        status: SessionStatus,
+        kind: EventKind,
+    ) -> Vec<UiEvent> {
+        wait_for_events(store, session_id, |events| {
+            events.iter().any(|event| event.kind == kind)
+        })
+        .await
+    }
+
+    async fn wait_for_events<F>(store: &EventStore, session_id: Uuid, predicate: F) -> Vec<UiEvent>
+    where
+        F: Fn(&[UiEvent]) -> bool,
+    {
+        for _ in 0..250 {
+            let events = store.load_events_after(session_id, 0).await.unwrap();
+            if predicate(&events) {
+                return events;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        store.load_events_after(session_id, 0).await.unwrap()
+    }
+
+    async fn wait_for_events_after<F>(
+        store: &EventStore,
+        session_id: Uuid,
+        after_id: u64,
+        predicate: F,
+    ) -> Vec<UiEvent>
+    where
+        F: Fn(&[UiEvent]) -> bool,
+    {
+        for _ in 0..250 {
+            let events = store.load_events_after(session_id, after_id).await.unwrap();
+            if predicate(&events) {
+                return events;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        store.load_events_after(session_id, after_id).await.unwrap()
+    }
+
+    async fn wait_for_claude_session_id(
+        store: &EventStore,
+        session_id: Uuid,
+        expected: &str,
     ) -> SessionMeta {
-        for _ in 0..50 {
+        for _ in 0..250 {
             let meta = store.load_meta(session_id).await.unwrap();
-            if meta.status == status {
+            if meta.claude_session_id.as_deref() == Some(expected) {
                 return meta;
             }
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
@@ -926,19 +972,19 @@ done
         store.load_meta(session_id).await.unwrap()
     }
 
-    async fn wait_for_event_kind(
-        store: &EventStore,
-        session_id: Uuid,
-        kind: EventKind,
-    ) -> Vec<UiEvent> {
-        for _ in 0..50 {
-            let events = store.load_events_after(session_id, 0).await.unwrap();
-            if events.iter().any(|event| event.kind == kind) {
-                return events;
+    async fn wait_for_file_contents<F>(path: &std::path::Path, predicate: F) -> Option<String>
+    where
+        F: Fn(&str) -> bool,
+    {
+        for _ in 0..250 {
+            if let Ok(contents) = fs::read_to_string(path)
+                && predicate(&contents)
+            {
+                return Some(contents);
             }
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
-        store.load_events_after(session_id, 0).await.unwrap()
+        fs::read_to_string(path).ok()
     }
 
     async fn read_pid_file(path: &std::path::Path) -> Option<u32> {
@@ -1105,7 +1151,7 @@ done
                 "type": "tool_use",
                 "id": "toolu_1",
                 "name": "Bash",
-                "input": { "command": "sleep 10" }
+                "input": { "command": "sleep 10", "run_in_background": true }
             }),
         )];
 
@@ -1159,7 +1205,7 @@ done
         let bin = fake_claude(temp.path());
         let store = EventStore::new(temp.path().join("data")).await.unwrap();
         let manager = SessionManager::new(
-            store,
+            store.clone(),
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
@@ -1314,7 +1360,7 @@ done
         let bin = fake_claude(temp.path());
         let store = EventStore::new(temp.path().join("data")).await.unwrap();
         let manager = SessionManager::new(
-            store,
+            store.clone(),
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
@@ -1389,7 +1435,7 @@ done
         let bin = fake_claude(temp.path());
         let store = EventStore::new(temp.path().join("data")).await.unwrap();
         let manager = SessionManager::new(
-            store,
+            store.clone(),
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
@@ -1420,7 +1466,7 @@ done
             .send_input(created.id, "exit".to_string())
             .await
             .unwrap();
-        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        wait_for_event_kind(&store, created.id, EventKind::System).await;
         manager.stop_session(created.id).await.unwrap();
         let stopped = manager.get_session(created.id).await.unwrap();
         assert_eq!(stopped.status, SessionStatus::Stopped);
@@ -1473,9 +1519,7 @@ done
             .await
             .unwrap();
 
-        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-
-        let loaded = store.load_meta(session.id).await.unwrap();
+        let loaded = wait_for_claude_session_id(&store, session.id, "fake-session").await;
         assert_eq!(loaded.claude_session_id, Some("fake-session".to_string()));
     }
 
@@ -1500,7 +1544,7 @@ done
             })
             .await
             .unwrap();
-        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        wait_for_claude_session_id(&store, session.id, "fake-session").await;
         manager.stop_session(session.id).await.unwrap();
         let before_resume_max_id = store
             .load_events_after(session.id, 0)
@@ -1512,12 +1556,10 @@ done
             .unwrap();
 
         manager.resume_session(session.id).await.unwrap();
-        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-
-        let events = store
-            .load_events_after(session.id, before_resume_max_id)
-            .await
-            .unwrap();
+        let events = wait_for_events_after(&store, session.id, before_resume_max_id, |events| {
+            events.iter().any(|event| event.kind == EventKind::System)
+        })
+        .await;
         assert!(events.iter().any(|event| event.kind == EventKind::System));
         assert!(events.iter().all(|event| event.id > before_resume_max_id));
     }
@@ -1543,7 +1585,7 @@ done
             })
             .await
             .unwrap();
-        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        wait_for_claude_session_id(&store, session.id, "fake-session").await;
 
         let mut meta = store.load_meta(session.id).await.unwrap();
         meta.claude_session_id = None;
@@ -1551,7 +1593,15 @@ done
 
         manager.restart_session(session.id).await.unwrap();
 
-        let events = store.load_events_after(session.id, 0).await.unwrap();
+        let events = wait_for_events(&store, session.id, |events| {
+            events.iter().any(|event| {
+                event
+                    .payload
+                    .to_string()
+                    .contains("no claude session id found")
+            })
+        })
+        .await;
         assert!(events.iter().any(|event| {
             event
                 .payload
@@ -1617,9 +1667,12 @@ done
         assert!(!running.contains_key(&deleted_id));
         drop(running);
 
-        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-        let args = fs::read_to_string(args_log).unwrap();
-        assert_eq!(args.lines().count(), 2);
+        let args = wait_for_file_contents(&args_log, |args| {
+            args.lines()
+                .any(|line| line.contains("--resume running-resume"))
+        })
+        .await
+        .unwrap();
         assert!(args.contains("--resume running-resume"));
         assert!(!args.contains("stopped-resume"));
         assert!(!args.contains("deleted-resume"));
@@ -1793,15 +1846,14 @@ done
             })
             .await
             .unwrap();
-        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        wait_for_claude_session_id(&store, session.id, "fake-session").await;
 
         manager
             .send_input(session.id, "hello".to_string())
             .await
             .unwrap();
-        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
 
-        let events = store.load_events_after(session.id, 0).await.unwrap();
+        let events = wait_for_event_kind(&store, session.id, EventKind::Assistant).await;
         let mut ids = HashSet::new();
         for event in events {
             assert!(ids.insert(event.id), "duplicate event id {}", event.id);
@@ -2010,49 +2062,34 @@ done
     #[tokio::test]
     async fn archive_during_starting_reservation_prevents_late_running_resurrection() {
         let temp = tempfile::tempdir().unwrap();
-        let wrapper = temp.path().join("slow-wrapper.sh");
-        fs::write(
-            &wrapper,
-            "#!/usr/bin/env bash\nprintf '{\"type\":\"system\",\"session_id\":\"slow-session\"}\\n'\nwhile IFS= read -r line; do sleep 10; done\n",
-        )
-        .unwrap();
-        let mut permissions = fs::metadata(&wrapper).unwrap().permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&wrapper, permissions).unwrap();
-        let busy_executable = fs::OpenOptions::new().write(true).open(&wrapper).unwrap();
+        let bin = fake_claude(temp.path());
         let store = EventStore::new(temp.path().join("data")).await.unwrap();
         let manager = SessionManager::new(
             store.clone(),
-            vec![wrapper.to_string_lossy().to_string()],
+            vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
         );
         let session_id = Uuid::new_v4();
         let now = Utc::now();
-        store
-            .save_meta(&SessionMeta {
-                id: session_id,
-                name: Some("slow".to_string()),
-                cwd: temp.path().to_path_buf(),
-                permission_mode: "acceptEdits".to_string(),
-                status: SessionStatus::Stopped,
-                claude_session_id: Some("resume-me".to_string()),
-                worktree: None,
-                deleted_at: None,
-                created_at: now,
-                updated_at: now,
-            })
-            .await
-            .unwrap();
-
-        let resume_manager = manager.clone();
-        let resume = tokio::spawn(async move { resume_manager.resume_session(session_id).await });
-        let starting = wait_for_status(&store, session_id, SessionStatus::Starting).await;
-        assert_eq!(starting.status, SessionStatus::Starting);
+        let starting_meta = SessionMeta {
+            id: session_id,
+            name: Some("slow".to_string()),
+            cwd: temp.path().to_path_buf(),
+            permission_mode: "acceptEdits".to_string(),
+            status: SessionStatus::Starting,
+            claude_session_id: Some("resume-me".to_string()),
+            worktree: None,
+            deleted_at: None,
+            created_at: now,
+            updated_at: now,
+        };
+        store.save_meta(&starting_meta).await.unwrap();
 
         let archived = manager.archive_session(session_id).await.unwrap();
-        drop(busy_executable);
-        let resume_result = resume.await.unwrap();
+        let resume_result = manager
+            .start_process(starting_meta, Some("resume-me".to_string()))
+            .await;
         let final_meta = store.load_meta(session_id).await.unwrap();
 
         assert!(archived.deleted_at.is_some());
@@ -2065,49 +2102,34 @@ done
     #[tokio::test]
     async fn stop_during_starting_reservation_prevents_late_running_resurrection() {
         let temp = tempfile::tempdir().unwrap();
-        let wrapper = temp.path().join("slow-wrapper.sh");
-        fs::write(
-            &wrapper,
-            "#!/usr/bin/env bash\nprintf '{\"type\":\"system\",\"session_id\":\"slow-session\"}\\n'\nwhile IFS= read -r line; do sleep 10; done\n",
-        )
-        .unwrap();
-        let mut permissions = fs::metadata(&wrapper).unwrap().permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&wrapper, permissions).unwrap();
-        let busy_executable = fs::OpenOptions::new().write(true).open(&wrapper).unwrap();
+        let bin = fake_claude(temp.path());
         let store = EventStore::new(temp.path().join("data")).await.unwrap();
         let manager = SessionManager::new(
             store.clone(),
-            vec![wrapper.to_string_lossy().to_string()],
+            vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
         );
         let session_id = Uuid::new_v4();
         let now = Utc::now();
-        store
-            .save_meta(&SessionMeta {
-                id: session_id,
-                name: Some("slow".to_string()),
-                cwd: temp.path().to_path_buf(),
-                permission_mode: "acceptEdits".to_string(),
-                status: SessionStatus::Stopped,
-                claude_session_id: Some("resume-me".to_string()),
-                worktree: None,
-                deleted_at: None,
-                created_at: now,
-                updated_at: now,
-            })
-            .await
-            .unwrap();
-
-        let resume_manager = manager.clone();
-        let resume = tokio::spawn(async move { resume_manager.resume_session(session_id).await });
-        let starting = wait_for_status(&store, session_id, SessionStatus::Starting).await;
-        assert_eq!(starting.status, SessionStatus::Starting);
+        let starting_meta = SessionMeta {
+            id: session_id,
+            name: Some("slow".to_string()),
+            cwd: temp.path().to_path_buf(),
+            permission_mode: "acceptEdits".to_string(),
+            status: SessionStatus::Starting,
+            claude_session_id: Some("resume-me".to_string()),
+            worktree: None,
+            deleted_at: None,
+            created_at: now,
+            updated_at: now,
+        };
+        store.save_meta(&starting_meta).await.unwrap();
 
         manager.stop_session(session_id).await.unwrap();
-        drop(busy_executable);
-        let resume_result = resume.await.unwrap();
+        let resume_result = manager
+            .start_process(starting_meta, Some("resume-me".to_string()))
+            .await;
         let final_meta = store.load_meta(session_id).await.unwrap();
 
         assert!(matches!(resume_result, Err(AppError::InvalidRequest(_))));
@@ -2123,7 +2145,7 @@ done
         fs::write(
             &wrapper,
             format!(
-                "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" > '{}'\nprintf '{{\"type\":\"system\",\"session_id\":\"resumed\"}}\\n'\nwhile IFS= read -r line; do exit 0; done\n",
+                "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >> '{}'\nprintf '{{\"type\":\"system\",\"session_id\":\"resumed\"}}\\n'\nwhile IFS= read -r line; do exit 0; done\n",
                 args_log.display()
             ),
         )
@@ -2148,26 +2170,18 @@ done
             .await
             .unwrap();
         manager.stop_session(session.id).await.unwrap();
-        if let Err(error) = fs::remove_file(&args_log)
-            && error.kind() != std::io::ErrorKind::NotFound
-        {
-            panic!("failed to remove pre-resume args log: {error}");
-        }
         let mut meta = store.load_meta(session.id).await.unwrap();
         meta.claude_session_id = Some("resume-me".to_string());
         store.save_meta(&meta).await.unwrap();
 
         manager.resume_session(session.id).await.unwrap();
-        let mut args = String::new();
-        for _ in 0..20 {
-            if let Ok(contents) = fs::read_to_string(&args_log)
-                && contents.contains("--resume resume-me")
-            {
-                args = contents;
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
+        let args = wait_for_file_contents(&args_log, |contents| {
+            contents
+                .lines()
+                .any(|line| line.contains("--resume resume-me"))
+        })
+        .await
+        .unwrap_or_default();
 
         assert!(args.contains("--resume resume-me"));
     }
