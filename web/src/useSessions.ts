@@ -3,6 +3,7 @@ import {
   archiveSession,
   createSession,
   deleteSession,
+  getWorktreeStatus,
   listSessions,
   restartSession,
   resumeSession,
@@ -11,7 +12,7 @@ import {
   unarchiveSession
 } from './api';
 import { runtimeStatusLabels, type SessionListMode } from './AppShell';
-import type { SessionInfo } from './types';
+import type { SessionInfo, WorktreeStatus } from './types';
 
 type UseSessionsOptions = {
   setError: (error: string | null) => void;
@@ -36,7 +37,11 @@ export function useSessions({
   const [useWorktree, setUseWorktree] = useState(false);
   const [isListLoading, setIsListLoading] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
+  const [activeWorktreeStatus, setActiveWorktreeStatus] = useState<WorktreeStatus | null>(null);
+  const [activeWorktreeStatusError, setActiveWorktreeStatusError] = useState<string | null>(null);
+  const [isWorktreeStatusLoading, setIsWorktreeStatusLoading] = useState(false);
   const listRefreshIdRef = useRef(0);
+  const worktreeStatusRefreshIdRef = useRef(0);
   const skipNextListRefresh = useRef(false);
   const callbacksRef = useRef({
     setError,
@@ -143,6 +148,31 @@ export function useSessions({
     });
   }, []);
 
+  const refreshActiveWorktreeStatus = useCallback(async () => {
+    const session = activeSession;
+    const refreshId = ++worktreeStatusRefreshIdRef.current;
+    if (listModeState !== 'active' || !session?.worktree) {
+      setActiveWorktreeStatus(null);
+      setActiveWorktreeStatusError(null);
+      setIsWorktreeStatusLoading(false);
+      return;
+    }
+
+    setIsWorktreeStatusLoading(true);
+    try {
+      const status = await getWorktreeStatus(session.id);
+      if (refreshId !== worktreeStatusRefreshIdRef.current) return;
+      setActiveWorktreeStatus(status);
+      setActiveWorktreeStatusError(null);
+    } catch (err: unknown) {
+      if (refreshId !== worktreeStatusRefreshIdRef.current) return;
+      setActiveWorktreeStatus(null);
+      setActiveWorktreeStatusError(err instanceof Error ? err.message : String(err));
+    } finally {
+      if (refreshId === worktreeStatusRefreshIdRef.current) setIsWorktreeStatusLoading(false);
+    }
+  }, [activeSession, listModeState]);
+
   useEffect(() => {
     if (skipNextListRefresh.current) {
       skipNextListRefresh.current = false;
@@ -152,13 +182,18 @@ export function useSessions({
   }, [listModeState, refreshSessions]);
 
   useEffect(() => {
+    void refreshActiveWorktreeStatus();
+  }, [refreshActiveWorktreeStatus]);
+
+  useEffect(() => {
     const intervalId = window.setInterval(() => {
       if (listModeState === 'active') {
         void refreshSessions('active');
+        void refreshActiveWorktreeStatus();
       }
     }, 5000);
     return () => window.clearInterval(intervalId);
-  }, [listModeState, refreshSessions]);
+  }, [listModeState, refreshActiveWorktreeStatus, refreshSessions]);
 
   async function onCreateSession(event: FormEvent) {
     event.preventDefault();
@@ -200,20 +235,18 @@ export function useSessions({
       setSessions((current) => current.map((session) => {
         if (session.id !== sessionId) return session;
         if (removeWorktree && session.worktree) {
+          setActiveWorktreeStatus(null);
+          setActiveWorktreeStatusError(null);
           return { ...session, cwd: session.worktree.sourceCwd, status: 'stopped', runtimeStatus: 'stopped', worktree: null };
         }
         return { ...session, status: 'stopped', runtimeStatus: 'stopped' };
       }));
     } catch (err: unknown) {
-      if (removeWorktree) {
-        setSessions((current) => current.map((session) => (
-          session.id === sessionId ? { ...session, status: 'stopped', runtimeStatus: 'stopped' } : session
-        )));
-      }
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       callbacksRef.current.onTasksChanged?.();
       callbacksRef.current.onSessionTasksChanged?.(sessionId);
+      if (!removeWorktree) void refreshActiveWorktreeStatus();
     }
   }
 
@@ -294,10 +327,13 @@ export function useSessions({
     setSessions,
     activeId,
     activeSession,
+    activeWorktreeStatus,
+    activeWorktreeStatusError,
     cwd,
     isActiveSessionMode,
     isListLoading,
     isNewSessionOpen,
+    isWorktreeStatusLoading,
     listError,
     listMode: listModeState,
     permissionMode,

@@ -156,6 +156,37 @@ export default function App() {
     document.getElementById(`inspector-tab-${tabs[nextIndex]}`)?.focus();
   }
 
+  function renderRemoveWorktreeButton() {
+    const status = sessionState.activeWorktreeStatus;
+    const unavailable = sessionState.isWorktreeStatusLoading || sessionState.activeWorktreeStatusError || !status;
+    if (status?.dirty) {
+      return <button disabled title="Stop only keeps this dirty worktree so you can review, commit, stash, or clean its changes.">Review dirty worktree first</button>;
+    }
+    return (
+      <button
+        disabled={Boolean(unavailable)}
+        title={unavailable ? 'Worktree cleanup is available after the clean status check completes.' : undefined}
+        onClick={() => {
+          if (confirm('Stop this session and remove the clean app-created worktree? The source repository will remain.')) {
+            void sessionState.onStop(true);
+          }
+        }}
+      >
+        Stop and remove worktree
+      </button>
+    );
+  }
+
+  function renderWorktreeStopActions() {
+    const activeSession = sessionState.activeSession;
+    return (
+      <>
+        <button onClick={() => sessionState.onStop(false)}>Stop only</button>
+        {activeSession?.worktree?.createdByClaudeRemoteWeb && renderRemoveWorktreeButton()}
+      </>
+    );
+  }
+
   function renderActions() {
     const activeSession = sessionState.activeSession;
     if (!activeSession) return null;
@@ -171,16 +202,7 @@ export default function App() {
     if (activeSession.status === 'running') {
       return (
         <div className="actions">
-          {activeSession.worktree ? (
-            <>
-              <button onClick={() => sessionState.onStop(false)}>Stop only</button>
-              {activeSession.worktree.createdByClaudeRemoteWeb && (
-                <button onClick={() => sessionState.onStop(true)}>Stop and remove worktree</button>
-              )}
-            </>
-          ) : (
-            <button onClick={() => sessionState.onStop(false)}>Stop</button>
-          )}
+          {activeSession.worktree ? renderWorktreeStopActions() : <button onClick={() => sessionState.onStop(false)}>Stop</button>}
           <button onClick={sessionState.onRestart}>Restart</button>
           <button className="danger" onClick={sessionState.onArchive}>Archive</button>
         </div>
@@ -190,16 +212,7 @@ export default function App() {
     if (activeSession.status === 'starting') {
       return (
         <div className="actions">
-          {activeSession.worktree ? (
-            <>
-              <button onClick={() => sessionState.onStop(false)}>Stop only</button>
-              {activeSession.worktree.createdByClaudeRemoteWeb && (
-                <button onClick={() => sessionState.onStop(true)}>Stop and remove worktree</button>
-              )}
-            </>
-          ) : (
-            <button onClick={() => sessionState.onStop(false)}>Stop</button>
-          )}
+          {activeSession.worktree ? renderWorktreeStopActions() : <button onClick={() => sessionState.onStop(false)}>Stop</button>}
           <button className="danger" onClick={sessionState.onArchive}>Archive</button>
         </div>
       );
@@ -272,6 +285,9 @@ export default function App() {
           eventConnectionState={eventState.activeConnection.state}
           eventRenderLimit={EVENT_RENDER_LIMIT}
           eventsRef={eventState.eventsRef}
+          activeWorktreeStatus={sessionState.activeWorktreeStatus}
+          activeWorktreeStatusError={sessionState.activeWorktreeStatusError}
+          isWorktreeStatusLoading={sessionState.isWorktreeStatusLoading}
           hiddenEventCount={eventState.hiddenEventCount}
           isAwaitingClaude={eventState.isAwaitingClaude}
           isComposerSession={isComposerSession}

@@ -6,7 +6,7 @@ import type { AppView, SessionListMode } from './AppShell';
 import type { ClaudeCommand, SlashCommandToken } from './autocomplete';
 import type { ConversationBlock } from './conversationBlocks';
 import type { EventConnectionState } from './useSessionEvents';
-import type { SessionInfo } from './types';
+import type { SessionInfo, WorktreeStatus } from './types';
 
 type ApiError = {
   message: string;
@@ -28,6 +28,9 @@ type Props = {
   eventConnectionState: EventConnectionState;
   eventRenderLimit: number;
   eventsRef: RefObject<HTMLDivElement | null>;
+  activeWorktreeStatus: WorktreeStatus | null;
+  activeWorktreeStatusError: string | null;
+  isWorktreeStatusLoading: boolean;
   hiddenEventCount: number;
   isAwaitingClaude: boolean;
   isComposerSession: boolean;
@@ -66,6 +69,67 @@ function LoadingConversation() {
       <span />
       <span />
     </div>
+  );
+}
+
+function worktreeStateLabel(status: WorktreeStatus | null, isLoading: boolean, error: string | null): string {
+  if (isLoading) return 'Checking worktree...';
+  if (error) return 'Status unavailable';
+  if (!status) return 'Status pending';
+  if (!status.dirty) return 'Clean';
+  return `${status.changedFileCount} changed ${status.changedFileCount === 1 ? 'file' : 'files'}`;
+}
+
+function WorktreeStatusPanel({
+  session,
+  status,
+  error,
+  isLoading
+}: {
+  session: SessionInfo;
+  status: WorktreeStatus | null;
+  error: string | null;
+  isLoading: boolean;
+}) {
+  if (!session.worktree) return null;
+  const files = status?.files.slice(0, 8) ?? [];
+  const extraFileCount = Math.max(0, (status?.files.length ?? 0) - files.length);
+  const branch = status?.branch ?? session.worktree.branch;
+  const baseRef = status?.baseRef ?? session.worktree.baseRef;
+
+  return (
+    <section className={`worktree-status-panel ${status?.dirty ? 'dirty' : ''}`} aria-label="Worktree status">
+      <div className="worktree-status-heading">
+        <span className={`worktree-state ${status?.dirty ? 'dirty' : 'clean'}`}>{worktreeStateLabel(status, isLoading, error)}</span>
+        <span>Branch: {branch}</span>
+        {baseRef && <span>Base: {baseRef}</span>}
+      </div>
+      <dl className="worktree-paths">
+        <div>
+          <dt>Worktree</dt>
+          <dd title={session.worktree.worktreeCwd}>{session.worktree.worktreeCwd}</dd>
+        </div>
+        <div>
+          <dt>Source</dt>
+          <dd title={session.worktree.sourceCwd}>{session.worktree.sourceCwd}</dd>
+        </div>
+      </dl>
+      {error && <p className="worktree-warning">Unable to read worktree status: {error}</p>}
+      {status?.dirty && (
+        <p className="worktree-warning">This worktree has uncommitted changes. Stop only keeps it; cleanup is blocked until you commit, stash, or clean the changes.</p>
+      )}
+      {files.length > 0 && (
+        <ul className="worktree-file-list" aria-label="Changed files">
+          {files.map((file) => (
+            <li key={`${file.indexStatus}${file.worktreeStatus}:${file.path}`}>
+              <code>{file.indexStatus}{file.worktreeStatus}</code>
+              <span title={file.path}>{file.path}</span>
+            </li>
+          ))}
+          {extraFileCount > 0 && <li className="worktree-more">+ {extraFileCount} more</li>}
+        </ul>
+      )}
+    </section>
   );
 }
 
@@ -108,6 +172,9 @@ export default function ConversationWorkspace({
   eventConnectionState,
   eventRenderLimit,
   eventsRef,
+  activeWorktreeStatus,
+  activeWorktreeStatusError,
+  isWorktreeStatusLoading,
   hiddenEventCount,
   isAwaitingClaude,
   isComposerSession,
@@ -151,8 +218,9 @@ export default function ConversationWorkspace({
               <p title={activeSession.cwd}>{activeSession.cwd}</p>
               {activeSession.worktree && (
                 <div className="worktree-meta">
+                  <span>Worktree: {activeSession.worktree.worktreeCwd}</span>
                   <span>Source: {activeSession.worktree.sourceCwd}</span>
-                  <span>Branch: {activeSession.worktree.branch}</span>
+                  <span>Branch: {activeWorktreeStatus?.branch ?? activeSession.worktree.branch}</span>
                 </div>
               )}
             </div>
@@ -161,6 +229,12 @@ export default function ConversationWorkspace({
           {listMode === 'archived' && (
             <p className="deleted-note">This session is archived. Unarchive it before resuming work or sending messages.</p>
           )}
+          <WorktreeStatusPanel
+            session={activeSession}
+            status={activeWorktreeStatus}
+            error={activeWorktreeStatusError}
+            isLoading={isWorktreeStatusLoading}
+          />
           <div className="events" ref={eventsRef}>
             <div className="conversation-content">
               {connectionLabel(eventConnectionState) && (

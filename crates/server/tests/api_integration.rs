@@ -463,6 +463,50 @@ async fn lists_tasks_for_one_session() {
 }
 
 #[tokio::test]
+async fn worktree_status_endpoint_reports_dirty_files() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    init_repo(&repo).await;
+    let bin = fake_claude(temp.path());
+    let addr = spawn_app(&temp, vec![bin.to_string_lossy().to_string()]).await;
+    let client = reqwest::Client::new();
+
+    let created: Value = client
+        .post(format!("http://{addr}/api/sessions"))
+        .json(&json!({ "cwd": repo, "worktree": { "enabled": true } }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let session_id = created["id"].as_str().unwrap();
+    let worktree_cwd = PathBuf::from(created["worktree"]["worktreeCwd"].as_str().unwrap());
+    fs::write(worktree_cwd.join("notes.txt"), "draft\n").unwrap();
+
+    let status: Value = client
+        .get(format!(
+            "http://{addr}/api/sessions/{session_id}/worktree-status"
+        ))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(status["dirty"], true);
+    assert_eq!(status["changedFileCount"], 1);
+    assert_eq!(status["files"][0]["path"], "notes.txt");
+    assert_eq!(status["branch"], created["worktree"]["branch"]);
+    assert_eq!(status["baseRef"], "HEAD");
+}
+
+#[tokio::test]
 async fn stop_and_remove_worktree_endpoint_removes_worktree() {
     let temp = tempfile::tempdir().unwrap();
     let repo = temp.path().join("repo");
@@ -497,6 +541,44 @@ async fn stop_and_remove_worktree_endpoint_removes_worktree() {
         .unwrap();
 
     assert!(!worktree_cwd.exists());
+}
+
+#[tokio::test]
+async fn stop_and_remove_worktree_endpoint_rejects_dirty_worktree() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    init_repo(&repo).await;
+    let bin = fake_claude(temp.path());
+    let addr = spawn_app(&temp, vec![bin.to_string_lossy().to_string()]).await;
+    let client = reqwest::Client::new();
+
+    let created: Value = client
+        .post(format!("http://{addr}/api/sessions"))
+        .json(&json!({ "cwd": repo, "worktree": { "enabled": true } }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let session_id = created["id"].as_str().unwrap();
+    let worktree_cwd = PathBuf::from(created["worktree"]["worktreeCwd"].as_str().unwrap());
+    fs::write(worktree_cwd.join("notes.txt"), "draft\n").unwrap();
+
+    let response = client
+        .post(format!(
+            "http://{addr}/api/sessions/{session_id}/stop-and-remove-worktree"
+        ))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+    let body: Value = response.json().await.unwrap();
+    assert!(body["error"].as_str().unwrap().contains("uncommitted"));
+    assert!(worktree_cwd.exists());
 }
 
 #[tokio::test]

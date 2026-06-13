@@ -9,6 +9,7 @@ The code, files, git repositories, Claude CLI, and model gateway all stay on the
 - Rust daemon with REST and WebSocket APIs
 - React Web UI for multi-session control
 - Session creation by working directory
+- Optional git worktree sessions with branch, dirty state, and changed-file visibility
 - Streaming event display from `claude --output-format stream-json`
 - User input forwarding to the remote Claude process
 - Claude-like composer with slash commands, context hints, and inline stop/send controls
@@ -186,6 +187,8 @@ Permission mode: bypassPermissions
 ```
 
 The daemon starts the configured launcher in that working directory, streams events back to the browser, and names the session from the first user message.
+
+Enable **Use git worktree** to start Claude in an isolated checkout. Worktree sessions show the checkout path, source repo, branch, clean/dirty state, and changed files in the session header. `Stop only` keeps the worktree for review; `Stop and remove worktree` is only available for clean app-created worktrees and never force-removes dirty changes.
 
 ## Session History API
 

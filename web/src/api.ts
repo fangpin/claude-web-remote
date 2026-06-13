@@ -6,7 +6,8 @@ import type {
   SessionDiagnosticsResponse,
   SessionInfo,
   TaskGroups,
-  UiEvent
+  UiEvent,
+  WorktreeStatus
 } from './types';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -90,6 +91,10 @@ export async function sendInput(sessionId: string, text: string): Promise<Sessio
 
 export async function stopSession(sessionId: string): Promise<void> {
   await request<{ ok: true }>(`/api/sessions/${sessionId}/stop`, { method: 'POST' });
+}
+
+export async function getWorktreeStatus(sessionId: string): Promise<WorktreeStatus> {
+  return request<WorktreeStatus>(`/api/sessions/${sessionId}/worktree-status`);
 }
 
 export async function stopAndRemoveWorktree(sessionId: string): Promise<void> {

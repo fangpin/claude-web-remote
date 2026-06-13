@@ -322,6 +322,7 @@ mod tests {
                 source_cwd: PathBuf::from("/tmp/source"),
                 worktree_cwd: PathBuf::from("/tmp/source/.claude/worktrees/abc123"),
                 branch: "pin/abc123".to_string(),
+                base_ref: Some("HEAD".to_string()),
                 created_by_claude_remote_web: true,
             }),
             deleted_at: None,
@@ -489,6 +490,7 @@ mod tests {
             source_cwd: PathBuf::from("/tmp/source"),
             worktree_cwd: PathBuf::from("/tmp/source/.claude/worktrees/abc123"),
             branch: "pin/abc123".to_string(),
+            base_ref: Some("HEAD".to_string()),
             created_by_claude_remote_web: true,
         };
         let mut meta = meta(id, "demo", now);

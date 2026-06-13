@@ -826,6 +826,113 @@ button.danger:hover {
   white-space: nowrap;
 }
 
+.worktree-status-panel {
+  display: grid;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+  background: rgb(255 253 250 / 0.58);
+  padding: 10px 20px;
+}
+
+.worktree-status-panel.dirty {
+  border-bottom-color: #e8d6b3;
+  background: #fbf3df;
+}
+
+.worktree-status-heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  min-width: 0;
+}
+
+.worktree-status-heading span,
+.worktree-state {
+  max-width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  background: rgb(255 253 250 / 0.74);
+  padding: 3px 8px;
+  font-size: 12px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worktree-state.clean {
+  border-color: #caddd0;
+  color: var(--success);
+  background: var(--success-soft);
+}
+
+.worktree-state.dirty {
+  border-color: #e8d5aa;
+  color: var(--warning);
+  background: var(--warning-soft);
+}
+
+.worktree-paths {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+}
+
+.worktree-paths div {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.worktree-paths dt {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.worktree-paths dd {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.worktree-warning {
+  margin: 0;
+  color: var(--warning);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.worktree-file-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.worktree-file-list li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.worktree-file-list code {
+  color: var(--warning);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.worktree-file-list span,
+.worktree-more {
+  overflow-wrap: anywhere;
+}
+
 .composer-status-pill {
   display: inline-flex;
   align-items: center;
