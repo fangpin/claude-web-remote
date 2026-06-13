@@ -14,11 +14,12 @@ import {
   stopSession,
   unarchiveSession
 } from './api';
-import ConfigView from './ConfigView';
-import ConversationBlockList from './ConversationBlockList';
+import AppShell, { runtimeStatusLabels, type AppView, type SessionListMode } from './AppShell';
+import ConversationWorkspace from './ConversationWorkspace';
+import InspectorPanel, { type InspectorTab } from './InspectorPanel';
+import SessionSidebar from './SessionSidebar';
 import { buildConversationBlocks } from './conversationBlocks';
 import { extractSessionPlan } from './sessionPlan';
-import TasksPanel from './TasksPanel';
 import { applyCommandCompletion, findSlashCommandToken, getCommandSuggestions, type ClaudeCommand, type SlashCommandToken } from './autocomplete';
 import type { SessionInfo, TaskGroups, TaskInfo, UiEvent } from './types';
 import './App.css';
@@ -32,22 +33,10 @@ const EMPTY_STATE_PROMPTS = [
   'Run the relevant tests',
   'Plan the smallest fix'
 ];
-type SessionListMode = 'active' | 'archived';
-type AppView = 'sessions' | 'config';
 type ObjectPayload = Record<string, unknown>;
 type PendingMessage = {
   id: number;
   text: string;
-};
-
-const runtimeStatusLabels = {
-  starting: 'Starting',
-  running: 'Running',
-  waiting: 'Waiting for you',
-  ended: 'Ended',
-  exited: 'Ended',
-  stopped: 'Stopped',
-  failed: 'Failed'
 };
 
 function isObjectPayload(value: unknown): value is ObjectPayload {
@@ -96,7 +85,7 @@ export default function App() {
   const [view, setView] = useState<AppView>('sessions');
   const [isNewSessionOpen, setIsNewSessionOpen] = useState(false);
   const [isInspectorOpen, setIsInspectorOpen] = useState(true);
-  const [inspectorTab, setInspectorTab] = useState<'session' | 'global' | 'plan'>('session');
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>('session');
   const [events, setEvents] = useState<Record<string, UiEvent[]>>({});
   const [cwd, setCwd] = useState('');
   const [permissionMode, setPermissionMode] = useState('bypassPermissions');
@@ -797,365 +786,100 @@ export default function App() {
   }
 
   return (
-    <div className={`app-shell view-${view} ${isInspectorOpen ? 'inspector-open' : 'inspector-closed'}`}>
-      <nav className="primary-rail" aria-label="Primary navigation">
-        <div className="rail-brand" aria-label="Claude Remote Web">CRW</div>
-        <button
-          type="button"
-          aria-current={view === 'sessions' && listMode === 'active' ? 'page' : 'false'}
-          className={view === 'sessions' && listMode === 'active' ? 'active' : ''}
-          onClick={() => {
-            setView('sessions');
-            setListMode('active');
+    <AppShell
+      view={view}
+      listMode={listMode}
+      isInspectorOpen={isInspectorOpen}
+      onShowActiveSessions={() => {
+        setView('sessions');
+        setListMode('active');
+      }}
+      onShowConfig={() => setView('config')}
+      onShowArchivedSessions={() => {
+        setView('sessions');
+        setListMode('archived');
+      }}
+      sidebar={
+        <SessionSidebar
+          activeId={activeId}
+          cwd={cwd}
+          isListLoading={isListLoading}
+          isNewSessionOpen={isNewSessionOpen}
+          listMode={listMode}
+          permissionMode={permissionMode}
+          recentDirectories={recentDirectories}
+          sessionSearch={sessionSearch}
+          sessions={sessions}
+          useWorktree={useWorktree}
+          visibleSessions={visibleSessions}
+          onCreateSession={onCreateSession}
+          onSelectSession={setActiveId}
+          onSetCwd={setCwd}
+          onSetIsNewSessionOpen={setIsNewSessionOpen}
+          onSetListMode={setListMode}
+          onSetPermissionMode={setPermissionMode}
+          onSetSessionSearch={setSessionSearch}
+          onSetUseWorktree={setUseWorktree}
+          onToggleNewSession={() => setIsNewSessionOpen((open) => !open)}
+        />
+      }
+      workspace={
+        <ConversationWorkspace
+          activeBlocks={activeBlocks}
+          activeSession={activeSession}
+          activeSuggestionIndex={activeSuggestionIndex}
+          autocompleteOptionRefs={autocompleteOptionRefs}
+          autocompleteToken={autocompleteToken}
+          canSend={canSend}
+          composerDisabledReason={composerDisabledReason}
+          composerRef={composerRef}
+          emptyStatePrompts={EMPTY_STATE_PROMPTS}
+          error={error}
+          eventRenderLimit={EVENT_RENDER_LIMIT}
+          eventsRef={eventsRef}
+          hiddenEventCount={hiddenEventCount}
+          isAwaitingClaude={isAwaitingClaude}
+          isComposerSession={isComposerSession}
+          isSending={isSending}
+          listMode={listMode}
+          message={message}
+          messageInputRef={messageInputRef}
+          sendStatusText={sendStatusText}
+          suggestions={suggestions}
+          view={view}
+          actions={renderActions()}
+          onCompleteSuggestion={completeSuggestion}
+          onMessageChange={(value, element) => {
+            setMessage(value);
+            resizeMessageInput(element);
+            refreshAutocomplete(value, element.selectionStart);
           }}
-        >
-          Sessions
-        </button>
-        <button type="button" aria-current={view === 'config' ? 'page' : 'false'} className={view === 'config' ? 'active' : ''} onClick={() => setView('config')}>Config</button>
-        <button
-          type="button"
-          aria-current={listMode === 'archived' && view === 'sessions' ? 'page' : 'false'}
-          aria-label="Archived sessions"
-          className={listMode === 'archived' && view === 'sessions' ? 'active' : ''}
-          onClick={() => {
-            setView('sessions');
-            setListMode('archived');
-          }}
-        >
-          Archived
-        </button>
-      </nav>
-
-      {view === 'sessions' && (
-        <aside className="session-sidebar" aria-label="Session navigation">
-          <div className="sidebar-header">
-            <div>
-              <h1>Claude Remote Web</h1>
-              <p>Remote Claude sessions</p>
-            </div>
-            <button type="button" className="primary-action" onClick={() => setIsNewSessionOpen((open) => !open)}>
-              New chat
-            </button>
-          </div>
-
-          {isNewSessionOpen && (
-            <form className="new-session-panel" onSubmit={onCreateSession}>
-              <div className="new-session-heading">
-                <div>
-                  <h2>New session</h2>
-                  <p>Start Claude in a local working directory.</p>
-                </div>
-                <button type="button" onClick={() => setIsNewSessionOpen(false)}>Close</button>
-              </div>
-              <label>
-                Working directory
-                <input value={cwd} onChange={(event) => setCwd(event.target.value)} placeholder="/data00/home/user/repos/project" required />
-              </label>
-              {recentDirectories.length > 0 && (
-                <div className="directory-suggestions" aria-label="Recent working directories">
-                  <span>Recent</span>
-                  {recentDirectories.map((directory) => (
-                    <button key={directory} type="button" onClick={() => setCwd(directory)} aria-label={`Use ${directory}`}>
-                      {directory}
-                    </button>
-                  ))}
-                </div>
-              )}
-              <div className="new-session-options">
-                <label className="checkbox-label">
-                  <input type="checkbox" checked={useWorktree} onChange={(event) => setUseWorktree(event.target.checked)} />
-                  Use git worktree
-                </label>
-                <label>
-                  Permission mode
-                  <select value={permissionMode} onChange={(event) => setPermissionMode(event.target.value)}>
-                    <option value="bypassPermissions">bypassPermissions</option>
-                    <option value="acceptEdits">acceptEdits</option>
-                    <option value="auto">auto</option>
-                    <option value="default">default</option>
-                  </select>
-                </label>
-              </div>
-              <div className="new-session-actions">
-                <button className="primary-action" type="submit">Create session</button>
-              </div>
-            </form>
-          )}
-
-          <div className="session-modes" role="group" aria-label="Session list mode">
-            <button
-              type="button"
-              className={listMode === 'active' ? 'selected' : undefined}
-              aria-pressed={listMode === 'active'}
-              onClick={() => setListMode('active')}
-            >
-              Active
-            </button>
-            <button
-              type="button"
-              className={listMode === 'archived' ? 'selected' : undefined}
-              aria-pressed={listMode === 'archived'}
-              onClick={() => setListMode('archived')}
-            >
-              Archived
-            </button>
-          </div>
-
-          <section className="sessions" aria-label={listMode === 'archived' ? 'Archived sessions' : 'Active sessions'}>
-            <div className="session-list-toolbar">
-              <div>
-                <h2>{listMode === 'archived' ? 'Archived sessions' : 'Active sessions'}</h2>
-                <p>
-                  {sessionSearch.trim()
-                    ? `${visibleSessions.length} of ${sessions.length} shown`
-                    : `${sessions.length} ${sessions.length === 1 ? 'session' : 'sessions'}`}
-                </p>
-              </div>
-              {sessionSearch && (
-                <button type="button" onClick={() => setSessionSearch('')}>Clear</button>
-              )}
-            </div>
-            <label className="session-search">
-              <span className="sr-only">Search sessions</span>
-              <input
-                type="search"
-                value={sessionSearch}
-                onChange={(event) => setSessionSearch(event.target.value)}
-                placeholder="Search sessions"
-                aria-label="Search sessions"
-              />
-            </label>
-            {isListLoading && <p className="muted">Loading sessions...</p>}
-            {!isListLoading && sessions.length === 0 && <p className="muted">{listMode === 'archived' ? 'No archived sessions.' : 'No sessions yet.'}</p>}
-            {!isListLoading && sessions.length > 0 && visibleSessions.length === 0 && (
-              <p className="muted">No sessions match "{sessionSearch.trim()}".</p>
-            )}
-            {visibleSessions.map((session) => {
-              const runtimeStatus = session.runtimeStatus ?? session.status;
-              return (
-                <button
-                  key={session.id}
-                  className={session.id === activeId ? 'session active' : 'session'}
-                  onClick={() => setActiveId(session.id)}
-                >
-                  <span className="session-main-row">
-                    <strong>{session.name || session.cwd}</strong>
-                    <em className={`status status-${runtimeStatus}`}>{runtimeStatusLabels[runtimeStatus]}</em>
-                  </span>
-                  <span className="session-path" title={session.cwd}>{session.cwd}</span>
-                  {session.worktree && (
-                    <span className="session-worktree-row">
-                      <span>Worktree</span>
-                      <span className="session-branch" title={session.worktree.branch}>{session.worktree.branch}</span>
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </section>
-        </aside>
-      )}
-
-      {view === 'config' ? (
-        <main className="workspace config-workspace" aria-label="Configuration workspace">
-          <ConfigView />
-        </main>
-      ) : (
-        <main className={listMode === 'archived' ? 'workspace conversation-workspace with-deleted-note' : 'workspace conversation-workspace'} aria-label="Conversation workspace">
-          {error && <p role="alert" className="error">{error}</p>}
-          {activeSession ? (
-            <>
-              <header className="conversation-header">
-                <div>
-                  <span className="eyebrow">{listMode === 'archived' ? 'Archived Claude session' : 'Remote Claude session'}</span>
-                  <h2>{activeSession.name || activeSession.cwd}</h2>
-                  <p title={activeSession.cwd}>{activeSession.cwd}</p>
-                  {activeSession.worktree && (
-                    <div className="worktree-meta">
-                      <span>Source: {activeSession.worktree.sourceCwd}</span>
-                      <span>Branch: {activeSession.worktree.branch}</span>
-                    </div>
-                  )}
-                </div>
-                {renderActions()}
-              </header>
-              {listMode === 'archived' && (
-                <p className="deleted-note">This session is archived. Unarchive it before resuming work or sending messages.</p>
-              )}
-              <div className="events" ref={eventsRef}>
-                <div className="conversation-content">
-                  {hiddenEventCount > 0 && (
-                    <div className="event-limit-note">
-                      Showing latest {EVENT_RENDER_LIMIT} events. {hiddenEventCount} older events hidden.
-                    </div>
-                  )}
-                  {activeBlocks.length === 0 && hiddenEventCount === 0 && (
-                    <section className="conversation-empty" aria-label="Conversation starter">
-                      <span className="empty-eyebrow">Ready when you are</span>
-                      <h3>What would you like Claude to do?</h3>
-                      <p>Ask Claude to inspect this repo, explain behavior, run tests, or make a change.</p>
-                      {isComposerSession && (
-                        <div className="empty-prompts" aria-label="Prompt suggestions">
-                          {EMPTY_STATE_PROMPTS.map((prompt) => (
-                            <button key={prompt} type="button" onClick={() => useEmptyStatePrompt(prompt)}>
-                              {prompt}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </section>
-                  )}
-                  <ConversationBlockList blocks={activeBlocks} />
-                </div>
-              </div>
-              <form
-                className={`composer ${isComposerSession ? '' : 'composer-disabled'} ${isAwaitingClaude ? 'awaiting-claude' : ''}`}
-                onSubmit={onSend}
-                ref={composerRef}
-                aria-label="Message composer"
-              >
-                  <div className="composer-context" aria-label="Composer context">
-                    <span className="composer-status-pill">
-                      <span aria-hidden="true" className="composer-status-dot" />
-                      status: {isAwaitingClaude ? 'Waiting for Claude' : runtimeStatusLabels[activeSession.runtimeStatus ?? activeSession.status]}
-                    </span>
-                    <span title={activeSession.cwd}>cwd: {activeSession.cwd}</span>
-                    <span>permission: {activeSession.permissionMode}</span>
-                    {activeSession.worktree && <span title={activeSession.worktree.branch}>branch: {activeSession.worktree.branch}</span>}
-                    {activeSession.worktree && <span title={activeSession.worktree.sourceCwd}>source: {activeSession.worktree.sourceCwd}</span>}
-                  </div>
-                  <div className="composer-input">
-                    <label className="sr-only" htmlFor="message-input">Message</label>
-                    <textarea
-                      id="message-input"
-                      ref={messageInputRef}
-                      value={message}
-                      aria-label="Message"
-                      aria-activedescendant={suggestions.length > 0 && autocompleteToken ? `autocomplete-option-${activeSuggestionIndex}` : undefined}
-                      aria-autocomplete="list"
-                      aria-controls={suggestions.length > 0 && autocompleteToken ? 'command-autocomplete' : undefined}
-                      disabled={!isComposerSession}
-                      placeholder={isComposerSession ? 'Message Claude...' : composerDisabledReason}
-                      onChange={(event) => {
-                        setMessage(event.target.value);
-                        resizeMessageInput(event.currentTarget);
-                        refreshAutocomplete(event.target.value, event.target.selectionStart);
-                      }}
-                      onSelect={(event) => refreshAutocomplete(event.currentTarget.value, event.currentTarget.selectionStart)}
-                      onKeyDown={onMessageKeyDown}
-                      rows={1}
-                    />
-                    {suggestions.length > 0 && autocompleteToken && (
-                      <div id="command-autocomplete" className="autocomplete" role="listbox" aria-label="Claude command suggestions">
-                        <div className="autocomplete-header">
-                          <strong>Commands</strong>
-                          <span>Use arrows, Tab, or Enter</span>
-                        </div>
-                        {suggestions.map((suggestion, index) => (
-                          <button
-                            key={suggestion.name}
-                            id={`autocomplete-option-${index}`}
-                            type="button"
-                            role="option"
-                            aria-selected={index === activeSuggestionIndex}
-                            className={index === activeSuggestionIndex ? 'autocomplete-option active' : 'autocomplete-option'}
-                            ref={(element) => {
-                              autocompleteOptionRefs.current[index] = element;
-                            }}
-                            onMouseDown={(event) => event.preventDefault()}
-                            onMouseEnter={() => setActiveSuggestionIndex(index)}
-                            onClick={() => completeSuggestion(suggestion)}
-                          >
-                            <span className="autocomplete-command">{suggestion.name}</span>
-                            <span className="autocomplete-description">{suggestion.description}</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <div className="composer-actions">
-                    <span id="composer-send-status" aria-live="polite">{sendStatusText}</span>
-                    <div>
-                      {isComposerSession && (
-                        <button className="composer-stop-button" type="button" onClick={() => onStop(false)}>Stop session</button>
-                      )}
-                      <button
-                        className="send-button"
-                        type="submit"
-                        disabled={!canSend}
-                        aria-label={isSending ? 'Sending message' : 'Send'}
-                        aria-describedby="composer-send-status"
-                        title={isSending ? 'Sending message' : 'Send message'}
-                      >
-                        <span className="sr-only">{isSending ? 'Sending message' : 'Send'}</span>
-                        <svg aria-hidden="true" viewBox="0 0 16 16" focusable="false">
-                          <path d="M8 2.25 13.25 7.5l-.9.9L8.63 4.68V14H7.37V4.68L3.65 8.4l-.9-.9L8 2.25Z" />
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
-                </form>
-            </>
-          ) : (
-            <div className="empty-state">Create or select a session.</div>
-          )}
-        </main>
-      )}
-
-      {view === 'sessions' && (
-        <aside className="inspector" aria-label="Session inspector">
-          <button
-            type="button"
-            className="inspector-edge-toggle"
-            aria-label={isInspectorOpen ? 'Hide inspector' : 'Show inspector'}
-            title={isInspectorOpen ? 'Hide inspector' : 'Show inspector'}
-            onClick={() => setIsInspectorOpen((open) => !open)}
-          >
-            {isInspectorOpen ? '›' : '‹'}
-          </button>
-          <header className="inspector-header">
-            <div>
-              <h2>Inspector</h2>
-              <p>{activeSession ? activeSession.name || activeSession.cwd : 'No session selected'}</p>
-            </div>
-            <button type="button" onClick={() => setIsInspectorOpen((open) => !open)}>
-              {isInspectorOpen ? 'Hide' : 'Show'}
-            </button>
-          </header>
-          {isInspectorOpen && (
-            <>
-              <div className="inspector-tabs" role="tablist" aria-label="Inspector sections">
-                <button type="button" id="inspector-tab-session" role="tab" aria-selected={inspectorTab === 'session'} aria-controls="inspector-panel-session" tabIndex={inspectorTab === 'session' ? 0 : -1} onClick={() => setInspectorTab('session')} onKeyDown={onInspectorTabKeyDown}>Session tasks</button>
-                <button type="button" id="inspector-tab-global" role="tab" aria-selected={inspectorTab === 'global'} aria-controls="inspector-panel-global" tabIndex={inspectorTab === 'global' ? 0 : -1} onClick={() => setInspectorTab('global')} onKeyDown={onInspectorTabKeyDown}>All tasks</button>
-                <button type="button" id="inspector-tab-plan" role="tab" aria-selected={inspectorTab === 'plan'} aria-controls="inspector-panel-plan" tabIndex={inspectorTab === 'plan' ? 0 : -1} onClick={() => setInspectorTab('plan')} onKeyDown={onInspectorTabKeyDown}>Plan</button>
-              </div>
-              <div id="inspector-panel-session" role="tabpanel" aria-labelledby="inspector-tab-session" hidden={inspectorTab !== 'session'}>
-                {isActiveSessionMode ? (
-                  <TasksPanel title="Session tasks" tasks={sessionTasks} error={sessionTaskError} compact onSelectTask={onSelectTask} />
-                ) : (
-                  <p className="inspector-empty">No active session tasks.</p>
-                )}
-              </div>
-              <div id="inspector-panel-global" role="tabpanel" aria-labelledby="inspector-tab-global" hidden={inspectorTab !== 'global'}>
-                <TasksPanel title="All tasks" tasks={tasks} error={taskError} compact onSelectTask={onSelectTask} />
-              </div>
-              <section id="inspector-panel-plan" role="tabpanel" aria-labelledby="inspector-tab-plan" className="session-plan" hidden={inspectorTab !== 'plan'}>
-                {!activeSession ? (
-                  <p className="inspector-empty">No session selected.</p>
-                ) : activePlan ? (
-                  <>
-                    <h3>Session plan</h3>
-                    <p className="plan-source">From {activePlan.source === 'ExitPlanMode' ? 'ExitPlanMode' : 'plan file'}</p>
-                    <pre className="plan-content">{activePlan.markdown}</pre>
-                  </>
-                ) : (
-                  <p className="inspector-empty">No plan available for this session.</p>
-                )}
-              </section>
-            </>
-          )}
-        </aside>
-      )}
-    </div>
+          onMessageKeyDown={onMessageKeyDown}
+          onMessageSelect={refreshAutocomplete}
+          onSend={onSend}
+          onSetActiveSuggestionIndex={setActiveSuggestionIndex}
+          onStopSession={() => onStop(false)}
+          onUseEmptyStatePrompt={useEmptyStatePrompt}
+        />
+      }
+      inspector={
+        <InspectorPanel
+          activePlan={activePlan}
+          activeSession={activeSession}
+          inspectorTab={inspectorTab}
+          isActiveSessionMode={isActiveSessionMode}
+          isInspectorOpen={isInspectorOpen}
+          sessionTaskError={sessionTaskError}
+          sessionTasks={sessionTasks}
+          taskError={taskError}
+          tasks={tasks}
+          onInspectorTabKeyDown={onInspectorTabKeyDown}
+          onSelectTask={onSelectTask}
+          onSetInspectorOpen={setIsInspectorOpen}
+          onSetInspectorTab={setInspectorTab}
+          onToggleInspector={() => setIsInspectorOpen((open) => !open)}
+        />
+      }
+    />
   );
 }
