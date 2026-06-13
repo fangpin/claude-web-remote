@@ -332,6 +332,7 @@ export function useComposerState({
     messageInputRef,
     sendStatusText,
     suggestions,
+    closeAutocomplete,
     completeSuggestion,
     onMessageChange,
     onMessageKeyDown,

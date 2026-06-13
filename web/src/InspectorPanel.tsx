@@ -70,7 +70,7 @@ export default function InspectorPanel({
         type="button"
         className="inspector-edge-toggle"
         aria-label={isInspectorOpen ? 'Hide inspector' : 'Show inspector'}
-        title={isInspectorOpen ? 'Hide inspector' : 'Show inspector'}
+        title={isInspectorOpen ? 'Hide inspector (⌘/Ctrl+I)' : 'Show inspector (⌘/Ctrl+I)'}
         onClick={onToggleInspector}
       >
         {isInspectorOpen ? '›' : '‹'}
@@ -80,7 +80,7 @@ export default function InspectorPanel({
           <h2>Inspector</h2>
           <p>{activeSession ? activeSession.name || activeSession.cwd : 'No session selected'}</p>
         </div>
-        <button type="button" onClick={() => onSetInspectorOpen(!isInspectorOpen)}>
+        <button type="button" title={isInspectorOpen ? 'Hide inspector (⌘/Ctrl+I)' : 'Show inspector (⌘/Ctrl+I)'} onClick={() => onSetInspectorOpen(!isInspectorOpen)}>
           {isInspectorOpen ? 'Hide' : 'Show'}
         </button>
       </header>

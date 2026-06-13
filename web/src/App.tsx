@@ -1,8 +1,9 @@
-import { KeyboardEvent, useCallback, useRef, useState } from 'react';
+import { FormEvent, KeyboardEvent, useCallback, useEffect, useRef, useState } from 'react';
 import AppShell, { type AppView } from './AppShell';
 import { buildActivityTimeline, waitingCopy, type ActivityItem } from './activityTimeline';
 import ConversationWorkspace from './ConversationWorkspace';
 import InspectorPanel, { type InspectorTab } from './InspectorPanel';
+import { hasAppModifier, isEditableTarget, isPlainSlash } from './keyboardShortcuts';
 import SessionSidebar from './SessionSidebar';
 import type { TaskInfo } from './types';
 import { useComposerState } from './useComposerState';
@@ -38,6 +39,8 @@ type EventActions = {
 export default function App() {
   const [view, setView] = useState<AppView>('sessions');
   const [isInspectorOpen, setIsInspectorOpen] = useState(true);
+  const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('session');
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const isDiagnosticsVisible = view === 'sessions' && isInspectorOpen && inspectorTab === 'diagnostics';
@@ -45,6 +48,7 @@ export default function App() {
     refreshTasks: async () => undefined,
     refreshSessionTasks: async (_sessionId: string) => undefined
   });
+  const shouldFocusComposerAfterCreateRef = useRef(false);
   const eventActionsRef = useRef<EventActions>({
     removeSessionEvents: (_sessionId: string) => undefined,
     setPendingEventId: (_eventId: number) => undefined
@@ -122,6 +126,64 @@ export default function App() {
   const latestPermissionActivity = activities.find((activity) => activity.isPermissionLike && ['running', 'waiting'].includes(activity.status));
   const waitingMessage = waitingCopy(sessionState.activeSession, latestPermissionActivity ?? null);
 
+  function focusComposer(seedSlash = false) {
+    if (!isComposerSession) return;
+    const input = composerState.messageInputRef.current;
+    if (!input) return;
+    const nextMessage = seedSlash && composerState.message.length === 0 ? '/' : composerState.message;
+    if (nextMessage !== composerState.message) {
+      composerState.onMessageChange(nextMessage, input);
+    }
+    requestAnimationFrame(() => {
+      input.focus();
+      input.setSelectionRange(nextMessage.length, nextMessage.length);
+      composerState.onMessageSelect(nextMessage, nextMessage.length);
+    });
+  }
+
+  function focusSessionButton(sessionId: string) {
+    const escapedSessionId = window.CSS?.escape ? window.CSS.escape(sessionId) : sessionId.replace(/"/g, '\\"');
+    requestAnimationFrame(() => {
+      document.querySelector<HTMLButtonElement>(`button.session[data-session-id="${escapedSessionId}"]`)?.focus();
+    });
+  }
+
+  function focusFallbackAfterSidebarClose() {
+    requestAnimationFrame(() => {
+      const activeElement = document.activeElement;
+      if (!(activeElement instanceof HTMLElement) || !activeElement.closest('.session-sidebar')) return;
+      if (isComposerSession) {
+        focusComposer(false);
+        return;
+      }
+      document.querySelector<HTMLButtonElement>('.primary-rail button')?.focus();
+    });
+  }
+
+  function toggleSidebar() {
+    setIsSidebarOpen((open) => {
+      const nextOpen = !open;
+      if (!nextOpen) focusFallbackAfterSidebarClose();
+      return nextOpen;
+    });
+  }
+
+  function selectVisibleSession(offset: number) {
+    const visibleSessions = sessionState.visibleSessions;
+    if (visibleSessions.length === 0) return;
+    const currentIndex = Math.max(0, visibleSessions.findIndex((session) => session.id === sessionState.activeId));
+    const nextSession = visibleSessions[(currentIndex + offset + visibleSessions.length) % visibleSessions.length];
+    setView('sessions');
+    sessionState.selectSession(nextSession.id);
+    if (!isSidebarOpen) setIsSidebarOpen(true);
+    focusSessionButton(nextSession.id);
+  }
+
+  async function onCreateSession(event: FormEvent) {
+    shouldFocusComposerAfterCreateRef.current = true;
+    await sessionState.onCreateSession(event);
+  }
+
   function onSelectTask(task: TaskInfo) {
     if (sessionState.listMode !== 'active') {
       sessionState.setListMode('active');
@@ -133,6 +195,76 @@ export default function App() {
   function onSelectActivity(activity: ActivityItem) {
     eventState.setPendingEventId(activity.anchorEventId);
   }
+
+  useEffect(() => {
+    if (!shouldFocusComposerAfterCreateRef.current || !isComposerSession) return;
+    shouldFocusComposerAfterCreateRef.current = false;
+    focusComposer(false);
+  }, [isComposerSession, sessionState.activeId]);
+
+  useEffect(() => {
+    function onGlobalKeyDown(event: globalThis.KeyboardEvent) {
+      const editableTarget = isEditableTarget(event.target);
+      const hasAutocomplete = composerState.suggestions.length > 0 && composerState.autocompleteToken;
+
+      if (event.key === 'Escape') {
+        if (isShortcutHelpOpen) {
+          event.preventDefault();
+          setIsShortcutHelpOpen(false);
+          return;
+        }
+        if (hasAutocomplete) {
+          event.preventDefault();
+          composerState.closeAutocomplete();
+          return;
+        }
+        if (sessionState.isNewSessionOpen) {
+          event.preventDefault();
+          sessionState.setIsNewSessionOpen(false);
+          return;
+        }
+        if (isInspectorOpen) {
+          event.preventDefault();
+          setIsInspectorOpen(false);
+        }
+        return;
+      }
+
+      if (hasAppModifier(event) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setView('sessions');
+        focusComposer(true);
+        return;
+      }
+
+      if (hasAppModifier(event) && event.key.toLowerCase() === 'b') {
+        event.preventDefault();
+        toggleSidebar();
+        return;
+      }
+
+      if (hasAppModifier(event) && event.key.toLowerCase() === 'i') {
+        event.preventDefault();
+        setIsInspectorOpen((open) => !open);
+        return;
+      }
+
+      if (!editableTarget && event.altKey && !event.metaKey && !event.ctrlKey && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+        event.preventDefault();
+        selectVisibleSession(event.key === 'ArrowDown' ? 1 : -1);
+        return;
+      }
+
+      if (!editableTarget && isPlainSlash(event)) {
+        event.preventDefault();
+        setView('sessions');
+        focusComposer(true);
+      }
+    }
+
+    window.addEventListener('keydown', onGlobalKeyDown);
+    return () => window.removeEventListener('keydown', onGlobalKeyDown);
+  });
 
   function onInspectorTabKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
     const tabs: Array<typeof inspectorTab> = ['activity', 'session', 'global', 'plan', 'diagnostics'];
@@ -218,15 +350,21 @@ export default function App() {
       view={view}
       listMode={sessionState.listMode}
       isInspectorOpen={isInspectorOpen}
+      isShortcutHelpOpen={isShortcutHelpOpen}
+      isSidebarOpen={isSidebarOpen}
+      onSetShortcutHelpOpen={setIsShortcutHelpOpen}
       onShowActiveSessions={() => {
         setView('sessions');
+        setIsSidebarOpen(true);
         sessionState.setListMode('active');
       }}
       onShowConfig={() => setView('config')}
       onShowArchivedSessions={() => {
         setView('sessions');
+        setIsSidebarOpen(true);
         sessionState.setListMode('archived');
       }}
+      onToggleSidebar={toggleSidebar}
       sidebar={
         <SessionSidebar
           activeId={sessionState.activeId}
@@ -241,7 +379,7 @@ export default function App() {
           sessions={sessionState.sessions}
           useWorktree={sessionState.useWorktree}
           visibleSessions={sessionState.visibleSessions}
-          onCreateSession={sessionState.onCreateSession}
+          onCreateSession={onCreateSession}
           onSelectSession={sessionState.selectSession}
           onSetCwd={sessionState.setCwd}
           onSetIsNewSessionOpen={sessionState.setIsNewSessionOpen}

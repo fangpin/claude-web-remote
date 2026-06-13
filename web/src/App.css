@@ -144,13 +144,23 @@ label {
   background: var(--app-bg);
 }
 
+.app-shell.sidebar-closed {
+  grid-template-columns: 72px 0 minmax(0, 1fr) minmax(280px, 360px);
+}
+
 .app-shell.inspector-closed {
   grid-template-columns: 72px minmax(260px, 320px) minmax(0, 1fr) 88px;
 }
 
+.app-shell.sidebar-closed.inspector-closed {
+  grid-template-columns: 72px 0 minmax(0, 1fr) 88px;
+}
+
 .primary-rail {
+  position: relative;
+  z-index: 20;
   display: grid;
-  grid-template-rows: auto auto auto auto 1fr;
+  grid-template-rows: auto auto auto auto auto auto 1fr;
   gap: 8px;
   border-right: 1px solid var(--border);
   background: #ede7dc;
@@ -183,9 +193,62 @@ label {
 }
 
 .primary-rail button.active,
+.primary-rail button[aria-pressed='true'],
 .primary-rail button:hover {
   color: var(--text);
   background: rgb(255 253 250 / 0.65);
+}
+
+.shortcut-help {
+  position: relative;
+  min-width: 0;
+}
+
+.shortcut-help-popover {
+  position: absolute;
+  top: 0;
+  left: calc(100% + 10px);
+  z-index: 30;
+  display: grid;
+  gap: 10px;
+  width: 240px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 12px;
+  box-shadow: var(--shadow-popover);
+}
+
+.shortcut-help-popover h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 720;
+}
+
+.shortcut-help-popover dl {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+}
+
+.shortcut-help-popover dl > div {
+  display: grid;
+  grid-template-columns: 82px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+}
+
+.shortcut-help-popover dt {
+  color: var(--accent-strong);
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.shortcut-help-popover dd {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .session-sidebar {
@@ -195,6 +258,11 @@ label {
   min-height: 0;
   border-right: 1px solid var(--border);
   background: var(--panel-bg);
+}
+
+.app-shell.sidebar-closed .session-sidebar {
+  overflow: hidden;
+  visibility: hidden;
 }
 
 .sidebar-header {
