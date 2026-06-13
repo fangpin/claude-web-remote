@@ -610,10 +610,11 @@ test('config view fits without chat composer or inspector collisions', async ({ 
   await page.getByRole('button', { name: 'Config' }).click();
 
   const workspace = page.getByRole('main', { name: 'Configuration workspace' });
-  const configPanel = page.locator('.config-panel');
-  const configForm = page.locator('.config-form');
+  const configPanel = page.locator('.settings-panel');
+  const configForm = page.locator('.settings-form');
 
   await expect(workspace).toContainText('Daemon config');
+  await expect(workspace).toContainText('Settings');
   await expect(workspace).toContainText('/Users/example/.claude-remote-web/config.toml');
   await expect(page.getByLabel('Bind address')).toHaveValue('127.0.0.1:8787');
   await expect(page.getByLabel('Launcher argv')).toHaveValue('ttadk\nclaude\n-m\ngpt-5.5\n--skip-check\n-a');
@@ -697,7 +698,8 @@ test('empty search results and no-task inspector states stay stable', async ({ p
 
   const inspector = await showInspectorIfNeeded(page);
   const sessionTasks = page.getByRole('tabpanel', { name: 'Session tasks' });
-  await expect(sessionTasks).toContainText('No tasks yet.');
+  await expect(sessionTasks).toContainText('No agent activity yet');
+  await expect(sessionTasks).toContainText('This session is quiet.');
   await boxFor(sessionTasks, 'empty session tasks panel');
 
   await page.getByRole('tab', { name: 'All tasks' }).click();
