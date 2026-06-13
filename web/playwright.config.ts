@@ -4,12 +4,22 @@ export default defineConfig({
   testDir: './e2e',
   timeout: 30_000,
   expect: {
-    timeout: 5_000
+    timeout: 5_000,
+    toHaveScreenshot: {
+      animations: 'disabled',
+      caret: 'hide',
+      maxDiffPixelRatio: 0.02,
+      scale: 'css'
+    }
   },
   fullyParallel: true,
   reporter: [['list']],
   use: {
     baseURL: 'http://127.0.0.1:4173',
+    colorScheme: 'light',
+    locale: 'en-US',
+    reducedMotion: 'reduce',
+    timezoneId: 'UTC',
     trace: 'retain-on-failure'
   },
   webServer: {

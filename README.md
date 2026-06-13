@@ -254,7 +254,7 @@ Expected current coverage:
 - `cargo test --manifest-path Cargo.toml` passes
 - Frontend Vitest suite passes
 - Frontend production build succeeds
-- Frontend Playwright visual smoke checks pass across wide desktop, desktop, and narrow viewports without screenshot snapshots
+- Frontend Playwright visual smoke checks and screenshot baselines pass across wide desktop, desktop, and narrow viewports
 
 ## Security notes
 
