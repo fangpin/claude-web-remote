@@ -62,11 +62,12 @@ Audit Claude Remote Web from a product and QA perspective against the native Cla
 - At 390px, rail/sidebar/workspace/inspector/autocomplete/composer fit without horizontal page scroll.
 - Conversation and inspector can scroll independently when content is tall.
 - Empty conversation starter remains visible and does not collide with composer.
+- Empty search results, no-task inspector panels, archived sessions, and config workspace fit at all visual-smoke viewports.
 
 ## Automated Coverage Added
 
-`web/e2e/visual.spec.ts` uses Playwright layout assertions instead of screenshot snapshots. The mocked fixture covers long paths, long branch names, long task titles/summaries, long message tokens, tool/task blocks, autocomplete, and an empty conversation starter across wide desktop, desktop, and narrow viewports.
+`web/e2e/visual.spec.ts` uses Playwright layout assertions instead of screenshot snapshots. The mocked fixture covers long paths, long branch names, stopped and archived sessions, config workspace fields, long task titles/summaries, long message tokens, tool/task blocks, failed Bash output, autocomplete, a long multiline composer draft, an empty conversation starter, empty search results, and a no-task session across wide desktop, desktop, and narrow viewports.
 
-The smoke guards against blank regions, viewport overflow, element overflow, sidebar/workspace/inspector collisions, composer obstruction of the event stream, and autocomplete covering typed text.
+The smoke guards against blank regions, viewport overflow, element overflow, sidebar/workspace/inspector collisions, config inheriting chat-only regions, failed tool output being hidden, long composer drafts losing their internal scroll cap, composer obstruction of the event stream, and autocomplete covering typed text.
 
-Not covered yet: real Claude CLI stream permutations beyond local fixtures, native desktop affordances, and pixel-perfect comparison to Claude App.
+Not covered yet: real Claude CLI stream permutations beyond local fixtures, no-session/API-loading/API-error states, native desktop affordances, and pixel-perfect comparison to Claude App.

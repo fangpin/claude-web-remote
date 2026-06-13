@@ -42,9 +42,10 @@ const sessions = [
     ...baseSession,
     id: 's3',
     name: 'Stopped Session',
-    cwd: '/Users/example/repos/other-project',
-    status: 'exited',
-    runtimeStatus: 'ended'
+    cwd: '/Users/example/repos/stopped-project-with-a-long-directory-name',
+    status: 'stopped',
+    runtimeStatus: 'stopped',
+    claudeSessionId: 'claude-visual-stopped-session'
   },
   {
     ...baseSession,
@@ -53,6 +54,36 @@ const sessions = [
     cwd: '/Users/example/repos/empty-state-validation-with-long-directory-name',
     status: 'running',
     runtimeStatus: 'waiting'
+  },
+  {
+    ...baseSession,
+    id: 's5',
+    name: 'No Tasks Session',
+    cwd: '/Users/example/repos/no-task-state-validation-with-long-directory-name',
+    status: 'running',
+    runtimeStatus: 'waiting'
+  },
+  {
+    ...baseSession,
+    id: 's6',
+    name: 'Failed Tool Session',
+    cwd: '/Users/example/repos/failed-tool-output-validation-with-long-directory-name',
+    status: 'running',
+    runtimeStatus: 'waiting'
+  }
+];
+
+const archivedSessions = [
+  {
+    ...baseSession,
+    id: 'archived-1',
+    name: 'Archived Visual Session With A Long Name',
+    cwd: '/Users/example/repos/archived-project-with-a-very-long-directory-name',
+    status: 'stopped',
+    runtimeStatus: 'stopped',
+    claudeSessionId: 'claude-visual-archived-session',
+    deletedAt: '2026-06-12T01:00:00Z',
+    updatedAt: '2026-06-12T01:00:00Z'
   }
 ];
 
@@ -87,6 +118,20 @@ const taskGroups = {
       startEventId: 7,
       finishEventId: 8,
       summary: 'Checked sidebar, inspector, composer, conversation blocks, task cards, and long summaries that must wrap without widening the inspector.'
+    },
+    {
+      id: 's6:failed-bash',
+      sessionId: 's6',
+      sessionName: 'Failed Tool Session',
+      sessionCwd: sessions[5].cwd,
+      toolKind: 'Bash',
+      title: 'Bash: npm --prefix web run build -- --simulate-failure-with-a-long-command-title',
+      status: 'failed',
+      startedAt: '2026-06-12T00:03:00Z',
+      finishedAt: '2026-06-12T00:03:30Z',
+      startEventId: 20,
+      finishEventId: 21,
+      summary: 'Command failed with exit code 1 after emitting a long diagnostic line that should wrap without expanding the task inspector.'
     }
   ]
 };
@@ -200,8 +245,64 @@ const visualEvents = [
       message:
         'The visible conversation now includes ordinary text, compact tool activity, background Bash activity, Agent task activity, and a deliberately long token: /Users/example/repos/claude-web-remote/web/src/components/really-long-path/branch-pin-visual-responsive-layout-validation-with-long-branch-name.tsx'
     }
+  },
+  {
+    id: 20,
+    sessionId: 's6',
+    time: '2026-06-12T00:03:00Z',
+    kind: 'tool',
+    payload: {
+      type: 'tool_use',
+      id: 'tool-failed-bash',
+      name: 'Bash',
+      input: {
+        command:
+          'npm --prefix web run build -- --simulate-failure-with-a-long-command-title-and-a-path=/Users/example/repos/claude-web-remote/web/src/components/really-long-path/failure-case.tsx',
+        description: 'Run a command that returns a visible failure block'
+      }
+    }
+  },
+  {
+    id: 21,
+    sessionId: 's6',
+    time: '2026-06-12T00:03:01Z',
+    kind: 'tool',
+    payload: {
+      type: 'tool_result',
+      tool_use_id: 'tool-failed-bash',
+      is_error: true,
+      content:
+        'Error: command failed with exit code 1\nstderr: missing file /Users/example/repos/claude-web-remote/web/src/components/really-long-path/failure-case.tsx\n' +
+        longToken
+    }
   }
 ];
+
+const configResponse = {
+  path: '/Users/example/.claude-remote-web/config.toml',
+  exists: true,
+  current: {
+    bind: '127.0.0.1:8787',
+    dataDir: '/Users/example/.claude-remote-web',
+    launcher: ['ttadk', 'claude', '-m', 'gpt-5.5', '--skip-check', '-a'],
+    webDir: '/Users/example/repos/claude-web-remote/web/dist',
+    defaultPermissionMode: 'acceptEdits',
+    worktreesDir: '/Users/example/repos/claude-web-remote/.claude/worktrees',
+    worktreeBranchPrefix: 'pin',
+    worktreeBaseRef: 'fresh'
+  },
+  file: {
+    bind: '127.0.0.1:8787',
+    dataDir: '/Users/example/.claude-remote-web',
+    launcher: ['ttadk', 'claude', '-m', 'gpt-5.5', '--skip-check', '-a'],
+    webDir: '/Users/example/repos/claude-web-remote/web/dist',
+    defaultPermissionMode: 'acceptEdits',
+    worktreesDir: '/Users/example/repos/claude-web-remote/.claude/worktrees',
+    worktreeBranchPrefix: 'pin',
+    worktreeBaseRef: 'fresh'
+  },
+  restartRequired: false
+};
 
 async function installApiMocks(page: Page) {
   await page.route('**/api/**', async (route) => {
@@ -216,13 +317,22 @@ async function installApiMocks(page: Page) {
       });
 
     if (path === '/api/sessions' && request.method() === 'GET') {
+      if (url.searchParams.get('deletedOnly') === 'true') {
+        return json({ sessions: archivedSessions });
+      }
       return json({ sessions });
     }
     if (path === '/api/tasks') {
       return json(taskGroups);
     }
     if (path === '/api/sessions/s1/tasks') {
-      return json(taskGroups);
+      return json({ background: taskGroups.background, finished: [taskGroups.finished[0]] });
+    }
+    if (path === '/api/sessions/s6/tasks') {
+      return json({ background: [], finished: [taskGroups.finished[1]] });
+    }
+    if (path === '/api/config') {
+      return json(configResponse);
     }
     if (path.endsWith('/tasks')) {
       return json({ background: [], finished: [] });
@@ -345,6 +455,16 @@ async function expectComposerPinnedBelowEvents(page: Page) {
   );
 }
 
+async function showInspectorIfNeeded(page: Page) {
+  const inspector = page.getByRole('complementary', { name: 'Session inspector' });
+  const showInspector = inspector.getByRole('button', { name: 'Show inspector' });
+  if (await showInspector.isVisible()) {
+    await showInspector.click();
+  }
+  await expect(inspector.getByRole('button', { name: 'Hide', exact: true })).toBeVisible();
+  return inspector;
+}
+
 test.beforeEach(async ({ page }) => {
   await installWebSocketMock(page);
   await installApiMocks(page);
@@ -373,6 +493,7 @@ test('Claude-like UI stays readable across key viewports', async ({ page }) => {
   await expect(page.locator('.tool-block.completed')).toContainText('git status --short');
   await expect(page.locator('.task-block.running')).toContainText('Run browser visual layout verification');
   await expect(page.locator('.task-block.completed')).toContainText('Inspect responsive UI affordances');
+  await expect(page.getByRole('button', { name: /Stopped Session/ })).toContainText('Stopped');
 
   await expectNoHorizontalPageOverflow(page);
   await expectViewportContains(composer, 'composer');
@@ -459,4 +580,129 @@ test('empty conversation starter stays visible without colliding with composer',
   await expectViewportContains(composer, 'empty-state composer');
   await expectNoHorizontalPageOverflow(page);
   await expectNoMeaningfulOverlap(starter, composer, 'empty starter and composer');
+});
+
+test('archived session view stays readable and read-only', async ({ page }) => {
+  await page.getByRole('button', { name: 'Archived sessions' }).click();
+
+  const sidebar = page.getByRole('complementary', { name: 'Session navigation' });
+  const workspace = page.getByRole('main', { name: 'Conversation workspace' });
+  const archivedSession = page.getByRole('button', { name: /Archived Visual Session/ });
+  const composer = page.getByRole('form', { name: 'Message composer' });
+
+  await expect(archivedSession).toBeVisible();
+  await expect(archivedSession).toContainText('Stopped');
+  await expect(workspace).toContainText('Archived Claude session');
+  await expect(workspace).toContainText('This session is archived. Unarchive it before resuming work or sending messages.');
+  await expect(composer.getByRole('textbox', { name: 'Message' })).toBeDisabled();
+  await expect(composer).toContainText('Archived sessions are read-only. Unarchive to continue.');
+  await expect(page.getByRole('button', { name: 'Unarchive' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Delete' })).toBeVisible();
+
+  await boxFor(sidebar, 'archived session sidebar');
+  await boxFor(workspace, 'archived conversation workspace');
+  await expectViewportContains(composer, 'archived composer');
+  await expectNoHorizontalPageOverflow(page);
+  await expectComposerPinnedBelowEvents(page);
+});
+
+test('config view fits without chat composer or inspector collisions', async ({ page }) => {
+  await page.getByRole('button', { name: 'Config' }).click();
+
+  const workspace = page.getByRole('main', { name: 'Configuration workspace' });
+  const configPanel = page.locator('.config-panel');
+  const configForm = page.locator('.config-form');
+
+  await expect(workspace).toContainText('Daemon config');
+  await expect(workspace).toContainText('/Users/example/.claude-remote-web/config.toml');
+  await expect(page.getByLabel('Bind address')).toHaveValue('127.0.0.1:8787');
+  await expect(page.getByLabel('Launcher argv')).toHaveValue('ttadk\nclaude\n-m\ngpt-5.5\n--skip-check\n-a');
+  await expect(page.getByLabel('Worktrees directory')).toHaveValue(
+    '/Users/example/repos/claude-web-remote/.claude/worktrees'
+  );
+  await expect(page.getByRole('button', { name: 'Save config' })).toBeVisible();
+
+  await boxFor(workspace, 'config workspace');
+  await boxFor(configPanel, 'config panel');
+  await boxFor(configForm, 'config form');
+  await expectNoHorizontalPageOverflow(page);
+  await expectNoHorizontalElementOverflow(workspace, 'config workspace');
+  await expect(page.getByRole('form', { name: 'Message composer' })).toHaveCount(0);
+  await expect(page.getByRole('complementary', { name: 'Session inspector' })).toHaveCount(0);
+});
+
+test('failed tool output stays diagnosable without widening layout', async ({ page }) => {
+  await page.getByRole('button', { name: /Failed Tool Session/ }).evaluate((element) => {
+    (element as HTMLButtonElement).click();
+  });
+
+  const failedTool = page.locator('.tool-block.failed');
+  const events = page.locator('.events');
+  const inspector = await showInspectorIfNeeded(page);
+
+  await expect(failedTool).toContainText('Bash');
+  await expect(failedTool).toContainText('failed');
+  await expect(failedTool).toContainText('exit code 1');
+  await expect(failedTool.locator('.visible-result')).toContainText('missing file');
+  const sessionTasks = page.getByRole('tabpanel', { name: 'Session tasks' });
+  await expect(sessionTasks.locator('.task-card.failed')).toContainText('Command failed with exit code 1');
+  await expect(sessionTasks).toContainText('failed');
+
+  await boxFor(failedTool, 'failed tool block');
+  await expectNoHorizontalPageOverflow(page);
+  await expectNoHorizontalElementOverflow(events, 'failed event stream');
+  await expectViewportContains(inspector, 'failed inspector');
+  await expectComposerPinnedBelowEvents(page);
+});
+
+test('long multiline composer drafts cap height and stay inside the viewport', async ({ page }) => {
+  const message = page.getByRole('textbox', { name: 'Message' });
+  const composer = page.getByRole('form', { name: 'Message composer' });
+  const lines = Array.from({ length: 24 }, (_, index) => {
+    return `Line ${index + 1}: please keep this multiline composer draft readable with ${longToken}`;
+  });
+
+  await message.fill(lines.join('\n'));
+  await expect(composer).toContainText('Ready to send');
+  await expect(message).toHaveValue(lines.join('\n'));
+
+  const textareaBox = await boxFor(message, 'long multiline textarea');
+  expect(textareaBox.height, 'textarea should cap tall multiline drafts').toBeLessThanOrEqual(221);
+  const overflow = await message.evaluate((element) => ({
+    verticalOverflow: element.scrollHeight - element.clientHeight,
+    overflowY: window.getComputedStyle(element).overflowY
+  }));
+  expect(overflow.verticalOverflow, 'textarea should have internal vertical overflow for long drafts').toBeGreaterThan(0);
+  expect(overflow.overflowY, 'textarea should scroll internally once capped').toBe('auto');
+
+  await expectViewportContains(composer, 'long multiline composer');
+  await expectNoHorizontalPageOverflow(page);
+});
+
+test('empty search results and no-task inspector states stay stable', async ({ page }) => {
+  const search = page.getByRole('searchbox', { name: 'Search sessions' });
+  await search.fill('definitely-no-session-matches-this-query');
+
+  const sidebar = page.getByRole('complementary', { name: 'Session navigation' });
+  await expect(sidebar).toContainText('No sessions match "definitely-no-session-matches-this-query".');
+  await expectNoHorizontalPageOverflow(page);
+  await expectNoHorizontalElementOverflow(sidebar, 'empty search sidebar');
+
+  await page.getByRole('button', { name: 'Clear' }).evaluate((element) => {
+    (element as HTMLButtonElement).click();
+  });
+  await page.getByRole('button', { name: /No Tasks Session/ }).evaluate((element) => {
+    (element as HTMLButtonElement).click();
+  });
+
+  const inspector = await showInspectorIfNeeded(page);
+  const sessionTasks = page.getByRole('tabpanel', { name: 'Session tasks' });
+  await expect(sessionTasks).toContainText('No tasks yet.');
+  await boxFor(sessionTasks, 'empty session tasks panel');
+
+  await page.getByRole('tab', { name: 'All tasks' }).click();
+  await expect(page.getByRole('tabpanel', { name: 'All tasks' })).toContainText('Running visual smoke checks');
+
+  await expectViewportContains(inspector, 'no-task inspector');
+  await expectNoHorizontalPageOverflow(page);
 });
