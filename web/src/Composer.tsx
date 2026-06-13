@@ -1,7 +1,7 @@
-import type { FormEvent, KeyboardEvent, RefObject } from 'react';
+import { useState, type FormEvent, type KeyboardEvent, type RefObject } from 'react';
 import { runtimeStatusLabels } from './AppShell';
 import type { ClaudeCommand, SlashCommandToken } from './autocomplete';
-import type { SessionInfo } from './types';
+import type { ComposerContextAttachment, SessionInfo } from './types';
 
 type Props = {
   activeSession: SessionInfo;
@@ -9,6 +9,7 @@ type Props = {
   autocompleteOptionRefs: RefObject<Array<HTMLButtonElement | null>>;
   autocompleteToken: SlashCommandToken | null;
   canSend: boolean;
+  contextAttachments: ComposerContextAttachment[];
   composerDisabledReason: string;
   composerRef: RefObject<HTMLFormElement | null>;
   isAwaitingClaude: boolean;
@@ -18,10 +19,13 @@ type Props = {
   messageInputRef: RefObject<HTMLTextAreaElement | null>;
   sendStatusText: string;
   suggestions: ClaudeCommand[];
+  onAddPathContextAttachment: (path: string) => void;
+  onAddTextContextAttachment: (name: string, content: string) => void;
   onCompleteSuggestion: (suggestion: ClaudeCommand) => void;
   onMessageChange: (value: string, element: HTMLTextAreaElement) => void;
   onMessageKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   onMessageSelect: (value: string, cursor: number | null) => void;
+  onRemoveContextAttachment: (id: string) => void;
   onSend: (event: FormEvent) => void;
   onSetActiveSuggestionIndex: (index: number) => void;
   onStopSession: () => void;
@@ -34,6 +38,7 @@ export default function Composer({
   autocompleteToken,
   canSend,
   composerDisabledReason,
+  contextAttachments,
   composerRef,
   isAwaitingClaude,
   isComposerSession,
@@ -42,14 +47,21 @@ export default function Composer({
   messageInputRef,
   sendStatusText,
   suggestions,
+  onAddPathContextAttachment,
+  onAddTextContextAttachment,
   onCompleteSuggestion,
   onMessageChange,
   onMessageKeyDown,
   onMessageSelect,
+  onRemoveContextAttachment,
   onSend,
   onSetActiveSuggestionIndex,
   onStopSession
 }: Props) {
+  const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
+  const [pathContext, setPathContext] = useState('');
+  const [textContextName, setTextContextName] = useState('');
+  const [textContextContent, setTextContextContent] = useState('');
   const hasAutocomplete = suggestions.length > 0 && autocompleteToken;
   const runtimeStatus = activeSession.runtimeStatus ?? activeSession.status;
   const statusLabel = isAwaitingClaude ? 'Claude is working' : runtimeStatusLabels[runtimeStatus];
@@ -67,6 +79,21 @@ export default function Composer({
         ]
       : [])
   ];
+
+  function addPathContext() {
+    if (!pathContext.trim()) return;
+    onAddPathContextAttachment(pathContext);
+    setPathContext('');
+    setAttachmentMenuOpen(false);
+  }
+
+  function addTextContext() {
+    if (!textContextContent.trim()) return;
+    onAddTextContextAttachment(textContextName, textContextContent);
+    setTextContextName('');
+    setTextContextContent('');
+    setAttachmentMenuOpen(false);
+  }
 
   return (
     <form
@@ -99,6 +126,27 @@ export default function Composer({
           </dl>
         </details>
       </div>
+      {contextAttachments.length > 0 && (
+        <div className="context-attachment-chips" aria-label="Context attachments">
+          {contextAttachments.map((attachment) => {
+            const label = attachment.type === 'path' ? `@${attachment.path}` : attachment.name;
+            const kind = attachment.type === 'path' ? 'Repo path' : 'Pasted text';
+            return (
+              <span className="context-attachment-chip" key={attachment.id} title={label}>
+                <span className="context-attachment-kind">{kind}</span>
+                <span className="context-attachment-label">{label}</span>
+                <button
+                  type="button"
+                  aria-label={`Remove ${label}`}
+                  onClick={() => onRemoveContextAttachment(attachment.id)}
+                >
+                  ×
+                </button>
+              </span>
+            );
+          })}
+        </div>
+      )}
       <div className="composer-input">
         <label className="sr-only" htmlFor="message-input">Message</label>
         <textarea
@@ -153,15 +201,68 @@ export default function Composer({
       <div className="composer-actions">
         <span id="composer-send-status" aria-live="polite">{sendStatusText}</span>
         <div>
-          <button
-            className="composer-attach-button"
-            type="button"
-            disabled
-            aria-label="Attach file context coming soon"
-            title="File attachments are not implemented yet"
-          >
-            <span aria-hidden="true">+</span>
-          </button>
+          <div className="composer-attachment-menu">
+            <button
+              className="composer-attach-button"
+              type="button"
+              disabled={!isComposerSession}
+              aria-expanded={attachmentMenuOpen}
+              aria-haspopup="dialog"
+              aria-label="Add context reference"
+              title="Add repo path or pasted text context"
+              onClick={() => setAttachmentMenuOpen((open) => !open)}
+            >
+              <span aria-hidden="true">+</span>
+            </button>
+            {attachmentMenuOpen && (
+              <div className="context-attachment-popover" role="dialog" aria-label="Add context reference">
+                <div className="context-attachment-copy">
+                  <strong>Add context reference</strong>
+                  <span>References are sent as prompt context. Browser files are not uploaded. Use paths relative to the session cwd.</span>
+                </div>
+                <div className="context-attachment-section">
+                  <label htmlFor="path-context-input">
+                    Repo path
+                    <input
+                      id="path-context-input"
+                      value={pathContext}
+                      placeholder="web/src/Composer.tsx"
+                      onChange={(event) => setPathContext(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault();
+                          addPathContext();
+                        }
+                      }}
+                    />
+                  </label>
+                  <button type="button" onClick={addPathContext} disabled={!pathContext.trim()}>Add path</button>
+                </div>
+                <div className="context-attachment-section">
+                  <label htmlFor="text-context-name-input">
+                    Text context name
+                    <input
+                      id="text-context-name-input"
+                      value={textContextName}
+                      placeholder="Error log, stack trace, notes"
+                      onChange={(event) => setTextContextName(event.target.value)}
+                    />
+                  </label>
+                  <label htmlFor="text-context-content-input">
+                    Pasted text
+                    <textarea
+                      id="text-context-content-input"
+                      value={textContextContent}
+                      placeholder="Paste text to include with the prompt"
+                      onChange={(event) => setTextContextContent(event.target.value)}
+                      rows={4}
+                    />
+                  </label>
+                  <button type="button" onClick={addTextContext} disabled={!textContextContent.trim()}>Add pasted text</button>
+                </div>
+              </div>
+            )}
+          </div>
           {isComposerSession && (
             <button className="composer-stop-button" type="button" onClick={onStopSession} disabled={isSending}>
               Stop session

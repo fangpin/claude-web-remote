@@ -6,7 +6,7 @@ import type { AppView, SessionListMode } from './AppShell';
 import type { ClaudeCommand, SlashCommandToken } from './autocomplete';
 import type { ConversationBlock } from './conversationBlocks';
 import type { EventConnectionState } from './useSessionEvents';
-import type { SessionInfo } from './types';
+import type { ComposerContextAttachment, SessionInfo } from './types';
 
 type ApiError = {
   message: string;
@@ -20,6 +20,7 @@ type Props = {
   autocompleteOptionRefs: RefObject<Array<HTMLButtonElement | null>>;
   autocompleteToken: SlashCommandToken | null;
   canSend: boolean;
+  contextAttachments: ComposerContextAttachment[];
   composerDisabledReason: string;
   composerRef: RefObject<HTMLFormElement | null>;
   emptyStatePrompts: string[];
@@ -40,10 +41,13 @@ type Props = {
   suggestions: ClaudeCommand[];
   view: AppView;
   actions: ReactNode;
+  onAddPathContextAttachment: (path: string) => void;
+  onAddTextContextAttachment: (name: string, content: string) => void;
   onCompleteSuggestion: (suggestion: ClaudeCommand) => void;
   onMessageChange: (value: string, element: HTMLTextAreaElement) => void;
   onMessageKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   onMessageSelect: (value: string, cursor: number | null) => void;
+  onRemoveContextAttachment: (id: string) => void;
   onSend: (event: FormEvent) => void;
   onSetActiveSuggestionIndex: (index: number) => void;
   onStopSession: () => void;
@@ -101,6 +105,7 @@ export default function ConversationWorkspace({
   autocompleteToken,
   canSend,
   composerDisabledReason,
+  contextAttachments,
   composerRef,
   emptyStatePrompts,
   error,
@@ -120,10 +125,13 @@ export default function ConversationWorkspace({
   suggestions,
   view,
   actions,
+  onAddPathContextAttachment,
+  onAddTextContextAttachment,
   onCompleteSuggestion,
   onMessageChange,
   onMessageKeyDown,
   onMessageSelect,
+  onRemoveContextAttachment,
   onSend,
   onSetActiveSuggestionIndex,
   onStopSession,
@@ -215,6 +223,7 @@ export default function ConversationWorkspace({
             canSend={canSend}
             composerDisabledReason={composerDisabledReason}
             composerRef={composerRef}
+            contextAttachments={contextAttachments}
             isAwaitingClaude={isAwaitingClaude}
             isComposerSession={isComposerSession}
             isSending={isSending}
@@ -222,10 +231,13 @@ export default function ConversationWorkspace({
             messageInputRef={messageInputRef}
             sendStatusText={sendStatusText}
             suggestions={suggestions}
+            onAddPathContextAttachment={onAddPathContextAttachment}
+            onAddTextContextAttachment={onAddTextContextAttachment}
             onCompleteSuggestion={onCompleteSuggestion}
             onMessageChange={onMessageChange}
             onMessageKeyDown={onMessageKeyDown}
             onMessageSelect={onMessageSelect}
+            onRemoveContextAttachment={onRemoveContextAttachment}
             onSend={onSend}
             onSetActiveSuggestionIndex={onSetActiveSuggestionIndex}
             onStopSession={onStopSession}

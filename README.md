@@ -11,7 +11,7 @@ The code, files, git repositories, Claude CLI, and model gateway all stay on the
 - Session creation by working directory
 - Streaming event display from `claude --output-format stream-json`
 - User input forwarding to the remote Claude process
-- Claude-like composer with slash commands, context hints, and inline stop/send controls
+- Claude-like composer with slash commands, context hints, context reference attachments, and inline stop/send controls
 - Stop and restart session controls
 - Event, stderr, raw stdout, and session metadata persistence
 - Automatic Claude session id extraction and restart resume
@@ -186,6 +186,15 @@ Permission mode: bypassPermissions
 ```
 
 The daemon starts the configured launcher in that working directory, streams events back to the browser, and names the session from the first user message.
+
+## Add context to a prompt
+
+Use the composer `+` button to attach context references before sending:
+
+- Repo path references are sent as `@path/to/file` in the prompt, so Claude Code can read the file from the session working directory. Use paths relative to the session cwd. The Web UI does not read the file contents or browse arbitrary devbox paths.
+- Pasted text context is sent as a named fenced text block with the prompt.
+
+Attachment chips can be removed before sending. Attachments are cleared after a successful send.
 
 ## Session History API
 
