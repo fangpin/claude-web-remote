@@ -711,7 +711,9 @@ button.danger:hover {
 }
 
 .worktree-meta span,
-.composer-context span {
+.composer-context-desktop span,
+.composer-context-compact summary span,
+.composer-context-compact dd {
   max-width: 100%;
   overflow: hidden;
   border: 1px solid var(--border);
@@ -1217,6 +1219,7 @@ button.danger:hover {
 }
 
 .composer {
+  position: relative;
   display: grid;
   gap: 11px;
   width: min(calc(100% - 48px), 920px);
@@ -1233,6 +1236,98 @@ button.danger:hover {
   flex-wrap: wrap;
   gap: 7px;
   min-width: 0;
+}
+
+.composer-context-desktop {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: 7px;
+  min-width: 0;
+}
+
+.composer-context-desktop span {
+  max-width: min(100%, 360px);
+  border-color: transparent;
+  background: transparent;
+  padding-inline: 2px 8px;
+}
+
+.composer-status-pill {
+  color: var(--text-soft);
+}
+
+.composer-status-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 999px;
+  background: var(--success);
+  vertical-align: 1px;
+}
+
+.composer.awaiting-claude .composer-status-dot {
+  background: var(--accent);
+}
+
+.composer-context-compact {
+  display: none;
+  min-width: 0;
+}
+
+.composer-context-compact summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  list-style: none;
+  cursor: pointer;
+}
+
+.composer-context-compact summary::-webkit-details-marker {
+  display: none;
+}
+
+.composer-context-compact summary span {
+  border-color: var(--border);
+  background: rgb(255 253 250 / 0.78);
+}
+
+.composer-context-compact dl {
+  position: absolute;
+  right: 12px;
+  bottom: calc(100% - 8px);
+  left: 12px;
+  z-index: 12;
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  background: var(--surface);
+  padding: 12px;
+  box-shadow: var(--shadow-popover);
+}
+
+.composer-context-compact div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.composer-context-compact dt {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 720;
+  text-transform: uppercase;
+}
+
+.composer-context-compact dd {
+  margin: 0;
+  border-radius: 8px;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .composer-input {
@@ -1270,10 +1365,26 @@ button.danger:hover {
   min-width: 0;
 }
 
+.composer-attachment-button {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  color: var(--muted);
+}
+
+.composer-attachment-button svg {
+  width: 17px;
+  height: 17px;
+  fill: currentColor;
+}
+
 .composer-stop-button {
   border-color: #e6c9c0;
   color: var(--danger);
   background: #fff8f6;
+  padding: 8px 10px;
 }
 
 .composer-stop-button:hover {
@@ -1322,6 +1433,12 @@ button.danger:hover {
   font-size: 12px;
 }
 
+.autocomplete-header div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
 .autocomplete-header span {
   color: var(--muted);
   overflow-wrap: anywhere;
@@ -1346,6 +1463,25 @@ button.danger:hover {
 
 .autocomplete-command {
   color: var(--text);
+  font-weight: 650;
+}
+
+.autocomplete-command-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.autocomplete-category {
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  background: rgb(255 253 250 / 0.7);
+  padding: 2px 7px;
+  font-size: 11px;
   font-weight: 650;
 }
 
@@ -1855,7 +1991,16 @@ button.danger:hover {
   }
 
   .conversation-empty {
-    margin-bottom: 26px;
+    margin: 28px auto 26px;
+    padding: 22px;
+  }
+
+  .composer-context-desktop {
+    display: none;
+  }
+
+  .composer-context-compact {
+    display: block;
   }
 
   .inspector {
@@ -2003,6 +2148,7 @@ button.danger:hover {
   .composer {
     width: calc(100% - 20px);
     margin-bottom: 8px;
+    padding: 11px;
   }
 
   .composer-actions {
@@ -2012,6 +2158,21 @@ button.danger:hover {
 
   .composer-actions > div {
     justify-content: flex-end;
+  }
+
+  .composer-context-compact dl {
+    right: 8px;
+    left: 8px;
+  }
+
+  .autocomplete {
+    max-height: min(260px, 46vh);
+  }
+
+  .autocomplete-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
   }
 
   .inspector,

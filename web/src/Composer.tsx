@@ -51,6 +51,20 @@ export default function Composer({
   onStopSession
 }: Props) {
   const hasAutocomplete = suggestions.length > 0 && autocompleteToken;
+  const contextItems = [
+    { label: 'cwd', value: activeSession.cwd, title: activeSession.cwd },
+    { label: 'permission', value: activeSession.permissionMode },
+    ...(activeSession.worktree
+      ? [
+          { label: 'branch', value: activeSession.worktree.branch, title: activeSession.worktree.branch },
+          { label: 'source', value: activeSession.worktree.sourceCwd, title: activeSession.worktree.sourceCwd }
+        ]
+      : [])
+  ];
+  const statusLabel = isAwaitingClaude
+    ? 'Claude is working'
+    : runtimeStatusLabels[activeSession.runtimeStatus ?? activeSession.status];
+  const paletteTitle = autocompleteToken?.query === '/' ? 'Command palette' : 'Commands';
 
   return (
     <form
@@ -60,14 +74,32 @@ export default function Composer({
       aria-label="Message composer"
     >
       <div className="composer-context" aria-label="Composer context">
-        <span className="composer-status-pill">
-          <span aria-hidden="true" className="composer-status-dot" />
-          status: {isAwaitingClaude ? 'Waiting for Claude' : runtimeStatusLabels[activeSession.runtimeStatus ?? activeSession.status]}
-        </span>
-        <span title={activeSession.cwd}>cwd: {activeSession.cwd}</span>
-        <span>permission: {activeSession.permissionMode}</span>
-        {activeSession.worktree && <span title={activeSession.worktree.branch}>branch: {activeSession.worktree.branch}</span>}
-        {activeSession.worktree && <span title={activeSession.worktree.sourceCwd}>source: {activeSession.worktree.sourceCwd}</span>}
+        <div className="composer-context-desktop" aria-hidden={false}>
+          <span className="composer-status-pill">
+            <span aria-hidden="true" className="composer-status-dot" />
+            status: {statusLabel}
+          </span>
+          {contextItems.map((item) => (
+            <span key={item.label} title={item.title}>{item.label}: {item.value}</span>
+          ))}
+        </div>
+        <details className="composer-context-compact">
+          <summary>
+            <span className="composer-status-pill">
+              <span aria-hidden="true" className="composer-status-dot" />
+              {statusLabel}
+            </span>
+            <span>Context</span>
+          </summary>
+          <dl>
+            {contextItems.map((item) => (
+              <div key={item.label}>
+                <dt>{item.label}</dt>
+                <dd title={item.title}>{item.value}</dd>
+              </div>
+            ))}
+          </dl>
+        </details>
       </div>
       <div className="composer-input">
         <label className="sr-only" htmlFor="message-input">Message</label>
@@ -89,8 +121,11 @@ export default function Composer({
         {hasAutocomplete && (
           <div id="command-autocomplete" className="autocomplete" role="listbox" aria-label="Claude command suggestions">
             <div className="autocomplete-header">
-              <strong>Commands</strong>
-              <span>Use arrows, Tab, or Enter</span>
+              <div>
+                <strong>{paletteTitle}</strong>
+                <span>{suggestions.length} available</span>
+              </div>
+              <span>Arrow keys, Tab, Enter, Esc</span>
             </div>
             {suggestions.map((suggestion, index) => (
               <button
@@ -107,7 +142,10 @@ export default function Composer({
                 onMouseEnter={() => onSetActiveSuggestionIndex(index)}
                 onClick={() => onCompleteSuggestion(suggestion)}
               >
-                <span className="autocomplete-command">{suggestion.name}</span>
+                <span className="autocomplete-command-row">
+                  <span className="autocomplete-command">{suggestion.name}</span>
+                  <span className="autocomplete-category">{suggestion.category}</span>
+                </span>
                 <span className="autocomplete-description">{suggestion.description}</span>
               </button>
             ))}
@@ -117,8 +155,20 @@ export default function Composer({
       <div className="composer-actions">
         <span id="composer-send-status" aria-live="polite">{sendStatusText}</span>
         <div>
+          <button
+            className="composer-attachment-button"
+            type="button"
+            disabled
+            title="Attach file context coming soon"
+            aria-label="Attach file context coming soon"
+          >
+            <span className="sr-only">Attach file context coming soon</span>
+            <svg aria-hidden="true" viewBox="0 0 16 16" focusable="false">
+              <path d="M5.1 12.9a3.1 3.1 0 0 1 0-4.38l4.78-4.78a2.15 2.15 0 1 1 3.04 3.04l-5.15 5.15a1.25 1.25 0 0 1-1.77-1.77l4.46-4.46.9.9-4.46 4.46a.02.02 0 0 0 0 .03.02.02 0 0 0 .03 0l5.15-5.15a.88.88 0 1 0-1.25-1.25L6 9.43a1.83 1.83 0 1 0 2.59 2.59l5.05-5.05.9.9-5.05 5.05a3.1 3.1 0 0 1-4.39-.02Z" />
+            </svg>
+          </button>
           {isComposerSession && (
-            <button className="composer-stop-button" type="button" onClick={onStopSession}>Stop session</button>
+            <button className="composer-stop-button" type="button" onClick={onStopSession} aria-label="Stop session">Stop</button>
           )}
           <button
             className="send-button"

@@ -5,6 +5,8 @@ import { applyCommandCompletion, findSlashCommandToken, getCommandSuggestions, t
 import type { SessionInfo } from './types';
 
 const MESSAGE_INPUT_MAX_HEIGHT = 220;
+const PROMPT_HISTORY_KEY = 'claude-remote-web:prompt-history';
+const PROMPT_HISTORY_LIMIT = 50;
 
 type UseComposerStateOptions = {
   activeId: string | null;
@@ -31,6 +33,46 @@ function resizeMessageInput(element: HTMLTextAreaElement | null) {
   element.style.overflowY = contentHeight > MESSAGE_INPUT_MAX_HEIGHT ? 'auto' : 'hidden';
 }
 
+function readPromptHistory(): string[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(PROMPT_HISTORY_KEY) ?? '[]');
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+  } catch {
+    return [];
+  }
+}
+
+function writePromptHistory(history: string[]) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(PROMPT_HISTORY_KEY, JSON.stringify(history.slice(0, PROMPT_HISTORY_LIMIT)));
+  } catch {
+    // History is a convenience feature; storage failures should never block sending.
+  }
+}
+
+function savePromptToHistory(prompt: string): string[] {
+  const trimmed = prompt.trim();
+  if (!trimmed) return readPromptHistory();
+  const nextHistory = [trimmed, ...readPromptHistory().filter((item) => item !== trimmed)].slice(0, PROMPT_HISTORY_LIMIT);
+  writePromptHistory(nextHistory);
+  return nextHistory;
+}
+
+function canRecallPreviousPrompt(value: string, cursor: number | null | undefined): boolean {
+  if (value.length === 0) return true;
+  if (cursor === null || cursor === undefined) return false;
+  return !value.includes('\n') && cursor === 0;
+}
+
+function canRecallNextPrompt(value: string, cursor: number | null | undefined): boolean {
+  if (value.length === 0) return true;
+  if (cursor === null || cursor === undefined) return false;
+  return !value.includes('\n') && cursor === value.length;
+}
+
 export function useComposerState({
   activeId,
   activeSession,
@@ -51,6 +93,9 @@ export function useComposerState({
   const [autocompleteToken, setAutocompleteToken] = useState<SlashCommandToken | null>(null);
   const [suggestions, setSuggestions] = useState<ClaudeCommand[]>([]);
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(0);
+  const [promptHistory, setPromptHistory] = useState<string[]>(() => readPromptHistory());
+  const [historyIndex, setHistoryIndex] = useState<number | null>(null);
+  const historyDraftRef = useRef('');
 
   const hasDraft = message.trim().length > 0;
   const canSend = isComposerSession && hasDraft && !isSending;
@@ -60,18 +105,22 @@ export function useComposerState({
       ? 'Archived sessions are read-only. Unarchive to continue.'
       : activeSession.status === 'starting'
         ? 'Claude is starting. You can send once the session is ready.'
+        : activeSession.status === 'failed' || activeSession.runtimeStatus === 'failed'
+          ? 'This session failed. Restart to continue.'
         : activeSession.status !== 'running'
           ? 'This session is stopped. Resume it to continue.'
           : '';
   const sendStatusText = !isComposerSession
     ? composerDisabledReason
     : isSending
-      ? 'Sending...'
+      ? 'Sending to Claude...'
       : isAwaitingClaude
-        ? 'Sent. Waiting for Claude...'
+        ? 'Claude is working...'
         : hasDraft
           ? 'Ready to send'
-          : 'Message Claude';
+          : activeSession?.status === 'failed' || activeSession?.runtimeStatus === 'failed'
+            ? 'Session failed. Restart to continue.'
+            : 'Ready for a prompt';
 
   const hasAutocomplete = useMemo(
     () => suggestions.length > 0 && autocompleteToken,
@@ -109,6 +158,9 @@ export function useComposerState({
       if (updatedSession) {
         setSessions((current) => current.map((session) => session.id === updatedSession.id ? updatedSession : session));
       }
+      setPromptHistory(savePromptToHistory(text));
+      setHistoryIndex(null);
+      historyDraftRef.current = '';
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
       removePendingMessage(sessionId, pendingEventId);
@@ -131,6 +183,39 @@ export function useComposerState({
     });
   }
 
+  function recallPromptHistory(direction: 'previous' | 'next') {
+    const history = promptHistory.length > 0 ? promptHistory : readPromptHistory();
+    if (history.length === 0) return;
+
+    const currentIndex = historyIndex;
+    let nextIndex: number | null;
+    if (direction === 'previous') {
+      if (currentIndex === null) {
+        historyDraftRef.current = message;
+        nextIndex = 0;
+      } else {
+        nextIndex = Math.min(currentIndex + 1, history.length - 1);
+      }
+    } else if (currentIndex === null) {
+      return;
+    } else if (currentIndex <= 0) {
+      nextIndex = null;
+    } else {
+      nextIndex = currentIndex - 1;
+    }
+
+    const nextMessage = nextIndex === null ? historyDraftRef.current : history[nextIndex];
+    setPromptHistory(history);
+    setHistoryIndex(nextIndex);
+    setMessage(nextMessage);
+    closeAutocomplete();
+    requestAnimationFrame(() => {
+      messageInputRef.current?.focus();
+      messageInputRef.current?.setSelectionRange(nextMessage.length, nextMessage.length);
+      resizeMessageInput(messageInputRef.current);
+    });
+  }
+
   function completeActiveSuggestion() {
     const suggestion = suggestions[activeSuggestionIndex];
     if (!suggestion) return;
@@ -148,6 +233,8 @@ export function useComposerState({
 
   function onMessageChange(value: string, element: HTMLTextAreaElement) {
     setMessage(value);
+    setHistoryIndex(null);
+    historyDraftRef.current = '';
     resizeMessageInput(element);
     refreshAutocomplete(value, element.selectionStart);
   }
@@ -202,6 +289,18 @@ export function useComposerState({
         closeAutocomplete();
         return;
       }
+    }
+
+    if (event.key === 'ArrowUp' && (historyIndex !== null || canRecallPreviousPrompt(message, event.currentTarget.selectionStart))) {
+      event.preventDefault();
+      recallPromptHistory('previous');
+      return;
+    }
+
+    if (event.key === 'ArrowDown' && (historyIndex !== null || canRecallNextPrompt(message, event.currentTarget.selectionStart))) {
+      event.preventDefault();
+      recallPromptHistory('next');
+      return;
     }
 
     if (event.key !== 'Enter' || event.shiftKey || isComposing) return;

@@ -20,8 +20,14 @@ describe('autocomplete helpers', () => {
 
   it('filters built-in commands by prefix', () => {
     expect(CLAUDE_COMMANDS.map((command) => command.name)).toContain('/help');
+    expect(getCommandSuggestions('/').length).toBe(CLAUDE_COMMANDS.length);
     expect(getCommandSuggestions('/he').map((command) => command.name)).toEqual(['/help']);
     expect(getCommandSuggestions('/perm').map((command) => command.name)).toEqual(['/permissions']);
+  });
+
+  it('returns fuzzy matches when no command prefix matches', () => {
+    expect(getCommandSuggestions('/github').map((command) => command.name)).toEqual(['/install-github-app']);
+    expect(getCommandSuggestions('/pullrequest').map((command) => command.name)).toEqual(['/pr-comments']);
   });
 
   it('returns no suggestions for text that is not a slash prefix', () => {
@@ -68,6 +74,10 @@ describe('autocomplete helpers', () => {
       '/terminal-setup',
       '/vim'
     ]));
+    expect(CLAUDE_COMMANDS.find((command) => command.name === '/help')).toMatchObject({
+      category: 'Help',
+      description: expect.any(String)
+    });
   });
 
   it('keeps command names unique and sorted', () => {

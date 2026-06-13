@@ -185,6 +185,7 @@ beforeEach(() => {
   cleanup();
   sessions = defaultSessions;
   deletedSessions = defaultDeletedSessions;
+  window.localStorage.clear();
   FakeWebSocket.instances = [];
   scrollIntoViewMock = vi.fn();
   Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
@@ -487,9 +488,14 @@ describe('App', () => {
     render(<App />);
 
     const messageInput = await screen.findByLabelText('Message') as HTMLTextAreaElement;
-    fireEvent.change(messageInput, { target: { value: '/he', selectionStart: 3 } });
+    fireEvent.change(messageInput, { target: { value: '/', selectionStart: 1 } });
 
-    expect(await screen.findByRole('listbox', { name: 'Claude command suggestions' })).toBeInTheDocument();
+    const palette = await screen.findByRole('listbox', { name: 'Claude command suggestions' });
+    expect(palette).toBeInTheDocument();
+    expect(palette).toHaveTextContent('Command palette');
+    expect(within(palette).getAllByText('Help').length).toBeGreaterThan(0);
+
+    fireEvent.change(messageInput, { target: { value: '/he', selectionStart: 3 } });
     expect(screen.getByRole('option', { name: /\/help/ })).toBeInTheDocument();
 
     fireEvent.keyDown(messageInput, { key: 'Tab' });
@@ -609,6 +615,41 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
   });
 
+  it('stores successful prompts and recalls them with arrow keys without stealing multiline editing', async () => {
+    render(<App />);
+
+    const messageInput = await screen.findByLabelText('Message') as HTMLTextAreaElement;
+
+    fireEvent.change(messageInput, { target: { value: 'first prompt' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/input', expect.objectContaining({ method: 'POST' })));
+
+    fireEvent.change(messageInput, { target: { value: 'second prompt' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([url]) => String(url) === '/api/sessions/s1/input')).toHaveLength(2);
+    });
+
+    expect(JSON.parse(window.localStorage.getItem('claude-remote-web:prompt-history') ?? '[]')).toEqual([
+      'second prompt',
+      'first prompt'
+    ]);
+
+    fireEvent.keyDown(messageInput, { key: 'ArrowUp' });
+    expect(messageInput).toHaveValue('second prompt');
+
+    fireEvent.keyDown(messageInput, { key: 'ArrowUp' });
+    expect(messageInput).toHaveValue('first prompt');
+
+    messageInput.setSelectionRange(messageInput.value.length, messageInput.value.length);
+    fireEvent.keyDown(messageInput, { key: 'ArrowDown' });
+    expect(messageInput).toHaveValue('second prompt');
+
+    fireEvent.change(messageInput, { target: { value: 'line one\nline two', selectionStart: 8 } });
+    fireEvent.keyDown(messageInput, { key: 'ArrowUp' });
+    expect(messageInput).toHaveValue('line one\nline two');
+  });
+
   it('stops the active session from the composer', async () => {
     render(<App />);
 
@@ -624,6 +665,7 @@ describe('App', () => {
     expect(within(context).getByText('cwd: /repo/one')).toBeInTheDocument();
     expect(within(context).getByText('permission: acceptEdits')).toBeInTheDocument();
     expect(context).toHaveTextContent('status: Waiting for you');
+    expect(screen.getByRole('button', { name: 'Attach file context coming soon' })).toBeDisabled();
 
     fireEvent.click(sessionButton('Worktree Repo'));
 
