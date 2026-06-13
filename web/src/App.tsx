@@ -17,6 +17,7 @@ import {
 import ConfigView from './ConfigView';
 import ConversationBlockList from './ConversationBlockList';
 import { buildConversationBlocks } from './conversationBlocks';
+import { extractSessionPlan } from './sessionPlan';
 import TasksPanel from './TasksPanel';
 import { applyCommandCompletion, findSlashCommandToken, getCommandSuggestions, type ClaudeCommand, type SlashCommandToken } from './autocomplete';
 import type { SessionInfo, TaskGroups, TaskInfo, UiEvent } from './types';
@@ -34,7 +35,7 @@ export default function App() {
   const [view, setView] = useState<AppView>('sessions');
   const [isNewSessionOpen, setIsNewSessionOpen] = useState(false);
   const [isInspectorOpen, setIsInspectorOpen] = useState(true);
-  const [inspectorTab, setInspectorTab] = useState<'session' | 'global' | 'details'>('session');
+  const [inspectorTab, setInspectorTab] = useState<'session' | 'global' | 'plan'>('session');
   const [events, setEvents] = useState<Record<string, UiEvent[]>>({});
   const [cwd, setCwd] = useState('');
   const [name, setName] = useState('');
@@ -76,6 +77,10 @@ export default function App() {
   const activeBlocks = useMemo(
     () => buildConversationBlocks(visibleEvents),
     [visibleEvents]
+  );
+  const activePlan = useMemo(
+    () => extractSessionPlan(activeEvents),
+    [activeEvents]
   );
   const hiddenEventCount = displayableEvents.length - visibleEvents.length;
   const isActiveSessionMode = listMode === 'active' && !activeSession?.deletedAt;
@@ -453,7 +458,7 @@ export default function App() {
   }
 
   function onInspectorTabKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
-    const tabs: Array<typeof inspectorTab> = ['session', 'global', 'details'];
+    const tabs: Array<typeof inspectorTab> = ['session', 'global', 'plan'];
     const currentIndex = tabs.indexOf(inspectorTab);
     let nextIndex = currentIndex;
 
@@ -733,6 +738,15 @@ export default function App() {
 
       {view === 'sessions' && (
         <aside className="inspector" aria-label="Session inspector">
+          <button
+            type="button"
+            className="inspector-edge-toggle"
+            aria-label={isInspectorOpen ? 'Hide inspector' : 'Show inspector'}
+            title={isInspectorOpen ? 'Hide inspector' : 'Show inspector'}
+            onClick={() => setIsInspectorOpen((open) => !open)}
+          >
+            {isInspectorOpen ? '›' : '‹'}
+          </button>
           <header className="inspector-header">
             <div>
               <h2>Inspector</h2>
@@ -747,7 +761,7 @@ export default function App() {
               <div className="inspector-tabs" role="tablist" aria-label="Inspector sections">
                 <button type="button" id="inspector-tab-session" role="tab" aria-selected={inspectorTab === 'session'} aria-controls="inspector-panel-session" tabIndex={inspectorTab === 'session' ? 0 : -1} onClick={() => setInspectorTab('session')} onKeyDown={onInspectorTabKeyDown}>Session tasks</button>
                 <button type="button" id="inspector-tab-global" role="tab" aria-selected={inspectorTab === 'global'} aria-controls="inspector-panel-global" tabIndex={inspectorTab === 'global' ? 0 : -1} onClick={() => setInspectorTab('global')} onKeyDown={onInspectorTabKeyDown}>All tasks</button>
-                <button type="button" id="inspector-tab-details" role="tab" aria-selected={inspectorTab === 'details'} aria-controls="inspector-panel-details" tabIndex={inspectorTab === 'details' ? 0 : -1} onClick={() => setInspectorTab('details')} onKeyDown={onInspectorTabKeyDown}>Details</button>
+                <button type="button" id="inspector-tab-plan" role="tab" aria-selected={inspectorTab === 'plan'} aria-controls="inspector-panel-plan" tabIndex={inspectorTab === 'plan' ? 0 : -1} onClick={() => setInspectorTab('plan')} onKeyDown={onInspectorTabKeyDown}>Plan</button>
               </div>
               <div id="inspector-panel-session" role="tabpanel" aria-labelledby="inspector-tab-session" hidden={inspectorTab !== 'session'}>
                 {isActiveSessionMode ? (
@@ -759,33 +773,17 @@ export default function App() {
               <div id="inspector-panel-global" role="tabpanel" aria-labelledby="inspector-tab-global" hidden={inspectorTab !== 'global'}>
                 <TasksPanel title="All tasks" tasks={tasks} error={taskError} compact onSelectTask={onSelectTask} />
               </div>
-              <section id="inspector-panel-details" role="tabpanel" aria-labelledby="inspector-tab-details" className="session-details" hidden={inspectorTab !== 'details'}>
-                {activeSession ? (
+              <section id="inspector-panel-plan" role="tabpanel" aria-labelledby="inspector-tab-plan" className="session-plan" hidden={inspectorTab !== 'plan'}>
+                {!activeSession ? (
+                  <p className="inspector-empty">No session selected.</p>
+                ) : activePlan ? (
                   <>
-                    <h3>Session details</h3>
-                    <dl>
-                      <dt>Status</dt>
-                      <dd>{activeSession.status}</dd>
-                      <dt>Directory</dt>
-                      <dd>{activeSession.cwd}</dd>
-                      <dt>Permission mode</dt>
-                      <dd>{activeSession.permissionMode}</dd>
-                      {activeSession.claudeSessionId && (
-                        <>
-                          <dt>Claude session</dt>
-                          <dd>{activeSession.claudeSessionId}</dd>
-                        </>
-                      )}
-                      {activeSession.worktree && (
-                        <>
-                          <dt>Worktree branch</dt>
-                          <dd>{activeSession.worktree.branch}</dd>
-                        </>
-                      )}
-                    </dl>
+                    <h3>Session plan</h3>
+                    <p className="plan-source">From {activePlan.source === 'ExitPlanMode' ? 'ExitPlanMode' : 'plan file'}</p>
+                    <pre className="plan-content">{activePlan.markdown}</pre>
                   </>
                 ) : (
-                  <p className="inspector-empty">No session selected.</p>
+                  <p className="inspector-empty">No plan available for this session.</p>
                 )}
               </section>
             </>

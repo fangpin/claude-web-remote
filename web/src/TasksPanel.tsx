@@ -24,7 +24,7 @@ function TaskSection({
   tasks: TaskInfo[];
   onSelectTask: (task: TaskInfo) => void;
 }) {
-  const visibleTasks = tasks.slice(-TASK_SECTION_LIMIT);
+  const visibleTasks = tasks.slice(0, TASK_SECTION_LIMIT);
   const hiddenTaskCount = tasks.length - visibleTasks.length;
 
   return (
@@ -52,8 +52,9 @@ function TaskSection({
                 <span className="task-card-meta">
                   {task.toolKind} · {task.sessionName || task.sessionCwd}
                 </span>
-                <span className="task-card-meta">
-                  <span>{task.status}</span>{time ? ` · ${time}` : ''}
+                <span className="task-card-status-row">
+                  <span className="task-status-pill">{task.status}</span>
+                  {time && <span className="task-card-meta">{time}</span>}
                 </span>
                 {task.summary && <span className="task-card-summary">{task.summary}</span>}
               </button>
