@@ -1696,6 +1696,10 @@ button.danger:hover {
     padding-bottom: 26px;
   }
 
+  .conversation-empty {
+    margin-bottom: 26px;
+  }
+
   .inspector {
     position: fixed;
     top: 0;
