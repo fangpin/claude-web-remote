@@ -16,6 +16,7 @@ The code, files, git repositories, Claude CLI, and model gateway all stay on the
 - Event, stderr, raw stdout, and session metadata persistence
 - Automatic Claude session id extraction and restart resume
 - Config file support through `~/.claude-remote-web/config.toml`
+- Runtime diagnostics for resolved config, launcher argv, web assets, data directory, and recent session failures
 - Wrapper launcher support, including `ttadk claude ... -a`
 - SSH-only access model by binding to `127.0.0.1`
 
@@ -196,6 +197,19 @@ GET /api/sessions/<session-id>/transcript?afterId=<last-seen-event-id>
 ```
 
 This returns persisted append-only UI events as `{ "events": [...] }` for active, stopped, ended, failed, or archived sessions. `GET /api/sessions/<session-id>/events?afterId=...` remains the WebSocket replay-then-live stream for running sessions. Archived sessions remain read-only and reject mutation routes such as input, stop, restart, and resume until unarchived.
+
+## Diagnostics
+
+The Inspector has a Diagnostics tab for startup and runtime health. It shows the resolved config summary, a secret-redacted launcher argv preview with the native Claude args appended, web asset status, data directory writability, recent failed sessions, and the selected session's recent stderr/error/system event summaries.
+
+The same data is available through:
+
+```text
+GET /api/diagnostics
+GET /api/sessions/<session-id>/diagnostics
+```
+
+Diagnostics redact common secret-bearing argv and stderr shapes such as token, password, secret, credential, authorization, cookie, JWT, and API key values. Raw stdout/stderr/event logs remain append-only on disk.
 
 ## Data layout
 
