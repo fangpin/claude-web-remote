@@ -30,6 +30,17 @@ pub struct WorktreeRequest {
     pub enabled: bool,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SessionRuntimeStatus {
+    Starting,
+    Running,
+    Waiting,
+    Ended,
+    Stopped,
+    Failed,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionInfo {
@@ -38,6 +49,7 @@ pub struct SessionInfo {
     pub cwd: PathBuf,
     pub permission_mode: String,
     pub status: SessionStatus,
+    pub runtime_status: SessionRuntimeStatus,
     pub claude_session_id: Option<String>,
     pub worktree: Option<WorktreeMeta>,
     pub deleted_at: Option<chrono::DateTime<Utc>>,
@@ -161,17 +173,17 @@ impl SessionManager {
     }
 
     pub async fn list_sessions(&self, filter: SessionListFilter) -> AppResult<Vec<SessionInfo>> {
-        Ok(self
-            .store
-            .list_meta(filter)
-            .await?
-            .into_iter()
-            .map(SessionInfo::from)
-            .collect())
+        let metas = self.store.list_meta(filter).await?;
+        let mut sessions = Vec::with_capacity(metas.len());
+        for meta in metas {
+            sessions.push(self.session_info(meta).await?);
+        }
+        Ok(sessions)
     }
 
     pub async fn get_session(&self, session_id: Uuid) -> AppResult<SessionInfo> {
-        Ok(SessionInfo::from(self.store.load_meta(session_id).await?))
+        let meta = self.store.load_meta(session_id).await?;
+        self.session_info(meta).await
     }
 
     pub async fn list_tasks(&self) -> AppResult<TaskGroups> {
@@ -280,7 +292,7 @@ impl SessionManager {
                 Ok(())
             })
             .await?;
-        Ok(SessionInfo::from(meta))
+        self.session_info(meta).await
     }
 
     pub async fn delete_session(&self, session_id: Uuid) -> AppResult<SessionInfo> {
@@ -301,7 +313,7 @@ impl SessionManager {
                 Ok(())
             })
             .await?;
-        Ok(SessionInfo::from(meta))
+        self.session_info(meta).await
     }
 
     pub async fn unarchive_session(&self, session_id: Uuid) -> AppResult<SessionInfo> {
@@ -318,7 +330,7 @@ impl SessionManager {
                 Ok(())
             })
             .await?;
-        Ok(SessionInfo::from(meta))
+        self.session_info(meta).await
     }
 
     pub async fn restore_session(&self, session_id: Uuid) -> AppResult<SessionInfo> {
@@ -335,7 +347,7 @@ impl SessionManager {
                 Ok(())
             })
             .await?;
-        Ok(SessionInfo::from(meta))
+        self.session_info(meta).await
     }
 
     pub async fn permanently_delete_session(&self, session_id: Uuid) -> AppResult<()> {
@@ -589,7 +601,13 @@ impl SessionManager {
             }
         });
 
-        Ok(SessionInfo::from(meta))
+        self.session_info(meta).await
+    }
+
+    async fn session_info(&self, meta: SessionMeta) -> AppResult<SessionInfo> {
+        let events = self.store.load_events_after(meta.id, 0).await?;
+        let runtime_status = runtime_status(&meta, &events);
+        Ok(SessionInfo::new(meta, runtime_status))
     }
 
     async fn update_claude_session_id(
@@ -640,20 +658,48 @@ fn expand_home(path: PathBuf) -> PathBuf {
     path
 }
 
-impl From<SessionMeta> for SessionInfo {
-    fn from(meta: SessionMeta) -> Self {
+impl SessionInfo {
+    fn new(meta: SessionMeta, runtime_status: SessionRuntimeStatus) -> Self {
         Self {
             id: meta.id,
             name: meta.name,
             cwd: meta.cwd,
             permission_mode: meta.permission_mode,
             status: meta.status,
+            runtime_status,
             claude_session_id: meta.claude_session_id,
             worktree: meta.worktree,
             deleted_at: meta.deleted_at,
             created_at: meta.created_at,
             updated_at: meta.updated_at,
         }
+    }
+}
+
+fn runtime_status(meta: &SessionMeta, events: &[UiEvent]) -> SessionRuntimeStatus {
+    match meta.status {
+        SessionStatus::Starting => SessionRuntimeStatus::Starting,
+        SessionStatus::Exited => SessionRuntimeStatus::Ended,
+        SessionStatus::Stopped => SessionRuntimeStatus::Stopped,
+        SessionStatus::Failed => SessionRuntimeStatus::Failed,
+        SessionStatus::Running => running_runtime_status(meta, events),
+    }
+}
+
+fn running_runtime_status(meta: &SessionMeta, events: &[UiEvent]) -> SessionRuntimeStatus {
+    let tasks = project_session_tasks(meta, events);
+    if !tasks.background.is_empty() {
+        return SessionRuntimeStatus::Running;
+    }
+
+    match events
+        .iter()
+        .rev()
+        .find(|event| event.kind != EventKind::Raw && event.kind != EventKind::Error)
+        .map(|event| &event.kind)
+    {
+        Some(EventKind::User) => SessionRuntimeStatus::Running,
+        _ => SessionRuntimeStatus::Waiting,
     }
 }
 
@@ -832,6 +878,130 @@ done
         fs::write(root.join("README.md"), "hello\n").unwrap();
         git(root, &["add", "README.md"]);
         git(root, &["commit", "-m", "initial"]);
+    }
+
+    fn test_event(
+        id: u64,
+        session_id: Uuid,
+        kind: EventKind,
+        payload: serde_json::Value,
+    ) -> UiEvent {
+        UiEvent::new(id, session_id, kind, payload)
+    }
+
+    #[test]
+    fn runtime_status_maps_ended_lifecycle() {
+        let temp = tempfile::tempdir().unwrap();
+        let now = Utc::now();
+        let meta = SessionMeta {
+            id: Uuid::new_v4(),
+            name: None,
+            cwd: temp.path().to_path_buf(),
+            permission_mode: "acceptEdits".to_string(),
+            status: SessionStatus::Exited,
+            claude_session_id: None,
+            worktree: None,
+            deleted_at: None,
+            created_at: now,
+            updated_at: now,
+        };
+
+        assert_eq!(runtime_status(&meta, &[]), SessionRuntimeStatus::Ended);
+    }
+
+    #[test]
+    fn runtime_status_waits_when_running_without_pending_work() {
+        let session_id = Uuid::new_v4();
+        let temp = tempfile::tempdir().unwrap();
+        let now = Utc::now();
+        let meta = SessionMeta {
+            id: session_id,
+            name: None,
+            cwd: temp.path().to_path_buf(),
+            permission_mode: "acceptEdits".to_string(),
+            status: SessionStatus::Running,
+            claude_session_id: None,
+            worktree: None,
+            deleted_at: None,
+            created_at: now,
+            updated_at: now,
+        };
+        let events = vec![test_event(
+            1,
+            session_id,
+            EventKind::Assistant,
+            json!({ "type": "assistant", "message": "done" }),
+        )];
+
+        assert_eq!(
+            runtime_status(&meta, &events),
+            SessionRuntimeStatus::Waiting
+        );
+    }
+
+    #[test]
+    fn runtime_status_runs_after_latest_user_event() {
+        let session_id = Uuid::new_v4();
+        let temp = tempfile::tempdir().unwrap();
+        let now = Utc::now();
+        let meta = SessionMeta {
+            id: session_id,
+            name: None,
+            cwd: temp.path().to_path_buf(),
+            permission_mode: "acceptEdits".to_string(),
+            status: SessionStatus::Running,
+            claude_session_id: None,
+            worktree: None,
+            deleted_at: None,
+            created_at: now,
+            updated_at: now,
+        };
+        let events = vec![test_event(
+            1,
+            session_id,
+            EventKind::User,
+            json!({ "text": "please work" }),
+        )];
+
+        assert_eq!(
+            runtime_status(&meta, &events),
+            SessionRuntimeStatus::Running
+        );
+    }
+
+    #[test]
+    fn runtime_status_runs_with_background_task() {
+        let session_id = Uuid::new_v4();
+        let temp = tempfile::tempdir().unwrap();
+        let now = Utc::now();
+        let meta = SessionMeta {
+            id: session_id,
+            name: None,
+            cwd: temp.path().to_path_buf(),
+            permission_mode: "acceptEdits".to_string(),
+            status: SessionStatus::Running,
+            claude_session_id: None,
+            worktree: None,
+            deleted_at: None,
+            created_at: now,
+            updated_at: now,
+        };
+        let events = vec![test_event(
+            1,
+            session_id,
+            EventKind::Tool,
+            json!({
+                "type": "tool_use",
+                "id": "toolu_1",
+                "name": "Bash",
+                "input": { "command": "sleep 10" }
+            }),
+        )];
+
+        assert_eq!(
+            runtime_status(&meta, &events),
+            SessionRuntimeStatus::Running
+        );
     }
 
     #[tokio::test]

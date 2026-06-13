@@ -301,6 +301,17 @@ button.danger:hover {
   background: #e3f4ec;
 }
 
+.status-waiting {
+  color: #7a541d;
+  background: #fff3cf;
+}
+
+.status-ended,
+.status-stopped {
+  color: #4d5359;
+  background: #eceff1;
+}
+
 .status-failed {
   color: #a13a2b;
   background: #fde9e4;

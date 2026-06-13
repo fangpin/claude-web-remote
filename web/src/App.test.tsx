@@ -17,6 +17,7 @@ const defaultSessions = [
     name: 'Repo One',
     cwd: '/repo/one',
     status: 'running',
+    runtimeStatus: 'waiting',
     updatedAt: '2026-06-11T02:00:00Z'
   },
   {
@@ -24,7 +25,8 @@ const defaultSessions = [
     id: 's2',
     name: 'Stopped Repo',
     cwd: '/repo/stopped',
-    status: 'stopped',
+    status: 'exited',
+    runtimeStatus: 'ended',
     claudeSessionId: 'claude-s2',
     updatedAt: '2026-06-11T01:00:00Z'
   },
@@ -34,6 +36,7 @@ const defaultSessions = [
     name: 'Worktree Repo',
     cwd: '/repo/one/.claude/worktrees/abc123',
     status: 'running',
+    runtimeStatus: 'running',
     worktree: {
       sourceCwd: '/repo/one',
       worktreeCwd: '/repo/one/.claude/worktrees/abc123',
@@ -48,6 +51,7 @@ const defaultSessions = [
     name: 'External Worktree Repo',
     cwd: '/repo/external-worktree',
     status: 'running',
+    runtimeStatus: 'running',
     worktree: {
       sourceCwd: '/repo/external',
       worktreeCwd: '/repo/external-worktree',
@@ -65,6 +69,7 @@ const defaultDeletedSessions = [
     name: 'Archived Repo',
     cwd: '/repo/archived',
     status: 'stopped',
+    runtimeStatus: 'stopped',
     claudeSessionId: 'claude-s3',
     deletedAt: '2026-06-12T00:00:00Z',
     updatedAt: '2026-06-12T00:00:00Z'
@@ -157,6 +162,10 @@ function querySessionButton(name: string): HTMLElement | null {
   return (matches.find((element) => element.closest('button.session'))?.closest('button') as HTMLElement | null) ?? null;
 }
 
+function expectSessionStatus(name: string, status: string) {
+  expect(within(sessionButton(name)).getByText(status)).toBeInTheDocument();
+}
+
 class FakeWebSocket {
   static instances: FakeWebSocket[] = [];
   onopen: (() => void) | null = null;
@@ -226,7 +235,7 @@ beforeEach(() => {
       return jsonResponse({ ...sessions[0], deletedAt: '2026-06-12T00:00:00Z', updatedAt: '2026-06-12T00:00:00Z' });
     }
     if (url === '/api/sessions/s2/resume' && init?.method === 'POST') {
-      return jsonResponse({ ...sessions[1], status: 'running', updatedAt: '2026-06-12T00:00:00Z' });
+      return jsonResponse({ ...sessions[1], status: 'running', runtimeStatus: 'waiting', updatedAt: '2026-06-12T00:00:00Z' });
     }
     if (url === '/api/sessions/s3/unarchive' && init?.method === 'POST') {
       return jsonResponse({ ...deletedSessions[0], deletedAt: null, updatedAt: '2026-06-12T01:00:00Z' });
@@ -269,7 +278,7 @@ beforeEach(() => {
     }
     if (url.endsWith('/restart')) {
       const session = sessions.find((item) => url.includes(item.id)) ?? sessions[0];
-      return jsonResponse({ ...session, status: 'running', updatedAt: '2026-06-12T00:00:00Z' });
+      return jsonResponse({ ...session, status: 'running', runtimeStatus: 'waiting', updatedAt: '2026-06-12T00:00:00Z' });
     }
     if (url.endsWith('/stop')) {
       return jsonResponse({ ok: true });
@@ -306,6 +315,9 @@ describe('App', () => {
 
     expect((await screen.findAllByText('Repo One')).length).toBeGreaterThan(0);
     expect(screen.getAllByText('/repo/one').length).toBeGreaterThan(0);
+    expectSessionStatus('Repo One', 'Waiting for you');
+    expectSessionStatus('Worktree Repo', 'Running');
+    expectSessionStatus('Stopped Repo', 'Ended');
     expect(screen.getByText('Remote Claude session')).toBeInTheDocument();
     const inspector = screen.getByRole('complementary', { name: 'Session inspector' });
     expect(within(inspector).getByRole('tab', { name: 'Session tasks' })).toBeInTheDocument();
@@ -486,7 +498,8 @@ describe('App', () => {
         id: 's1',
         name: 'Starting Repo',
         cwd: '/repo/starting',
-        status: 'starting'
+        status: 'starting',
+        runtimeStatus: 'starting'
       }
     ];
 
@@ -507,7 +520,8 @@ describe('App', () => {
         id: 's1',
         name,
         cwd: `/repo/${status}`,
-        status
+        status,
+        runtimeStatus: status === 'exited' ? 'ended' : status
       }
     ];
 
@@ -606,7 +620,8 @@ describe('App', () => {
         id: 's7',
         name: 'Newest Repo',
         cwd: '/repo/newest',
-        status: 'running'
+        status: 'running',
+        runtimeStatus: 'waiting'
       }
     ];
     let resolveArchive!: () => void;
