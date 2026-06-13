@@ -1,7 +1,8 @@
 use crate::{
     AppError, AppResult, ClaudeProcess, ClaudeProcessConfig, EventKind, EventStore, ProcessEvent,
     SessionMeta, SessionStatus, TaskGroups, UiEvent, WorktreeConfig, WorktreeManager, WorktreeMeta,
-    extract_claude_session_id, group_tasks, project_session_tasks, store::SessionListFilter,
+    extract_claude_session_id, group_tasks, has_unfinished_tool_use, project_session_tasks,
+    store::SessionListFilter,
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -716,7 +717,7 @@ fn runtime_status(meta: &SessionMeta, events: &[UiEvent]) -> SessionRuntimeStatu
 
 fn running_runtime_status(meta: &SessionMeta, events: &[UiEvent]) -> SessionRuntimeStatus {
     let tasks = project_session_tasks(meta, events);
-    if !tasks.background.is_empty() {
+    if !tasks.background.is_empty() || has_unfinished_tool_use(events) {
         return SessionRuntimeStatus::Running;
     }
 

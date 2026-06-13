@@ -18,5 +18,7 @@ pub use event::{EventKind, UiEvent, extract_claude_session_id, normalize_claude_
 pub use process::{ClaudeProcess, ClaudeProcessConfig, ProcessEvent};
 pub use session::{CreateSessionRequest, SessionInfo, SessionManager, WorktreeRequest};
 pub use store::{EventStore, SessionListFilter, SessionMeta, SessionStatus};
-pub use task::{TaskGroups, TaskInfo, TaskStatus, group_tasks, project_session_tasks};
+pub use task::{
+    TaskGroups, TaskInfo, TaskStatus, group_tasks, has_unfinished_tool_use, project_session_tasks,
+};
 pub use worktree::{WorktreeManager, WorktreeMeta};
