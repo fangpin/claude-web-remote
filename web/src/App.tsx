@@ -204,6 +204,7 @@ export default function App() {
           cwd={sessionState.cwd}
           isListLoading={sessionState.isListLoading}
           isNewSessionOpen={sessionState.isNewSessionOpen}
+          listError={sessionState.listError}
           listMode={sessionState.listMode}
           permissionMode={sessionState.permissionMode}
           recentDirectories={sessionState.recentDirectories}
@@ -219,6 +220,7 @@ export default function App() {
           onSetPermissionMode={sessionState.setPermissionMode}
           onSetSessionSearch={sessionState.setSessionSearch}
           onSetUseWorktree={sessionState.setUseWorktree}
+          onRetryList={sessionState.retryList}
           onToggleNewSession={sessionState.toggleNewSession}
         />
       }
@@ -234,6 +236,8 @@ export default function App() {
           composerRef={composerState.composerRef}
           emptyStatePrompts={EMPTY_STATE_PROMPTS}
           error={error}
+          connectionError={eventState.connectionError}
+          connectionState={eventState.connectionState}
           eventRenderLimit={EVENT_RENDER_LIMIT}
           eventsRef={eventState.eventsRef}
           hiddenEventCount={eventState.hiddenEventCount}
@@ -254,6 +258,9 @@ export default function App() {
           onSend={composerState.onSend}
           onSetActiveSuggestionIndex={composerState.setActiveSuggestionIndex}
           onStopSession={() => sessionState.onStop(false)}
+          onDismissError={() => setError(null)}
+          onRetryConnection={eventState.retryConnection}
+          onRetryTranscript={eventState.retryTranscript}
           onUseEmptyStatePrompt={composerState.useEmptyStatePrompt}
         />
       }

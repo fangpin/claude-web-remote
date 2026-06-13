@@ -6,6 +6,7 @@ import type { AppView, SessionListMode } from './AppShell';
 import type { ClaudeCommand, SlashCommandToken } from './autocomplete';
 import type { ConversationBlock } from './conversationBlocks';
 import type { SessionInfo } from './types';
+import type { EventConnectionState } from './useSessionEvents';
 
 type Props = {
   activeBlocks: ConversationBlock[];
@@ -18,6 +19,8 @@ type Props = {
   composerRef: RefObject<HTMLFormElement | null>;
   emptyStatePrompts: string[];
   error: string | null;
+  connectionError: string | null;
+  connectionState: EventConnectionState;
   eventRenderLimit: number;
   eventsRef: RefObject<HTMLDivElement | null>;
   hiddenEventCount: number;
@@ -38,6 +41,9 @@ type Props = {
   onSend: (event: FormEvent) => void;
   onSetActiveSuggestionIndex: (index: number) => void;
   onStopSession: () => void;
+  onDismissError: () => void;
+  onRetryConnection: () => void;
+  onRetryTranscript: () => void;
   onUseEmptyStatePrompt: (prompt: string) => void;
 };
 
@@ -52,6 +58,8 @@ export default function ConversationWorkspace({
   composerRef,
   emptyStatePrompts,
   error,
+  connectionError,
+  connectionState,
   eventRenderLimit,
   eventsRef,
   hiddenEventCount,
@@ -72,6 +80,9 @@ export default function ConversationWorkspace({
   onSend,
   onSetActiveSuggestionIndex,
   onStopSession,
+  onDismissError,
+  onRetryConnection,
+  onRetryTranscript,
   onUseEmptyStatePrompt
 }: Props) {
   if (view === 'config') {
@@ -84,7 +95,6 @@ export default function ConversationWorkspace({
 
   return (
     <main className={listMode === 'archived' ? 'workspace conversation-workspace with-deleted-note' : 'workspace conversation-workspace'} aria-label="Conversation workspace">
-      {error && <p role="alert" className="error">{error}</p>}
       {activeSession ? (
         <>
           <header className="conversation-header">
@@ -104,18 +114,61 @@ export default function ConversationWorkspace({
           {listMode === 'archived' && (
             <p className="deleted-note">This session is archived. Unarchive it before resuming work or sending messages.</p>
           )}
+          {error && (
+            <div role="alert" className="api-error-banner">
+              <div>
+                <strong>Something did not complete.</strong>
+                <span>The chat is still here. Try the action again, or expand details if you need the raw response.</span>
+              </div>
+              <button type="button" onClick={onDismissError}>Dismiss</button>
+              <details>
+                <summary>Details</summary>
+                <pre>{error}</pre>
+              </details>
+            </div>
+          )}
+          {connectionState === 'reconnecting' && (
+            <div className="connection-note" role="status">Reconnecting to Claude...</div>
+          )}
+          {connectionState === 'error' && connectionError && (
+            <div role="alert" className="api-error-banner connection-error">
+              <div>
+                <strong>Could not load the latest transcript.</strong>
+                <span>Existing messages stay visible while you reconnect or reload the transcript.</span>
+              </div>
+              <div className="inline-actions">
+                <button type="button" onClick={onRetryTranscript}>Reload</button>
+                {isComposerSession && <button type="button" onClick={onRetryConnection}>Reconnect</button>}
+              </div>
+              <details>
+                <summary>Details</summary>
+                <pre>{connectionError}</pre>
+              </details>
+            </div>
+          )}
           <div className="events" ref={eventsRef}>
             <div className="conversation-content">
+              {connectionState === 'loading' && activeBlocks.length === 0 && (
+                <div className="conversation-skeleton" aria-label="Loading transcript">
+                  <span />
+                  <span />
+                  <span />
+                </div>
+              )}
               {hiddenEventCount > 0 && (
                 <div className="event-limit-note">
                   Showing latest {eventRenderLimit} events. {hiddenEventCount} older events hidden.
                 </div>
               )}
-              {activeBlocks.length === 0 && hiddenEventCount === 0 && (
+              {connectionState !== 'loading' && activeBlocks.length === 0 && hiddenEventCount === 0 && (
                 <section className="conversation-empty" aria-label="Conversation starter">
-                  <span className="empty-eyebrow">Ready when you are</span>
-                  <h3>What would you like Claude to do?</h3>
-                  <p>Ask Claude to inspect this repo, explain behavior, run tests, or make a change.</p>
+                  <span className="empty-eyebrow">{isComposerSession ? 'Ready when you are' : 'No transcript yet'}</span>
+                  <h3>{isComposerSession ? 'What would you like Claude to do?' : 'This chat is quiet.'}</h3>
+                  <p>
+                    {isComposerSession
+                      ? 'Ask Claude to inspect this repo, explain behavior, run tests, or make a change.'
+                      : 'When this session has messages or tool output, they will appear here.'}
+                  </p>
                   {isComposerSession && (
                     <div className="empty-prompts" aria-label="Prompt suggestions">
                       {emptyStatePrompts.map((prompt) => (
@@ -155,7 +208,11 @@ export default function ConversationWorkspace({
           />
         </>
       ) : (
-        <div className="empty-state">Create or select a session.</div>
+        <section className="empty-state conversation-empty" aria-label="No session selected">
+          <span className="empty-eyebrow">Claude Remote Web</span>
+          <h3>No chat selected.</h3>
+          <p>Create a new chat or choose one from the sidebar to start working with Claude.</p>
+        </section>
       )}
     </main>
   );

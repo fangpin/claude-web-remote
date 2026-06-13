@@ -334,6 +334,10 @@ async function installApiMocks(page: Page) {
     if (path === '/api/config') {
       return json(configResponse);
     }
+    if (path.endsWith('/transcript')) {
+      const sessionId = path.match(/\/api\/sessions\/([^/]+)\/transcript/)?.[1];
+      return json({ events: visualEvents.filter((event) => event.sessionId === sessionId) });
+    }
     if (path.endsWith('/tasks')) {
       return json({ background: [], finished: [] });
     }
@@ -501,7 +505,7 @@ test('Claude-like UI stays readable across key viewports', async ({ page }) => {
   await expectNoHorizontalElementOverflow(events, 'event stream');
 
   const viewport = test.info().project.use.viewport!;
-  if (viewport.width > 1020) {
+  if (viewport.width > 1100) {
     await boxFor(inspector, 'session inspector');
     await expect(inspector.getByRole('button', { name: 'Hide', exact: true })).toBeVisible();
     await expect(page.getByRole('tabpanel', { name: 'Session tasks' })).toContainText('visual smoke checks');
@@ -685,7 +689,7 @@ test('empty search results and no-task inspector states stay stable', async ({ p
   await search.fill('definitely-no-session-matches-this-query');
 
   const sidebar = page.getByRole('complementary', { name: 'Session navigation' });
-  await expect(sidebar).toContainText('No sessions match "definitely-no-session-matches-this-query".');
+  await expect(sidebar).toContainText('No chats match "definitely-no-session-matches-this-query".');
   await expectNoHorizontalPageOverflow(page);
   await expectNoHorizontalElementOverflow(sidebar, 'empty search sidebar');
 

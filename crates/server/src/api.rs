@@ -55,6 +55,7 @@ pub fn build_router(state: AppState, web_dir: Option<PathBuf>) -> Router {
         .route("/tasks", get(list_tasks))
         .route("/sessions", get(list_sessions).post(create_session))
         .route("/sessions/{id}", get(get_session).delete(delete_session))
+        .route("/sessions/{id}/transcript", get(list_session_transcript))
         .route("/sessions/{id}/tasks", get(list_session_tasks))
         .route("/sessions/{id}/input", post(send_input))
         .route("/sessions/{id}/stop", post(stop_session))
@@ -125,6 +126,16 @@ async fn list_session_tasks(
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
     Ok(Json(json!(state.manager.tasks_for_session(id).await?)))
+}
+
+async fn list_session_transcript(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Query(query): Query<EventsQuery>,
+) -> AppResult<Json<serde_json::Value>> {
+    Ok(Json(
+        json!({ "events": state.manager.transcript_after(id, query.after_id.unwrap_or(0)).await? }),
+    ))
 }
 
 async fn send_input(
@@ -476,6 +487,43 @@ done
                 .unwrap()
                 .contains("is archived; unarchive it before continuing")
         );
+    }
+
+    #[tokio::test]
+    async fn transcript_route_replays_archived_session_events() {
+        let temp = tempfile::tempdir().unwrap();
+        let state = test_state(&temp).await;
+        let session = state
+            .manager
+            .create_session(CreateSessionRequest {
+                cwd: temp.path().to_path_buf(),
+                name: Some("archived-transcript".to_string()),
+                permission_mode: None,
+                worktree: None,
+            })
+            .await
+            .unwrap();
+        state.manager.stop_session(session.id).await.unwrap();
+        state.manager.delete_session(session.id).await.unwrap();
+        let app = build_router(state, None);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/sessions/{}/transcript", session.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(body["events"].as_array().unwrap().len() > 0);
     }
 
     #[tokio::test]

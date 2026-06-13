@@ -1,4 +1,4 @@
-import type { ConfigValues, CreateSessionInput, ManagedConfig, SessionInfo, TaskGroups } from './types';
+import type { ConfigValues, CreateSessionInput, ManagedConfig, SessionInfo, TaskGroups, UiEvent } from './types';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const requestInit: RequestInit | undefined = init
@@ -35,6 +35,14 @@ export async function listTasks(): Promise<TaskGroups> {
 
 export async function listSessionTasks(sessionId: string): Promise<TaskGroups> {
   return request<TaskGroups>(`/api/sessions/${sessionId}/tasks`);
+}
+
+export async function listSessionEvents(sessionId: string, afterId = 0): Promise<UiEvent[]> {
+  const params = new URLSearchParams();
+  if (afterId > 0) params.set('afterId', String(afterId));
+  const query = params.toString();
+  const result = await request<{ events: UiEvent[] }>(`/api/sessions/${sessionId}/transcript${query ? `?${query}` : ''}`);
+  return Array.isArray(result.events) ? result.events : [];
 }
 
 export async function createSession(input: CreateSessionInput): Promise<SessionInfo> {

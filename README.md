@@ -217,7 +217,7 @@ npm --prefix web run test:visual
 Expected current coverage:
 
 - `cargo fmt --manifest-path Cargo.toml -- --check` passes
-- `cargo test --manifest-path Cargo.toml` is currently red with backend failures
+- `cargo test --manifest-path Cargo.toml` passes
 - Frontend Vitest suite passes
 - Frontend production build succeeds
 - Frontend Playwright visual smoke checks pass across wide desktop, desktop, and narrow viewports without screenshot snapshots

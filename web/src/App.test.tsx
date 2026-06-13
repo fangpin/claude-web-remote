@@ -232,6 +232,9 @@ beforeEach(() => {
     if (url.endsWith('/tasks')) {
       return jsonResponse(emptyTaskGroups);
     }
+    if (url.endsWith('/transcript') || url.includes('/transcript?')) {
+      return jsonResponse({ events: [] });
+    }
     if (url === '/api/sessions/s1/archive' && init?.method === 'POST') {
       return jsonResponse({ ...sessions[0], deletedAt: '2026-06-12T00:00:00Z', updatedAt: '2026-06-12T00:00:00Z' });
     }
@@ -479,8 +482,69 @@ describe('App', () => {
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search sessions' }), { target: { value: 'missing-branch' } });
 
     expect(screen.getByRole('heading', { name: 'Search results' })).toBeInTheDocument();
-    expect(screen.getByText('No sessions match "missing-branch".')).toBeInTheDocument();
+    expect(screen.getByText('No chats match "missing-branch".')).toBeInTheDocument();
     expect(screen.getByText('Try a repo name, branch, path, or status.')).toBeInTheDocument();
+  });
+
+  it('keeps session list failures inside the sidebar with retry details', async () => {
+    let shouldFail = true;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/sessions') {
+        if (shouldFail) return jsonResponse({ error: 'database unavailable' }, 503);
+        return jsonResponse({ sessions: defaultSessions });
+      }
+      if (url === '/api/tasks' || url.endsWith('/tasks')) return jsonResponse(emptyTaskGroups);
+      if (url.endsWith('/transcript')) return jsonResponse({ events: [] });
+      return jsonResponse({ ok: true });
+    });
+
+    render(<App />);
+
+    const sidebar = await screen.findByRole('complementary', { name: 'Session navigation' });
+    expect(within(sidebar).getByText('Could not load chats.')).toBeInTheDocument();
+    expect(within(sidebar).getByText('Details')).toBeInTheDocument();
+    expect(screen.getByRole('main', { name: 'Conversation workspace' })).toHaveTextContent('No chat selected.');
+
+    shouldFail = false;
+    fireEvent.click(within(sidebar).getByRole('button', { name: 'Retry' }));
+
+    expect(await screen.findByRole('heading', { name: 'Repo One' })).toBeInTheDocument();
+  });
+
+  it('shows transcript failures with details and reload affordance', async () => {
+    let shouldFailTranscript = true;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/sessions' && !init) return jsonResponse({ sessions: defaultSessions });
+      if (url === '/api/tasks' || url.endsWith('/tasks')) return jsonResponse(emptyTaskGroups);
+      if (url === '/api/sessions/s1/transcript') {
+        if (shouldFailTranscript) return jsonResponse({ error: 'transcript store unavailable' }, 500);
+        return jsonResponse({
+          events: [
+            {
+              id: 7,
+              sessionId: 's1',
+              time: '2026-06-11T00:00:00Z',
+              kind: 'assistant',
+              payload: { message: 'Recovered transcript' }
+            }
+          ]
+        });
+      }
+      if (url.endsWith('/transcript')) return jsonResponse({ events: [] });
+      return jsonResponse({ ok: true });
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText('Could not load the latest transcript.')).toBeInTheDocument();
+    expect(screen.getByText('Details')).toBeInTheDocument();
+
+    shouldFailTranscript = false;
+    fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
+
+    expect(await screen.findByText('Recovered transcript')).toBeInTheDocument();
   });
 
   it('shows slash command autocomplete and completes without sending input', async () => {
@@ -644,6 +708,7 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByRole('heading', { name: 'What would you like Claude to do?' })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/transcript', undefined);
     fireEvent.click(screen.getByRole('button', { name: 'Run the relevant tests' }));
 
     expect(screen.getByLabelText('Message')).toHaveValue('Run the relevant tests');
@@ -769,7 +834,7 @@ describe('App', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s3/unarchive', expect.objectContaining({ method: 'POST' })));
     await waitFor(() => expect(screen.queryByRole('button', { name: /Archived Repo/ })).not.toBeInTheDocument());
-    expect(screen.getByRole('heading', { name: 'No archived sessions.' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'No archived chats.' })).toBeInTheDocument();
   });
 
   it('deletes archived session data from the archived list', async () => {
@@ -782,7 +847,7 @@ describe('App', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s3?permanent=true', expect.objectContaining({ method: 'DELETE' })));
     await waitFor(() => expect(screen.queryByRole('button', { name: /Archived Repo/ })).not.toBeInTheDocument());
-    expect(screen.getByRole('heading', { name: 'No archived sessions.' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'No archived chats.' })).toBeInTheDocument();
   });
 
   it('ignores stale active list responses after switching to archived mode', async () => {

@@ -427,6 +427,15 @@ impl SessionManager {
         self.store.load_events_after(session_id, after_id).await
     }
 
+    pub async fn transcript_after(
+        &self,
+        session_id: Uuid,
+        after_id: u64,
+    ) -> AppResult<Vec<UiEvent>> {
+        let _meta = self.store.load_meta(session_id).await?;
+        self.store.load_events_after(session_id, after_id).await
+    }
+
     async fn stop_running_process(&self, session_id: Uuid) -> AppResult<()> {
         let running = self.running.lock().await.remove(&session_id);
         if let Some(session) = running {

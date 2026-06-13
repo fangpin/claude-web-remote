@@ -23,6 +23,7 @@ type Props = {
   cwd: string;
   isListLoading: boolean;
   isNewSessionOpen: boolean;
+  listError: string | null;
   listMode: SessionListMode;
   permissionMode: string;
   recentDirectories: string[];
@@ -39,6 +40,7 @@ type Props = {
   onSetSessionSearch: (search: string) => void;
   onSetUseWorktree: (useWorktree: boolean) => void;
   onToggleNewSession: () => void;
+  onRetryList: () => void;
 };
 
 const permissionModeDescriptions: Record<string, string> = {
@@ -131,6 +133,7 @@ export default function SessionSidebar({
   cwd,
   isListLoading,
   isNewSessionOpen,
+  listError,
   listMode,
   permissionMode,
   recentDirectories,
@@ -146,7 +149,8 @@ export default function SessionSidebar({
   onSetPermissionMode,
   onSetSessionSearch,
   onSetUseWorktree,
-  onToggleNewSession
+  onToggleNewSession,
+  onRetryList
 }: Props) {
   const searchQuery = sessionSearch.trim();
   const sections = buildSessionSections(visibleSessions, listMode);
@@ -269,20 +273,41 @@ export default function SessionSidebar({
             aria-label="Search sessions"
           />
         </label>
-        {isListLoading && <p className="muted">Loading sessions...</p>}
-        {!isListLoading && sessions.length === 0 && (
+        {isListLoading && (
+          <div className="session-skeletons" aria-label="Loading sessions">
+            {Array.from({ length: 4 }, (_, index) => (
+              <div className="session-skeleton" key={index}>
+                <span />
+                <span />
+                <span />
+              </div>
+            ))}
+          </div>
+        )}
+        {!isListLoading && listError && (
+          <div className="session-empty session-empty-error" role="alert">
+            <h3>Could not load chats.</h3>
+            <p>The session list did not respond. You can retry without leaving this chat surface.</p>
+            <button type="button" onClick={onRetryList}>Retry</button>
+            <details>
+              <summary>Details</summary>
+              <pre>{listError}</pre>
+            </details>
+          </div>
+        )}
+        {!isListLoading && !listError && sessions.length === 0 && (
           <div className="session-empty">
-            <h3>{listMode === 'archived' ? 'No archived sessions.' : 'No sessions yet.'}</h3>
+            <h3>{listMode === 'archived' ? 'No archived chats.' : 'No chats yet.'}</h3>
             <p>{listMode === 'archived' ? 'Archived chats will land here.' : 'Start with New chat and choose a working directory.'}</p>
           </div>
         )}
-        {!isListLoading && sessions.length > 0 && visibleSessions.length === 0 && (
+        {!isListLoading && !listError && sessions.length > 0 && visibleSessions.length === 0 && (
           <div className="session-empty">
-            <h3>No sessions match "{searchQuery}".</h3>
+            <h3>No chats match "{searchQuery}".</h3>
             <p>Try a repo name, branch, path, or status.</p>
           </div>
         )}
-        {!isListLoading && visibleSessions.length > 0 && (
+        {!isListLoading && !listError && visibleSessions.length > 0 && (
           <div className="session-sections">
             {sections.map((section) => (
               <div className={`session-section session-section-${section.key}`} key={section.key}>

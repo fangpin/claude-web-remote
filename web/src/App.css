@@ -635,6 +635,85 @@ button.danger:hover {
   overflow-wrap: anywhere;
 }
 
+.session-empty-error {
+  border-style: solid;
+  border-color: #e2b4ab;
+  background: #fff8f6;
+}
+
+.session-empty-error button {
+  justify-self: start;
+  margin-top: 4px;
+}
+
+.session-empty-error details,
+.api-error-banner details {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.session-empty-error summary,
+.api-error-banner summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.session-empty-error pre,
+.api-error-banner pre {
+  max-height: 180px;
+  overflow: auto;
+  margin: 8px 0 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-soft);
+  background: var(--surface-2);
+  padding: 9px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.session-skeletons {
+  display: grid;
+  gap: 7px;
+  padding: 0 4px;
+}
+
+.session-skeleton,
+.conversation-skeleton {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgb(255 253 250 / 0.66);
+}
+
+.session-skeleton {
+  display: grid;
+  gap: 8px;
+  padding: 12px 10px;
+}
+
+.session-skeleton span,
+.conversation-skeleton span {
+  display: block;
+  height: 10px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #eee7dc 0%, #f8f4ed 45%, #eee7dc 90%);
+  background-size: 220% 100%;
+  animation: skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+.session-skeleton span:nth-child(1) {
+  width: 72%;
+}
+
+.session-skeleton span:nth-child(2) {
+  width: 92%;
+}
+
+.session-skeleton span:nth-child(3) {
+  width: 48%;
+}
+
 .session-empty p {
   color: var(--muted);
   font-size: 12px;
@@ -731,6 +810,56 @@ button.danger:hover {
   background: #fbf3df;
   padding: 10px 20px;
   font-size: 13px;
+}
+
+.api-error-banner,
+.connection-note {
+  display: grid;
+  gap: 8px;
+  border-bottom: 1px solid #e8d6b3;
+  color: var(--warning);
+  background: #fbf3df;
+  padding: 10px 20px;
+  font-size: 13px;
+}
+
+.api-error-banner {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  border-bottom-color: #e7c0b7;
+  color: var(--danger);
+  background: #fff8f6;
+}
+
+.api-error-banner > div:first-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.api-error-banner strong,
+.api-error-banner span {
+  overflow-wrap: anywhere;
+}
+
+.api-error-banner span {
+  color: var(--text-soft);
+}
+
+.api-error-banner button {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.api-error-banner details {
+  grid-column: 1 / -1;
+}
+
+.api-error-banner .inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
 }
 
 .actions {
@@ -1368,6 +1497,30 @@ button.danger:hover {
   text-align: center;
 }
 
+.conversation-skeleton {
+  display: grid;
+  gap: 14px;
+  max-width: 720px;
+  margin: 30px auto;
+  padding: 18px;
+}
+
+.conversation-skeleton span {
+  height: 14px;
+}
+
+.conversation-skeleton span:nth-child(1) {
+  width: 64%;
+}
+
+.conversation-skeleton span:nth-child(2) {
+  width: 94%;
+}
+
+.conversation-skeleton span:nth-child(3) {
+  width: 78%;
+}
+
 .conversation-empty h3,
 .conversation-empty p {
   margin: 0;
@@ -1763,6 +1916,15 @@ button.danger:hover {
   color: var(--muted);
 }
 
+@keyframes skeleton-pulse {
+  0% {
+    background-position: 160% 0;
+  }
+  100% {
+    background-position: -60% 0;
+  }
+}
+
 .config-panel {
   display: grid;
   align-content: start;
@@ -1818,7 +1980,7 @@ button.danger:hover {
   max-width: 720px;
 }
 
-@media (max-width: 1020px) {
+@media (max-width: 1100px) {
   html,
   body,
   #root {
@@ -1852,6 +2014,14 @@ button.danger:hover {
     min-height: 0;
     overflow: auto;
     padding-bottom: 26px;
+  }
+
+  .api-error-banner {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .api-error-banner .inline-actions {
+    justify-content: flex-start;
   }
 
   .conversation-empty {

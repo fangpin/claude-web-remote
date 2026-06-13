@@ -35,6 +35,7 @@ export function useSessions({
   const [permissionMode, setPermissionMode] = useState('bypassPermissions');
   const [useWorktree, setUseWorktree] = useState(false);
   const [isListLoading, setIsListLoading] = useState(false);
+  const [listError, setListError] = useState<string | null>(null);
   const listRefreshIdRef = useRef(0);
   const skipNextListRefresh = useRef(false);
   const callbacksRef = useRef({
@@ -97,6 +98,7 @@ export function useSessions({
       setActiveId(null);
     }
     try {
+      setListError(null);
       const loaded = await listSessions({ archivedOnly: mode === 'archived' });
       if (refreshId !== listRefreshIdRef.current) return;
       setSessions(loaded);
@@ -111,7 +113,9 @@ export function useSessions({
       if (mode === 'active') callbacksRef.current.onTasksChanged?.();
     } catch (err: unknown) {
       if (refreshId !== listRefreshIdRef.current) return;
-      callbacksRef.current.setError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      setListError(message);
+      if (!options.reset) callbacksRef.current.setError(message);
     } finally {
       if (refreshId !== listRefreshIdRef.current) return;
       if (options.reset) setIsListLoading(false);
@@ -295,6 +299,7 @@ export function useSessions({
     isActiveSessionMode,
     isListLoading,
     isNewSessionOpen,
+    listError,
     listMode: listModeState,
     permissionMode,
     recentDirectories,
@@ -309,6 +314,7 @@ export function useSessions({
     onStop,
     onUnarchive,
     refreshSessions,
+    retryList: () => refreshSessions(listModeState, { reset: true }),
     selectSession,
     setCwd,
     setIsNewSessionOpen,
