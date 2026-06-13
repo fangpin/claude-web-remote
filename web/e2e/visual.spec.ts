@@ -40,6 +40,39 @@ const sessions = [
   },
   {
     ...baseSession,
+    id: 's-starting',
+    name: 'Starting Session',
+    cwd: '/Users/example/repos/starting-session-validation-with-long-directory-name',
+    status: 'starting',
+    runtimeStatus: 'starting',
+    claudeSessionId: null
+  },
+  {
+    ...baseSession,
+    id: 's-markdown',
+    name: 'Markdown Diff Review',
+    cwd: '/Users/example/repos/markdown-rendering-validation-with-long-directory-name',
+    status: 'running',
+    runtimeStatus: 'waiting'
+  },
+  {
+    ...baseSession,
+    id: 's-risk',
+    name: 'Waiting Risk Review',
+    cwd: '/Users/example/repos/risk-review-validation-with-long-directory-name',
+    status: 'running',
+    runtimeStatus: 'waiting'
+  },
+  {
+    ...baseSession,
+    id: 's-long',
+    name: 'Long Conversation Scroll',
+    cwd: '/Users/example/repos/long-conversation-scroll-validation-with-long-directory-name',
+    status: 'running',
+    runtimeStatus: 'waiting'
+  },
+  {
+    ...baseSession,
     id: 's3',
     name: 'Stopped Session',
     cwd: '/Users/example/repos/stopped-project-with-a-long-directory-name',
@@ -68,8 +101,8 @@ const sessions = [
     id: 's6',
     name: 'Failed Tool Session',
     cwd: '/Users/example/repos/failed-tool-output-validation-with-long-directory-name',
-    status: 'running',
-    runtimeStatus: 'waiting'
+    status: 'failed',
+    runtimeStatus: 'failed'
   }
 ];
 
@@ -123,7 +156,7 @@ const taskGroups = {
       id: 's6:failed-bash',
       sessionId: 's6',
       sessionName: 'Failed Tool Session',
-      sessionCwd: sessions[5].cwd,
+      sessionCwd: sessions.find((session) => session.id === 's6')!.cwd,
       toolKind: 'Bash',
       title: 'Bash: npm --prefix web run build -- --simulate-failure-with-a-long-command-title',
       status: 'failed',
@@ -137,6 +170,37 @@ const taskGroups = {
 };
 
 const longToken = 'supercalifragilisticexpialidocious'.repeat(8);
+
+const markdownDiff = `diff --git a/web/src/App.css b/web/src/App.css
+index 1d2c3a4..5e6f7b8 100644
+--- a/web/src/App.css
++++ b/web/src/App.css
+@@ -42,7 +42,9 @@
+ .conversation-workspace {
+-  background: var(--panel);
++  background: linear-gradient(180deg, var(--panel), var(--panel-muted));
++  border: 1px solid var(--hairline);
++  box-shadow: var(--native-shadow);
+ }
+`;
+
+const longConversationEvents = Array.from({ length: 96 }, (_, index) => {
+  const id = 1000 + index;
+  const turn = index + 1;
+  const role = index % 2 === 0 ? 'user' : 'assistant';
+  return {
+    id,
+    sessionId: 's-long',
+    time: `2026-06-12T01:${String(Math.floor(index / 2)).padStart(2, '0')}:${String(index % 60).padStart(2, '0')}Z`,
+    kind: role,
+    payload: {
+      message:
+        role === 'user'
+          ? `Long scroll checkpoint ${turn}: verify the latest exchange remains reachable above the composer.`
+          : `Claude response ${turn}: the conversation keeps a stable internal scroll position while older events are hidden.`
+    }
+  };
+});
 
 const visualEvents = [
   {
@@ -275,8 +339,93 @@ const visualEvents = [
         'Error: command failed with exit code 1\nstderr: missing file /Users/example/repos/claude-web-remote/web/src/components/really-long-path/failure-case.tsx\n' +
         longToken
     }
+  },
+  {
+    id: 22,
+    sessionId: 's6',
+    time: '2026-06-12T00:03:02Z',
+    kind: 'error',
+    payload: {
+      message: 'The daemon lost the Claude child process after the failed command. Restart from this checkpoint.'
+    }
+  },
+  {
+    id: 40,
+    sessionId: 's-markdown',
+    time: '2026-06-12T00:04:00Z',
+    kind: 'user',
+    payload: { message: 'Show the visual baseline diff and explain the markdown rendering.' }
+  },
+  {
+    id: 41,
+    sessionId: 's-markdown',
+    time: '2026-06-12T00:04:01Z',
+    kind: 'assistant',
+    payload: {
+      message:
+        '## Visual baseline review\n\nThe chat surface should stay focused on the transcript while preserving rich rendering.\n\n- Markdown lists wrap inside the message bubble.\n- Inline `code` remains readable.\n- Fenced code uses the shared code frame.\n\n```tsx\nfunction BaselineCard() {\n  return <article className="conversation-block">Stable scene</article>;\n}\n```'
+    }
+  },
+  {
+    id: 42,
+    sessionId: 's-markdown',
+    time: '2026-06-12T00:04:02Z',
+    kind: 'tool',
+    payload: {
+      type: 'tool_use',
+      id: 'tool-edit-diff',
+      name: 'Edit',
+      input: {
+        file_path: '/Users/example/repos/claude-web-remote/web/src/App.css',
+        old_string: 'background: var(--panel);',
+        new_string: 'background: linear-gradient(180deg, var(--panel), var(--panel-muted));'
+      }
+    }
+  },
+  {
+    id: 43,
+    sessionId: 's-markdown',
+    time: '2026-06-12T00:04:03Z',
+    kind: 'tool',
+    payload: {
+      type: 'tool_result',
+      tool_use_id: 'tool-edit-diff',
+      content: markdownDiff
+    }
+  },
+  {
+    id: 60,
+    sessionId: 's-risk',
+    time: '2026-06-12T00:05:00Z',
+    kind: 'user',
+    payload: { message: 'Pause here and review the risk before applying changes.' }
+  },
+  {
+    id: 61,
+    sessionId: 's-risk',
+    time: '2026-06-12T00:05:01Z',
+    kind: 'assistant',
+    payload: {
+      message:
+        '## Risk review\n\nClaude is waiting for approval before touching shared state.\n\n1. Confirm no production UI mock branch is introduced.\n2. Keep snapshots deterministic and generated from fixture data.\n3. Run visual tests after updating baselines.'
+    }
+  },
+  {
+    id: 62,
+    sessionId: 's-risk',
+    time: '2026-06-12T00:05:02Z',
+    kind: 'tool',
+    payload: {
+      type: 'tool_use',
+      id: 'risk-review-agent',
+      name: 'Agent',
+      input: {
+        description: 'Review risk before applying visual baseline changes',
+        subagent_type: 'code-reviewer'
+      }
+    }
   }
-];
+].concat(longConversationEvents);
 
 const configResponse = {
   path: '/Users/example/.claude-remote-web/config.toml',
@@ -325,11 +474,38 @@ async function installApiMocks(page: Page) {
     if (path === '/api/tasks') {
       return json(taskGroups);
     }
+    const transcriptMatch = path.match(/^\/api\/sessions\/([^/]+)\/transcript$/);
+    if (transcriptMatch) {
+      const sessionId = transcriptMatch[1];
+      const afterId = Number(url.searchParams.get('afterId') ?? '0');
+      return json({ events: visualEvents.filter((event) => event.sessionId === sessionId && event.id > afterId) });
+    }
     if (path === '/api/sessions/s1/tasks') {
       return json({ background: taskGroups.background, finished: [taskGroups.finished[0]] });
     }
     if (path === '/api/sessions/s6/tasks') {
       return json({ background: [], finished: [taskGroups.finished[1]] });
+    }
+    if (path === '/api/sessions/s-risk/tasks') {
+      return json({
+        background: [
+          {
+            id: 's-risk:agent-review',
+            sessionId: 's-risk',
+            sessionName: 'Waiting Risk Review',
+            sessionCwd: '/Users/example/repos/risk-review-validation-with-long-directory-name',
+            toolKind: 'Agent',
+            title: 'Agent: Review risk before applying visual baseline changes',
+            status: 'background',
+            startedAt: '2026-06-12T00:05:02Z',
+            finishedAt: null,
+            startEventId: 62,
+            finishEventId: null,
+            summary: 'Waiting for human approval before applying visual fixture updates.'
+          }
+        ],
+        finished: []
+      });
     }
     if (path === '/api/config') {
       return json(configResponse);
@@ -465,6 +641,33 @@ async function showInspectorIfNeeded(page: Page) {
   return inspector;
 }
 
+async function prepareForScreenshot(page: Page) {
+  await page.evaluate(() => {
+    document.documentElement.style.scrollBehavior = 'auto';
+    document.querySelector<HTMLElement>('.events')?.style.setProperty('scroll-behavior', 'auto');
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+  });
+  await page.evaluate(() => document.fonts?.ready);
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+}
+
+async function expectVisualSnapshot(page: Page, name: string) {
+  await prepareForScreenshot(page);
+  await expect(page).toHaveScreenshot(name);
+}
+
+async function selectSession(page: Page, name: RegExp | string) {
+  await page.getByRole('button', { name }).evaluate((element) => {
+    (element as HTMLButtonElement).click();
+  });
+}
+
+function isProject(name: string) {
+  return test.info().project.name === name;
+}
+
 test.beforeEach(async ({ page }) => {
   await installWebSocketMock(page);
   await installApiMocks(page);
@@ -501,7 +704,7 @@ test('Claude-like UI stays readable across key viewports', async ({ page }) => {
   await expectNoHorizontalElementOverflow(events, 'event stream');
 
   const viewport = test.info().project.use.viewport!;
-  if (viewport.width > 1020) {
+  if (viewport.width >= 1200) {
     await boxFor(inspector, 'session inspector');
     await expect(inspector.getByRole('button', { name: 'Hide', exact: true })).toBeVisible();
     await expect(page.getByRole('tabpanel', { name: 'Session tasks' })).toContainText('visual smoke checks');
@@ -678,6 +881,114 @@ test('long multiline composer drafts cap height and stay inside the viewport', a
 
   await expectViewportContains(composer, 'long multiline composer');
   await expectNoHorizontalPageOverflow(page);
+});
+
+test.describe('screenshot baselines', () => {
+  test('empty and starting chat states have stable baselines', async ({ page }) => {
+    await selectSession(page, /Empty Conversation Starter/);
+    await expect(page.getByRole('region', { name: 'Conversation starter' })).toContainText('What would you like Claude to do?');
+    await expectVisualSnapshot(page, 'empty-start-conversation.png');
+
+    if (!isProject('narrow')) {
+      await selectSession(page, /Starting Session/);
+      await expect(page.getByRole('form', { name: 'Message composer' })).toContainText(
+        'Claude is starting. You can send once the session is ready.'
+      );
+      await expectVisualSnapshot(page, 'starting-session-disabled-composer.png');
+    }
+  });
+
+  test('session list grouping, worktree pin branch, and archived mode have stable baselines', async ({ page }) => {
+    const sidebar = page.getByRole('complementary', { name: 'Session navigation' });
+    await expect(sidebar).toContainText('Waiting');
+    await expect(sidebar).toContainText('Running');
+    await expect(sidebar).toContainText('Recent stopped');
+    await expect(sidebar).toContainText('pin/visual-responsive-layout-validation-with-long-branch-name');
+    await expect(sidebar).toContainText('Failed');
+    await expectVisualSnapshot(page, 'session-list-active-worktree-pin.png');
+
+    await page.getByRole('button', { name: 'Archived sessions' }).click();
+    await expect(page.getByRole('button', { name: /Archived Visual Session/ })).toBeVisible();
+    await expect(page.getByRole('main', { name: 'Conversation workspace' })).toContainText('Archived Claude session');
+    await expectVisualSnapshot(page, 'session-list-archived-readonly.png');
+  });
+
+  test('active chat markdown, code, and diff rendering has a stable baseline', async ({ page }) => {
+    test.skip(isProject('narrow'), 'covered by dedicated narrow composer and scroll baselines');
+
+    await selectSession(page, /Markdown Diff Review/);
+    await expect(page.getByRole('heading', { name: 'Visual baseline review' })).toBeVisible();
+    await expect(page.locator('.message-code')).toContainText('BaselineCard');
+    const diffDetails = page.locator('.tool-block.result-diff details.collapsed-result');
+    await diffDetails.evaluate((element) => {
+      (element as HTMLDetailsElement).open = true;
+    });
+    await expect(page.locator('.tool-result-pre.diff')).toContainText('native-shadow');
+    await expectVisualSnapshot(page, 'active-chat-markdown-code-diff.png');
+  });
+
+  test('tool activity and inspector timelines have stable baselines', async ({ page }) => {
+    test.skip(!isProject('wide-desktop'), 'inspector timeline baseline is kept to the widest stable viewport');
+
+    const inspector = await showInspectorIfNeeded(page);
+    await page.getByRole('tab', { name: 'Activity' }).click();
+    await expect(page.getByRole('tabpanel', { name: 'Activity' })).toContainText('Bash');
+    await expect(page.getByRole('tabpanel', { name: 'Activity' })).toContainText('Agent');
+    await expectVisualSnapshot(page, 'tool-activity-inspector-timeline.png');
+
+    await page.getByRole('tab', { name: 'All tasks' }).click();
+    await expect(page.getByRole('tabpanel', { name: 'All tasks' })).toContainText('Running visual smoke checks');
+    await expectViewportContains(inspector, 'all-tasks inspector');
+    await expectVisualSnapshot(page, 'tool-activity-inspector-all-tasks.png');
+  });
+
+  test('waiting risk review state has a stable baseline', async ({ page }) => {
+    test.skip(isProject('narrow'), 'narrow state is covered by mobile composer baselines');
+
+    await selectSession(page, /Waiting Risk Review/);
+    await expect(page.getByRole('heading', { name: 'Risk review', exact: true })).toBeVisible();
+    await expect(page.locator('.task-block.running')).toContainText('Review risk before applying visual baseline changes');
+    const inspector = await showInspectorIfNeeded(page);
+    await expect(inspector).toContainText('Waiting for human approval');
+    await expectVisualSnapshot(page, 'waiting-risk-review.png');
+  });
+
+  test('failed session and error state has a stable baseline', async ({ page }) => {
+    test.skip(isProject('desktop'), 'failed state is covered on wide desktop and narrow breakpoints');
+
+    await selectSession(page, /Failed Tool Session/);
+    await expect(page.locator('.tool-block.failed')).toContainText('exit code 1');
+    await expect(page.locator('.error-block')).toContainText('lost the Claude child process');
+    await showInspectorIfNeeded(page);
+    await expectVisualSnapshot(page, 'failed-tool-and-error.png');
+  });
+
+  test('narrow multiline composer has a stable baseline', async ({ page }) => {
+    test.skip(!isProject('narrow'), 'mobile composer baseline only runs in the narrow project');
+
+    const message = page.getByRole('textbox', { name: 'Message' });
+    const lines = Array.from({ length: 18 }, (_, index) => `Line ${index + 1}: keep the mobile composer native-like and scrollable.`);
+    await message.fill(lines.join('\n'));
+    await expect(page.getByRole('form', { name: 'Message composer' })).toContainText('Ready to send');
+    await expectVisualSnapshot(page, 'narrow-composer-multiline.png');
+
+    await message.fill('/he');
+    await expect(page.getByRole('listbox', { name: 'Claude command suggestions' })).toContainText('/help');
+    await expectVisualSnapshot(page, 'narrow-composer-autocomplete.png');
+  });
+
+  test('long conversation bottom scroll has a stable baseline', async ({ page }) => {
+    await selectSession(page, /Long Conversation Scroll/);
+    await expect(page.locator('.event-limit-note')).toContainText('Showing latest 80 events');
+    const events = page.locator('.events');
+    await events.evaluate((element) => {
+      element.style.scrollBehavior = 'auto';
+      element.scrollTop = element.scrollHeight;
+    });
+    await expect(page.locator('.message-block.assistant').last()).toContainText('stable internal scroll position');
+    await expectComposerPinnedBelowEvents(page);
+    await expectVisualSnapshot(page, 'long-conversation-bottom-scroll.png');
+  });
 });
 
 test('empty search results and no-task inspector states stay stable', async ({ page }) => {
