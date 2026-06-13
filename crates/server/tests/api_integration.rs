@@ -235,6 +235,18 @@ async fn seed_task_session(store: &EventStore, name: &str) -> Uuid {
     session_id
 }
 
+async fn wait_for_file_content(path: &Path, predicate: impl Fn(&str) -> bool) -> String {
+    for _ in 0..50 {
+        if let Ok(content) = fs::read_to_string(path)
+            && predicate(&content)
+        {
+            return content;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    fs::read_to_string(path).unwrap_or_default()
+}
+
 #[tokio::test]
 async fn creates_session_accepts_input_and_streams_events() {
     let temp = tempfile::tempdir().unwrap();
@@ -260,14 +272,18 @@ async fn creates_session_accepts_input_and_streams_events() {
         .await
         .unwrap();
 
-    client
+    let input_response: Value = client
         .post(format!("http://{addr}/api/sessions/{session_id}/input"))
         .json(&json!({ "text": "hello" }))
         .send()
         .await
         .unwrap()
         .error_for_status()
+        .unwrap()
+        .json()
+        .await
         .unwrap();
+    assert_eq!(input_response["session"]["name"], "demo");
 
     let saw_ack = tokio::time::timeout(std::time::Duration::from_secs(5), async {
         for _ in 0..5 {
@@ -284,6 +300,46 @@ async fn creates_session_accepts_input_and_streams_events() {
     .unwrap_or(false);
 
     assert!(saw_ack);
+}
+
+#[tokio::test]
+async fn first_input_returns_auto_named_session() {
+    let temp = tempfile::tempdir().unwrap();
+    let bin = fake_claude(temp.path());
+    let addr = spawn_app(&temp, vec![bin.to_string_lossy().to_string()]).await;
+    let client = reqwest::Client::new();
+
+    let created: Value = client
+        .post(format!("http://{addr}/api/sessions"))
+        .json(&json!({ "cwd": temp.path() }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let session_id = created["id"].as_str().unwrap().to_string();
+    assert!(created["name"].is_null());
+
+    let input_response: Value = client
+        .post(format!("http://{addr}/api/sessions/{session_id}/input"))
+        .json(&json!({ "text": "Explain the new chat naming flow in the web UI" }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        input_response["session"]["name"],
+        "Explain the new chat naming..."
+    );
 }
 
 #[tokio::test]
@@ -407,7 +463,7 @@ async fn restart_uses_persisted_claude_session_id() {
         .unwrap();
 
     let session_id = created["id"].as_str().unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    wait_for_file_content(&args_log, |args| args.contains("resume-session")).await;
 
     client
         .post(format!("http://{addr}/api/sessions/{session_id}/restart"))
@@ -417,8 +473,8 @@ async fn restart_uses_persisted_claude_session_id() {
         .error_for_status()
         .unwrap();
 
-    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-    let args = fs::read_to_string(args_log).unwrap();
+    let args =
+        wait_for_file_content(&args_log, |args| args.contains("--resume resume-session")).await;
     assert!(args.contains("--resume resume-session"));
 }
 
@@ -454,7 +510,7 @@ async fn wrapper_launcher_receives_native_args_after_prefix() {
         .unwrap();
 
     let session_id = created["id"].as_str().unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    wait_for_file_content(&args_log, |args| args.contains("resume-session")).await;
 
     client
         .post(format!("http://{addr}/api/sessions/{session_id}/restart"))
@@ -464,8 +520,11 @@ async fn wrapper_launcher_receives_native_args_after_prefix() {
         .error_for_status()
         .unwrap();
 
-    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-    let args = fs::read_to_string(args_log).unwrap();
+    let args = wait_for_file_content(&args_log, |args| {
+        args.contains("claude -m gpt-5.5 --skip-check -a --input-format stream-json")
+            && args.contains("--resume resume-session")
+    })
+    .await;
     assert!(args.contains("claude -m gpt-5.5 --skip-check -a --input-format stream-json"));
     assert!(args.contains("--resume resume-session"));
 }

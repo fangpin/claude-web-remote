@@ -181,11 +181,10 @@ In the Web UI:
 
 ```text
 Working directory: /path/to/remote/repo
-Name: optional display name
 Permission mode: bypassPermissions
 ```
 
-The daemon starts the configured launcher in that working directory and streams events back to the browser.
+The daemon starts the configured launcher in that working directory, streams events back to the browser, and names the session from the first user message.
 
 ## Data layout
 

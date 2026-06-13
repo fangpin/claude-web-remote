@@ -212,8 +212,8 @@ impl SessionManager {
         Ok(meta)
     }
 
-    pub async fn send_input(&self, session_id: Uuid, text: String) -> AppResult<()> {
-        let _meta = self.load_active_meta(session_id).await?;
+    pub async fn send_input(&self, session_id: Uuid, text: String) -> AppResult<SessionInfo> {
+        let meta = self.load_active_meta(session_id).await?;
         let mut event = UiEvent::new(0, session_id, EventKind::User, json!({ "text": text }));
         self.store.append_event_with_next_id(&mut event).await?;
 
@@ -225,7 +225,31 @@ impl SessionManager {
             (session.process.clone(), session.tx.clone())
         };
         let _ = tx.send(event);
-        process.send_input(&text).await
+        process.send_input(&text).await?;
+
+        let meta = if meta
+            .name
+            .as_ref()
+            .is_some_and(|name| !name.trim().is_empty())
+        {
+            meta
+        } else {
+            self.store
+                .update_meta(session_id, |meta| {
+                    if meta
+                        .name
+                        .as_ref()
+                        .is_some_and(|name| !name.trim().is_empty())
+                    {
+                        return Ok(());
+                    }
+                    meta.name = Some(generate_session_name(&text));
+                    meta.updated_at = Utc::now();
+                    Ok(())
+                })
+                .await?
+        };
+        self.session_info(meta).await
     }
 
     pub async fn stop_session(&self, session_id: Uuid) -> AppResult<()> {
@@ -703,6 +727,78 @@ fn running_runtime_status(meta: &SessionMeta, events: &[UiEvent]) -> SessionRunt
     }
 }
 
+fn generate_session_name(text: &str) -> String {
+    let normalized = text
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim_matches(is_title_boundary_punctuation)
+        .to_string();
+    if normalized.is_empty() {
+        return "New chat".to_string();
+    }
+
+    let mut title = String::new();
+    let mut has_cjk = false;
+    let max_chars = if normalized.chars().any(is_cjk) {
+        24
+    } else {
+        32
+    };
+    let mut word_count = 0;
+    for character in normalized.chars() {
+        has_cjk |= is_cjk(character);
+        if character.is_whitespace() {
+            word_count += 1;
+            if word_count >= 5 {
+                break;
+            }
+        }
+        if title.chars().count() >= max_chars {
+            break;
+        }
+        title.push(character);
+    }
+
+    let title = title
+        .trim()
+        .trim_matches(is_title_boundary_punctuation)
+        .to_string();
+
+    if title.is_empty() {
+        "New chat".to_string()
+    } else if !has_cjk && normalized.chars().count() > title.chars().count() {
+        format!("{title}...")
+    } else {
+        title
+    }
+}
+
+fn is_cjk(character: char) -> bool {
+    matches!(
+        character as u32,
+        0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF
+    )
+}
+
+fn is_title_boundary_punctuation(character: char) -> bool {
+    character.is_ascii_punctuation()
+        || matches!(
+            character as u32,
+            0x3001
+                | 0x3002
+                | 0xFF0C
+                | 0xFF1A
+                | 0xFF1B
+                | 0xFF01
+                | 0xFF1F
+                | 0x2018
+                | 0x2019
+                | 0x201C
+                | 0x201D
+        )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -828,6 +924,21 @@ done
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
         store.load_meta(session_id).await.unwrap()
+    }
+
+    async fn wait_for_event_kind(
+        store: &EventStore,
+        session_id: Uuid,
+        kind: EventKind,
+    ) -> Vec<UiEvent> {
+        for _ in 0..50 {
+            let events = store.load_events_after(session_id, 0).await.unwrap();
+            if events.iter().any(|event| event.kind == kind) {
+                return events;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        store.load_events_after(session_id, 0).await.unwrap()
     }
 
     async fn read_pid_file(path: &std::path::Path) -> Option<u32> {
@@ -1590,14 +1701,74 @@ done
             .send_input(session.id, "hello".to_string())
             .await
             .unwrap();
-        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
 
-        let events = store.load_events_after(session.id, 0).await.unwrap();
+        assert_eq!(
+            store.load_meta(session.id).await.unwrap().name,
+            Some("hello".to_string())
+        );
+        let events = wait_for_event_kind(&store, session.id, EventKind::Assistant).await;
         assert!(events.iter().any(|event| event.kind == EventKind::User));
         assert!(
             events
                 .iter()
                 .any(|event| event.kind == EventKind::Assistant)
+        );
+    }
+
+    #[tokio::test]
+    async fn first_input_generates_short_session_name() {
+        let temp = tempfile::tempdir().unwrap();
+        let bin = fake_claude(temp.path());
+        let store = EventStore::new(temp.path().join("data")).await.unwrap();
+        let manager = SessionManager::new(
+            store.clone(),
+            vec![bin.to_string_lossy().to_string()],
+            "acceptEdits".to_string(),
+            worktree_config(),
+        );
+
+        let session = manager
+            .create_session(CreateSessionRequest {
+                cwd: temp.path().to_path_buf(),
+                name: None,
+                permission_mode: None,
+                worktree: None,
+            })
+            .await
+            .unwrap();
+
+        let updated = manager
+            .send_input(
+                session.id,
+                "Now refactor the startup flow so new chats receive automatic names".to_string(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            updated.name,
+            Some("Now refactor the startup flow...".to_string())
+        );
+        assert_eq!(
+            store.load_meta(session.id).await.unwrap().name,
+            Some("Now refactor the startup flow...".to_string())
+        );
+
+        manager
+            .send_input(session.id, "do not rename this".to_string())
+            .await
+            .unwrap();
+        assert_eq!(
+            store.load_meta(session.id).await.unwrap().name,
+            Some("Now refactor the startup flow...".to_string())
+        );
+    }
+
+    #[test]
+    fn generated_session_names_handle_cjk_text() {
+        assert_eq!(
+            generate_session_name("现在new chat都是让用户手动输入一个名字。改成不需要用户输入名字"),
+            "现在new chat都是让用户手动输入一个名字"
         );
     }
 

@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
+import type { SessionInfo, SessionStatus } from './types';
 
 const baseSession = {
   permissionMode: 'acceptEdits',
@@ -10,7 +11,7 @@ const baseSession = {
   updatedAt: '2026-06-11T00:00:00Z'
 };
 
-const defaultSessions = [
+const defaultSessions: SessionInfo[] = [
   {
     ...baseSession,
     id: 's1',
@@ -62,7 +63,7 @@ const defaultSessions = [
   }
 ];
 
-const defaultDeletedSessions = [
+const defaultDeletedSessions: SessionInfo[] = [
   {
     ...baseSession,
     id: 's3',
@@ -113,8 +114,8 @@ const taskGroups = {
 
 const emptyTaskGroups = { background: [], finished: [] };
 
-let sessions = defaultSessions;
-let deletedSessions = defaultDeletedSessions;
+let sessions: SessionInfo[] = defaultSessions;
+let deletedSessions: SessionInfo[] = defaultDeletedSessions;
 let fetchMock: ReturnType<typeof vi.fn>;
 let scrollIntoViewMock: ReturnType<typeof vi.fn>;
 
@@ -206,7 +207,7 @@ beforeEach(() => {
       return jsonResponse({
         ...sessions[0],
         id: 's6',
-        name: body.name ?? 'New Repo',
+        name: body.name ?? null,
         cwd: body.cwd,
         worktree: body.worktree?.enabled
           ? {
@@ -270,8 +271,18 @@ beforeEach(() => {
         restartRequired: false
       }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
+    if (url === '/api/sessions/s1/input' && init?.method === 'POST') {
+      const body = JSON.parse(String(init.body));
+      return jsonResponse({
+        ok: true,
+        session: {
+          ...sessions[0],
+          name: body.text === 'do work' ? 'Do work' : body.text === 'Name this chat from the first prompt please' ? 'Name this chat from the...' : sessions[0].name
+        }
+      });
+    }
     if (url.endsWith('/input')) {
-      return jsonResponse({ ok: true });
+      return jsonResponse({ ok: true, session: null });
     }
     if (url.endsWith('/stop-and-remove-worktree')) {
       return jsonResponse({ ok: true });
@@ -375,19 +386,18 @@ describe('App', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'New chat' }));
     fireEvent.change(await screen.findByLabelText('Working directory'), { target: { value: '/repo/two' } });
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'New Repo' } });
     fireEvent.click(screen.getByLabelText('Use git worktree'));
     fireEvent.click(screen.getByText('Create session'));
 
-    expect((await screen.findAllByText('New Repo')).length).toBeGreaterThan(0);
+    expect(await screen.findByRole('heading', { name: '/repo/two' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Working directory')).not.toBeInTheDocument();
     const createCall = fetchMock.mock.calls.find(([url, init]) => url === '/api/sessions' && init?.method === 'POST');
     expect(JSON.parse(String(createCall?.[1]?.body))).toMatchObject({
       cwd: '/repo/two',
-      name: 'New Repo',
       permissionMode: 'bypassPermissions',
       worktree: { enabled: true }
     });
+    expect(JSON.parse(String(createCall?.[1]?.body))).not.toHaveProperty('name');
   });
 
   it('switches to active mode when creating from archived mode', async () => {
@@ -398,10 +408,9 @@ describe('App', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
     fireEvent.change(screen.getByLabelText('Working directory'), { target: { value: '/repo/two' } });
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'New Repo' } });
     fireEvent.click(screen.getByText('Create session'));
 
-    expect(await screen.findByRole('heading', { name: 'New Repo' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '/repo/two' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Active' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: 'Archived' })).toHaveAttribute('aria-pressed', 'false');
     expect(screen.queryByRole('button', { name: /Archived Repo/ })).not.toBeInTheDocument();
@@ -452,6 +461,7 @@ describe('App', () => {
     fireEvent.click(screen.getByText('Send'));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/input', expect.objectContaining({ method: 'POST' })));
+    expect(await screen.findByRole('heading', { name: 'Do work' })).toBeInTheDocument();
 
     fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -468,6 +478,28 @@ describe('App', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('input failed');
     expect(screen.getByLabelText('Message')).toHaveValue('retry work');
+  });
+
+  it('updates an unnamed chat with an auto-generated title after the first message', async () => {
+    sessions = [
+      {
+        ...baseSession,
+        id: 's1',
+        name: null,
+        cwd: '/repo/one',
+        status: 'running',
+        runtimeStatus: 'waiting'
+      }
+    ];
+
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: '/repo/one' })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Name this chat from the first prompt please' } });
+    fireEvent.click(screen.getByText('Send'));
+
+    expect(await screen.findByRole('heading', { name: 'Name this chat from the...' })).toBeInTheDocument();
   });
 
   it('renders actions by active session status and resumes stopped sessions', async () => {
@@ -512,7 +544,7 @@ describe('App', () => {
     expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
   });
 
-  it.each(['exited', 'failed'])('renders Resume and Archive actions for %s sessions', async (status) => {
+  it.each<SessionStatus>(['exited', 'failed'])('renders Resume and Archive actions for %s sessions', async (status) => {
     const name = `${status[0].toUpperCase()}${status.slice(1)} Repo`;
     sessions = [
       {

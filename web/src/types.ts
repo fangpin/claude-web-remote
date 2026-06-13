@@ -34,7 +34,6 @@ export type UiEvent = {
 
 export type CreateSessionInput = {
   cwd: string;
-  name?: string;
   permissionMode?: string;
   worktree?: {
     enabled: boolean;

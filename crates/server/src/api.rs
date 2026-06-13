@@ -135,8 +135,8 @@ async fn send_input(
     if request.text.trim().is_empty() {
         return Err(AppError::InvalidRequest("input text is empty".to_string()));
     }
-    state.manager.send_input(id, request.text).await?;
-    Ok(Json(json!({ "ok": true })))
+    let session = state.manager.send_input(id, request.text).await?;
+    Ok(Json(json!({ "ok": true, "session": session })))
 }
 
 async fn stop_session(
