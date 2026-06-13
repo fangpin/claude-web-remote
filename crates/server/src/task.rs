@@ -122,6 +122,24 @@ pub fn project_session_tasks(meta: &SessionMeta, events: &[UiEvent]) -> TaskGrou
     group_tasks(tasks.into_values().collect())
 }
 
+pub fn has_unfinished_tool_use(events: &[UiEvent]) -> bool {
+    let mut pending_starts: HashMap<String, ()> = HashMap::new();
+
+    for event in events {
+        for start in task_starts_from_event(event) {
+            pending_starts.entry(start.id).or_insert(());
+        }
+        for finish in task_finishes_from_event(event) {
+            pending_starts.remove(&finish.raw_id);
+        }
+        if is_session_exit_event(event) {
+            pending_starts.clear();
+        }
+    }
+
+    !pending_starts.is_empty()
+}
+
 fn apply_task_finish(task: &mut TaskInfo, event: &UiEvent, finish: TaskFinish) {
     if task.tool_kind == "Bash"
         && finish.status == TaskStatus::Completed
@@ -211,17 +229,34 @@ struct TaskFinish {
 }
 
 fn task_starts(meta: &SessionMeta, event: &UiEvent) -> Vec<TaskStart> {
-    tool_blocks(event, "tool_use")
-        .filter_map(|tool_block| task_start_from_block(meta, event, tool_block))
+    task_starts_from_event(event)
+        .into_iter()
+        .map(|start| task_start_from_raw(meta, event, start))
         .collect()
 }
 
-fn task_start_from_block(
-    meta: &SessionMeta,
-    event: &UiEvent,
-    tool_block: &Value,
-) -> Option<TaskStart> {
-    let raw_id = string_field(
+fn task_starts_from_event(event: &UiEvent) -> Vec<RawTaskStart> {
+    tool_blocks(event, "tool_use")
+        .filter_map(task_start_from_block)
+        .collect()
+}
+
+fn task_start_from_raw(meta: &SessionMeta, event: &UiEvent, start: RawTaskStart) -> TaskStart {
+    TaskStart {
+        id: scoped_task_id(meta.id, &start.id),
+        session_id: meta.id,
+        session_name: meta.name.clone(),
+        session_cwd: meta.cwd.clone(),
+        title: task_title(&start.tool_kind, start.input.as_ref()),
+        tool_kind: start.tool_kind,
+        started_at: event.time,
+        start_event_id: event.id,
+        input: start.input,
+    }
+}
+
+fn task_start_from_block(tool_block: &Value) -> Option<RawTaskStart> {
+    let id = string_field(
         tool_block,
         &[
             "id",
@@ -233,29 +268,37 @@ fn task_start_from_block(
     )?;
     let tool_kind = string_field(tool_block, &["name", "tool_name", "toolName"])
         .unwrap_or_else(|| "tool".to_string());
-    let input = tool_block.get("input");
-    let title = task_title(&tool_kind, input);
+    let input = tool_block.get("input").cloned();
 
-    Some(TaskStart {
-        id: scoped_task_id(meta.id, &raw_id),
-        session_id: meta.id,
-        session_name: meta.name.clone(),
-        session_cwd: meta.cwd.clone(),
+    Some(RawTaskStart {
+        id,
         tool_kind,
-        title,
-        started_at: event.time,
-        start_event_id: event.id,
-        input: input.cloned(),
+        input,
     })
 }
 
 fn task_finishes(meta: &SessionMeta, event: &UiEvent) -> Vec<TaskFinish> {
-    tool_blocks(event, "tool_result")
-        .filter_map(|tool_block| task_finish_from_block(meta, tool_block))
+    task_finishes_from_event(event)
+        .into_iter()
+        .map(|finish| task_finish_from_raw(meta, finish))
         .collect()
 }
 
-fn task_finish_from_block(meta: &SessionMeta, tool_block: &Value) -> Option<TaskFinish> {
+fn task_finishes_from_event(event: &UiEvent) -> Vec<RawTaskFinish> {
+    tool_blocks(event, "tool_result")
+        .filter_map(task_finish_from_block)
+        .collect()
+}
+
+fn task_finish_from_raw(meta: &SessionMeta, finish: RawTaskFinish) -> TaskFinish {
+    TaskFinish {
+        task_id: scoped_task_id(meta.id, &finish.raw_id),
+        status: finish.status,
+        summary: finish.summary,
+    }
+}
+
+fn task_finish_from_block(tool_block: &Value) -> Option<RawTaskFinish> {
     let raw_id = string_field(
         tool_block,
         &[
@@ -277,8 +320,8 @@ fn task_finish_from_block(meta: &SessionMeta, tool_block: &Value) -> Option<Task
         .or_else(|| tool_block.get("error"))
         .and_then(summarize_value);
 
-    Some(TaskFinish {
-        task_id: scoped_task_id(meta.id, &raw_id),
+    Some(RawTaskFinish {
+        raw_id,
         status: if failed {
             TaskStatus::Failed
         } else {
@@ -286,6 +329,18 @@ fn task_finish_from_block(meta: &SessionMeta, tool_block: &Value) -> Option<Task
         },
         summary,
     })
+}
+
+struct RawTaskStart {
+    id: String,
+    tool_kind: String,
+    input: Option<Value>,
+}
+
+struct RawTaskFinish {
+    raw_id: String,
+    status: TaskStatus,
+    summary: Option<String>,
 }
 
 fn tool_blocks<'a>(
@@ -525,6 +580,54 @@ mod tests {
 
         assert_eq!(tasks.background.len(), 0);
         assert_eq!(tasks.finished.len(), 0);
+    }
+
+    #[test]
+    fn unfinished_foreground_tool_use_is_pending_runtime_work() {
+        let session_id = Uuid::new_v4();
+        let events = vec![event(
+            1,
+            session_id,
+            EventKind::Tool,
+            json!({
+                "type": "tool_use",
+                "id": "toolu_1",
+                "name": "Bash",
+                "input": { "command": "pwd" }
+            }),
+        )];
+
+        assert!(has_unfinished_tool_use(&events));
+    }
+
+    #[test]
+    fn tool_result_clears_pending_runtime_work() {
+        let session_id = Uuid::new_v4();
+        let events = vec![
+            event(
+                1,
+                session_id,
+                EventKind::Tool,
+                json!({
+                    "type": "tool_use",
+                    "id": "toolu_1",
+                    "name": "Bash",
+                    "input": { "command": "pwd" }
+                }),
+            ),
+            event(
+                2,
+                session_id,
+                EventKind::Tool,
+                json!({
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_1",
+                    "content": "/repo/demo"
+                }),
+            ),
+        ];
+
+        assert!(!has_unfinished_tool_use(&events));
     }
 
     #[test]

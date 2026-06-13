@@ -1,7 +1,8 @@
 use crate::{
     AppError, AppResult, ClaudeProcess, ClaudeProcessConfig, EventKind, EventStore, ProcessEvent,
     SessionMeta, SessionStatus, TaskGroups, UiEvent, WorktreeConfig, WorktreeManager, WorktreeMeta,
-    extract_claude_session_id, group_tasks, project_session_tasks, store::SessionListFilter,
+    extract_claude_session_id, group_tasks, has_unfinished_tool_use, project_session_tasks,
+    store::SessionListFilter,
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -12,6 +13,8 @@ use std::{
     path::PathBuf,
     sync::Arc,
 };
+#[cfg(test)]
+use tokio::sync::Notify;
 use tokio::sync::{Mutex, broadcast};
 use uuid::Uuid;
 
@@ -62,6 +65,31 @@ struct RunningSession {
     tx: broadcast::Sender<UiEvent>,
 }
 
+#[cfg(test)]
+#[derive(Clone)]
+struct StartProcessPause {
+    entered: Arc<Notify>,
+    release: Arc<Notify>,
+}
+
+#[cfg(test)]
+impl StartProcessPause {
+    fn new() -> Self {
+        Self {
+            entered: Arc::new(Notify::new()),
+            release: Arc::new(Notify::new()),
+        }
+    }
+
+    async fn wait_entered(&self) {
+        self.entered.notified().await;
+    }
+
+    fn release(&self) {
+        self.release.notify_one();
+    }
+}
+
 #[derive(Clone)]
 pub struct SessionManager {
     store: EventStore,
@@ -70,6 +98,8 @@ pub struct SessionManager {
     worktree_manager: WorktreeManager,
     running: Arc<Mutex<HashMap<Uuid, RunningSession>>>,
     starting: Arc<Mutex<HashSet<Uuid>>>,
+    #[cfg(test)]
+    start_process_pause: Option<StartProcessPause>,
 }
 
 impl SessionManager {
@@ -86,7 +116,15 @@ impl SessionManager {
             worktree_manager: WorktreeManager::new(worktree_config),
             running: Arc::new(Mutex::new(HashMap::new())),
             starting: Arc::new(Mutex::new(HashSet::new())),
+            #[cfg(test)]
+            start_process_pause: None,
         }
+    }
+
+    #[cfg(test)]
+    fn with_start_process_pause(mut self, pause: StartProcessPause) -> Self {
+        self.start_process_pause = Some(pause);
+        self
     }
 
     pub async fn create_session(&self, request: CreateSessionRequest) -> AppResult<SessionInfo> {
@@ -159,7 +197,11 @@ impl SessionManager {
                     .store
                     .update_meta(meta.id, |failed_meta| {
                         if removed_worktree {
-                            failed_meta.cwd = cwd;
+                            failed_meta.cwd = meta
+                                .worktree
+                                .as_ref()
+                                .map(|worktree| worktree.source_cwd.clone())
+                                .unwrap_or_else(|| cwd.clone());
                             failed_meta.worktree = None;
                         }
                         failed_meta.status = SessionStatus::Failed;
@@ -516,6 +558,12 @@ impl SessionManager {
         mut meta: SessionMeta,
         resume_session_id: Option<String>,
     ) -> AppResult<SessionInfo> {
+        #[cfg(test)]
+        if let Some(pause) = &self.start_process_pause {
+            pause.entered.notify_one();
+            pause.release.notified().await;
+        }
+
         let starting_event_id = self.store.next_event_id(meta.id).await?;
         let (process, mut rx) = ClaudeProcess::spawn(
             meta.id,
@@ -712,7 +760,7 @@ fn runtime_status(meta: &SessionMeta, events: &[UiEvent]) -> SessionRuntimeStatu
 
 fn running_runtime_status(meta: &SessionMeta, events: &[UiEvent]) -> SessionRuntimeStatus {
     let tasks = project_session_tasks(meta, events);
-    if !tasks.background.is_empty() {
+    if !tasks.background.is_empty() || has_unfinished_tool_use(events) {
         return SessionRuntimeStatus::Running;
     }
 
@@ -885,6 +933,8 @@ done
         path
     }
 
+    const EVENTUALLY_ATTEMPTS: usize = 250;
+
     async fn save_meta_with_status(
         store: &EventStore,
         cwd: PathBuf,
@@ -916,7 +966,7 @@ done
         session_id: Uuid,
         status: SessionStatus,
     ) -> SessionMeta {
-        for _ in 0..50 {
+        for _ in 0..EVENTUALLY_ATTEMPTS {
             let meta = store.load_meta(session_id).await.unwrap();
             if meta.status == status {
                 return meta;
@@ -931,7 +981,7 @@ done
         session_id: Uuid,
         kind: EventKind,
     ) -> Vec<UiEvent> {
-        for _ in 0..50 {
+        for _ in 0..EVENTUALLY_ATTEMPTS {
             let events = store.load_events_after(session_id, 0).await.unwrap();
             if events.iter().any(|event| event.kind == kind) {
                 return events;
@@ -939,6 +989,52 @@ done
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
         store.load_events_after(session_id, 0).await.unwrap()
+    }
+
+    async fn wait_for_meta(
+        store: &EventStore,
+        session_id: Uuid,
+        matches: impl Fn(&SessionMeta) -> bool,
+    ) -> SessionMeta {
+        for _ in 0..EVENTUALLY_ATTEMPTS {
+            let meta = store.load_meta(session_id).await.unwrap();
+            if matches(&meta) {
+                return meta;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        store.load_meta(session_id).await.unwrap()
+    }
+
+    async fn wait_for_events_after(
+        store: &EventStore,
+        session_id: Uuid,
+        after_id: u64,
+        matches: impl Fn(&[UiEvent]) -> bool,
+    ) -> Vec<UiEvent> {
+        for _ in 0..EVENTUALLY_ATTEMPTS {
+            let events = store.load_events_after(session_id, after_id).await.unwrap();
+            if matches(&events) {
+                return events;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        store.load_events_after(session_id, after_id).await.unwrap()
+    }
+
+    async fn wait_for_file(
+        path: &std::path::Path,
+        matches: impl Fn(&str) -> bool,
+    ) -> Option<String> {
+        for _ in 0..EVENTUALLY_ATTEMPTS {
+            if let Ok(contents) = fs::read_to_string(path)
+                && matches(&contents)
+            {
+                return Some(contents);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        fs::read_to_string(path).ok()
     }
 
     async fn read_pid_file(path: &std::path::Path) -> Option<u32> {
@@ -1473,9 +1569,10 @@ done
             .await
             .unwrap();
 
-        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-
-        let loaded = store.load_meta(session.id).await.unwrap();
+        let loaded = wait_for_meta(&store, session.id, |meta| {
+            meta.claude_session_id.as_deref() == Some("fake-session")
+        })
+        .await;
         assert_eq!(loaded.claude_session_id, Some("fake-session".to_string()));
     }
 
@@ -1500,7 +1597,10 @@ done
             })
             .await
             .unwrap();
-        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        wait_for_meta(&store, session.id, |meta| {
+            meta.claude_session_id.as_deref() == Some("fake-session")
+        })
+        .await;
         manager.stop_session(session.id).await.unwrap();
         let before_resume_max_id = store
             .load_events_after(session.id, 0)
@@ -1512,12 +1612,11 @@ done
             .unwrap();
 
         manager.resume_session(session.id).await.unwrap();
-        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
 
-        let events = store
-            .load_events_after(session.id, before_resume_max_id)
-            .await
-            .unwrap();
+        let events = wait_for_events_after(&store, session.id, before_resume_max_id, |events| {
+            events.iter().any(|event| event.kind == EventKind::System)
+        })
+        .await;
         assert!(events.iter().any(|event| event.kind == EventKind::System));
         assert!(events.iter().all(|event| event.id > before_resume_max_id));
     }
@@ -1543,7 +1642,7 @@ done
             })
             .await
             .unwrap();
-        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        wait_for_meta(&store, session.id, |meta| meta.claude_session_id.is_some()).await;
 
         let mut meta = store.load_meta(session.id).await.unwrap();
         meta.claude_session_id = None;
@@ -1617,8 +1716,9 @@ done
         assert!(!running.contains_key(&deleted_id));
         drop(running);
 
-        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-        let args = fs::read_to_string(args_log).unwrap();
+        let args = wait_for_file(&args_log, |contents| contents.lines().count() == 2)
+            .await
+            .unwrap();
         assert_eq!(args.lines().count(), 2);
         assert!(args.contains("--resume running-resume"));
         assert!(!args.contains("stopped-resume"));
@@ -2010,23 +2110,16 @@ done
     #[tokio::test]
     async fn archive_during_starting_reservation_prevents_late_running_resurrection() {
         let temp = tempfile::tempdir().unwrap();
-        let wrapper = temp.path().join("slow-wrapper.sh");
-        fs::write(
-            &wrapper,
-            "#!/usr/bin/env bash\nprintf '{\"type\":\"system\",\"session_id\":\"slow-session\"}\\n'\nwhile IFS= read -r line; do sleep 10; done\n",
-        )
-        .unwrap();
-        let mut permissions = fs::metadata(&wrapper).unwrap().permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&wrapper, permissions).unwrap();
-        let busy_executable = fs::OpenOptions::new().write(true).open(&wrapper).unwrap();
+        let wrapper = fake_claude(temp.path());
         let store = EventStore::new(temp.path().join("data")).await.unwrap();
+        let pause = StartProcessPause::new();
         let manager = SessionManager::new(
             store.clone(),
             vec![wrapper.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
-        );
+        )
+        .with_start_process_pause(pause.clone());
         let session_id = Uuid::new_v4();
         let now = Utc::now();
         store
@@ -2049,9 +2142,10 @@ done
         let resume = tokio::spawn(async move { resume_manager.resume_session(session_id).await });
         let starting = wait_for_status(&store, session_id, SessionStatus::Starting).await;
         assert_eq!(starting.status, SessionStatus::Starting);
+        pause.wait_entered().await;
 
         let archived = manager.archive_session(session_id).await.unwrap();
-        drop(busy_executable);
+        pause.release();
         let resume_result = resume.await.unwrap();
         let final_meta = store.load_meta(session_id).await.unwrap();
 
@@ -2065,23 +2159,16 @@ done
     #[tokio::test]
     async fn stop_during_starting_reservation_prevents_late_running_resurrection() {
         let temp = tempfile::tempdir().unwrap();
-        let wrapper = temp.path().join("slow-wrapper.sh");
-        fs::write(
-            &wrapper,
-            "#!/usr/bin/env bash\nprintf '{\"type\":\"system\",\"session_id\":\"slow-session\"}\\n'\nwhile IFS= read -r line; do sleep 10; done\n",
-        )
-        .unwrap();
-        let mut permissions = fs::metadata(&wrapper).unwrap().permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&wrapper, permissions).unwrap();
-        let busy_executable = fs::OpenOptions::new().write(true).open(&wrapper).unwrap();
+        let wrapper = fake_claude(temp.path());
         let store = EventStore::new(temp.path().join("data")).await.unwrap();
+        let pause = StartProcessPause::new();
         let manager = SessionManager::new(
             store.clone(),
             vec![wrapper.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
-        );
+        )
+        .with_start_process_pause(pause.clone());
         let session_id = Uuid::new_v4();
         let now = Utc::now();
         store
@@ -2104,9 +2191,10 @@ done
         let resume = tokio::spawn(async move { resume_manager.resume_session(session_id).await });
         let starting = wait_for_status(&store, session_id, SessionStatus::Starting).await;
         assert_eq!(starting.status, SessionStatus::Starting);
+        pause.wait_entered().await;
 
         manager.stop_session(session_id).await.unwrap();
-        drop(busy_executable);
+        pause.release();
         let resume_result = resume.await.unwrap();
         let final_meta = store.load_meta(session_id).await.unwrap();
 
@@ -2158,16 +2246,11 @@ done
         store.save_meta(&meta).await.unwrap();
 
         manager.resume_session(session.id).await.unwrap();
-        let mut args = String::new();
-        for _ in 0..20 {
-            if let Ok(contents) = fs::read_to_string(&args_log)
-                && contents.contains("--resume resume-me")
-            {
-                args = contents;
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
+        let args = wait_for_file(&args_log, |contents| {
+            contents.contains("--resume resume-me")
+        })
+        .await
+        .unwrap_or_default();
 
         assert!(args.contains("--resume resume-me"));
     }
