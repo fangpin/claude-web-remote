@@ -11,6 +11,7 @@ The code, files, git repositories, Claude CLI, and model gateway all stay on the
 - Session creation by working directory
 - Streaming event display from `claude --output-format stream-json`
 - User input forwarding to the remote Claude process
+- Claude-like composer with slash commands, context hints, and inline stop/send controls
 - Stop and restart session controls
 - Event, stderr, raw stdout, and session metadata persistence
 - Automatic Claude session id extraction and restart resume

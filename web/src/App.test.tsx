@@ -458,7 +458,7 @@ describe('App', () => {
     render(<App />);
 
     fireEvent.change(await screen.findByLabelText('Message'), { target: { value: 'do work' } });
-    fireEvent.click(screen.getByText('Send'));
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/input', expect.objectContaining({ method: 'POST' })));
     expect(await screen.findByRole('heading', { name: 'Do work' })).toBeInTheDocument();
@@ -474,10 +474,81 @@ describe('App', () => {
     render(<App />);
 
     fireEvent.change(await screen.findByLabelText('Message'), { target: { value: 'retry work' } });
-    fireEvent.click(screen.getByText('Send'));
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('input failed');
     expect(screen.getByLabelText('Message')).toHaveValue('retry work');
+    expect(screen.getByRole('button', { name: 'Send' })).not.toBeDisabled();
+  });
+
+  it('disables send for empty input and prevents duplicate sends while pending', async () => {
+    const inputDeferred = createDeferredResponse({ ok: true });
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/sessions' && !init) return jsonResponse({ sessions: defaultSessions });
+      if (url === '/api/tasks' || url.endsWith('/tasks')) return jsonResponse(emptyTaskGroups);
+      if (url === '/api/sessions/s1/input' && init?.method === 'POST') return inputDeferred.promise;
+      return jsonResponse({ ok: true });
+    });
+
+    render(<App />);
+
+    const messageInput = await screen.findByLabelText('Message');
+    const sendButton = screen.getByRole('button', { name: 'Send' });
+    expect(sendButton).toBeDisabled();
+
+    fireEvent.change(messageInput, { target: { value: 'do work' } });
+    expect(sendButton).not.toBeDisabled();
+
+    fireEvent.click(sendButton);
+    fireEvent.click(screen.getByRole('button', { name: 'Sending...' }));
+
+    expect(screen.getByRole('button', { name: 'Sending...' })).toBeDisabled();
+    expect(fetchMock.mock.calls.filter(([url]) => String(url) === '/api/sessions/s1/input')).toHaveLength(1);
+
+    await act(async () => inputDeferred.resolve());
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+  });
+
+  it('stops the active session from the composer', async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop session' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/stop', expect.objectContaining({ method: 'POST' })));
+  });
+
+  it('shows composer context hints for cwd, permission, status, and worktree metadata', async () => {
+    render(<App />);
+
+    const context = await screen.findByLabelText('Composer context');
+    expect(within(context).getByText('cwd: /repo/one')).toBeInTheDocument();
+    expect(within(context).getByText('permission: acceptEdits')).toBeInTheDocument();
+    expect(within(context).getByText('status: Waiting for you')).toBeInTheDocument();
+
+    fireEvent.click(sessionButton('Worktree Repo'));
+
+    const worktreeContext = await screen.findByLabelText('Composer context');
+    expect(within(worktreeContext).getByText('branch: pin/abc123')).toBeInTheDocument();
+    expect(within(worktreeContext).getByText('source: /repo/one')).toBeInTheDocument();
+  });
+
+  it('shows an empty conversation state and fills suggestions without sending', async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/sessions' && !init) return jsonResponse({ sessions: defaultSessions });
+      if (url === '/api/tasks' || url.endsWith('/tasks')) return jsonResponse(emptyTaskGroups);
+      if (url.endsWith('/input')) return jsonResponse({ ok: true });
+      return jsonResponse({ ok: true });
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'What would you like Claude to do?' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Run the relevant tests' }));
+
+    expect(screen.getByLabelText('Message')).toHaveValue('Run the relevant tests');
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/sessions/s1/input')).toBe(false);
   });
 
   it('updates an unnamed chat with an auto-generated title after the first message', async () => {
