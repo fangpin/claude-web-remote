@@ -45,6 +45,7 @@ describe('ConversationBlockList', () => {
         status: 'completed',
         inputSummary: 'command: git status',
         resultSummary: 'On branch main',
+        resultDisplay: 'visible',
         eventIds: [2, 3],
         rawEvents: [rawEvent(2, { name: 'Bash' }), rawEvent(3, { result: 'On branch main' })]
       }
@@ -60,6 +61,55 @@ describe('ConversationBlockList', () => {
     expect(within(article).getByText('command: git status')).toBeInTheDocument();
     expect(within(article).getByText('Result').closest('section')).toHaveClass('block-section');
     expect(within(article).getByText('On branch main')).toBeInTheDocument();
+  });
+
+  it('hides Read tool result output from the main card while keeping raw details', () => {
+    const blocks: ConversationBlock[] = [
+      {
+        id: 'tool-read',
+        type: 'tool',
+        name: 'Read',
+        status: 'completed',
+        inputSummary: 'file_path: /tmp/a.txt',
+        resultSummary: 'secret file contents',
+        resultDisplay: 'hidden',
+        eventIds: [10, 11],
+        rawEvents: [rawEvent(10, { name: 'Read' }), rawEvent(11, { content: 'secret file contents' })]
+      }
+    ];
+
+    render(<ConversationBlockList blocks={blocks} />);
+
+    const article = screen.getByRole('article');
+    expect(within(article).getByText('Read')).toBeInTheDocument();
+    expect(within(article).getByText('file_path: /tmp/a.txt')).toBeInTheDocument();
+    expect(within(article).queryByText('Result')).not.toBeInTheDocument();
+    expect(within(article).queryByText('secret file contents')).not.toBeInTheDocument();
+    expect(within(article).getByText('Raw events')).toBeInTheDocument();
+  });
+
+  it('collapses Bash tool result output by default', () => {
+    const blocks: ConversationBlock[] = [
+      {
+        id: 'tool-bash',
+        type: 'tool',
+        name: 'Bash',
+        status: 'completed',
+        inputSummary: 'command: npm test',
+        resultSummary: 'long stdout',
+        resultDisplay: 'collapsed',
+        eventIds: [12, 13],
+        rawEvents: [rawEvent(12, { name: 'Bash' }), rawEvent(13, { content: 'long stdout' })]
+      }
+    ];
+
+    render(<ConversationBlockList blocks={blocks} />);
+
+    const article = screen.getByRole('article');
+    const details = within(article).getByText('Result').closest('details');
+    expect(details).not.toBeNull();
+    expect(details).not.toHaveAttribute('open');
+    expect(details).toHaveTextContent('long stdout');
   });
 
   it('renders task activity with output path when present', () => {
@@ -120,6 +170,7 @@ describe('ConversationBlockList', () => {
         status: 'running',
         inputSummary: 'file_path: /tmp/a.txt',
         resultSummary: '',
+        resultDisplay: 'visible',
         eventIds: [3],
         rawEvents: [rawEvent(3, { name: 'Read' })]
       },
@@ -147,6 +198,7 @@ describe('ConversationBlockList', () => {
   it('keeps App.css selectors aligned with rendered conversation block DOM', () => {
     const css = appCss();
 
+    expect(css).toMatch(/\.conversation-workspace\s*{[^}]*grid-template-rows:\s*auto\s+minmax\(0,\s*1fr\)\s+auto/s);
     expect(css).toMatch(/\.message-block\.system\b/);
     expect(css).toMatch(/\.task-block\.pending\b/);
     expect(css).not.toMatch(/\.task-header\s+small/);
@@ -200,6 +252,7 @@ describe('ConversationBlockList', () => {
         status: 'running',
         inputSummary: 'file_path: /tmp/example.txt',
         resultSummary: '',
+        resultDisplay: 'visible',
         eventIds: [8],
         rawEvents: [rawEvent(8, { toolNested: { path: '/tmp/example.txt' } })]
       },

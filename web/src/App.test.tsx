@@ -62,8 +62,8 @@ const defaultDeletedSessions = [
   {
     ...baseSession,
     id: 's3',
-    name: 'Deleted Repo',
-    cwd: '/repo/deleted',
+    name: 'Archived Repo',
+    cwd: '/repo/archived',
     status: 'stopped',
     claudeSessionId: 'claude-s3',
     deletedAt: '2026-06-12T00:00:00Z',
@@ -222,13 +222,13 @@ beforeEach(() => {
     if (url.endsWith('/tasks')) {
       return jsonResponse(emptyTaskGroups);
     }
-    if (url === '/api/sessions/s1' && init?.method === 'DELETE') {
+    if (url === '/api/sessions/s1/archive' && init?.method === 'POST') {
       return jsonResponse({ ...sessions[0], deletedAt: '2026-06-12T00:00:00Z', updatedAt: '2026-06-12T00:00:00Z' });
     }
     if (url === '/api/sessions/s2/resume' && init?.method === 'POST') {
       return jsonResponse({ ...sessions[1], status: 'running', updatedAt: '2026-06-12T00:00:00Z' });
     }
-    if (url === '/api/sessions/s3/restore' && init?.method === 'POST') {
+    if (url === '/api/sessions/s3/unarchive' && init?.method === 'POST') {
       return jsonResponse({ ...deletedSessions[0], deletedAt: null, updatedAt: '2026-06-12T01:00:00Z' });
     }
     if (url === '/api/sessions/s3?permanent=true' && init?.method === 'DELETE') {
@@ -243,14 +243,20 @@ beforeEach(() => {
           dataDir: '/home/user/.claude-remote-web',
           launcher: ['claude'],
           webDir: null,
-          defaultPermissionMode: 'acceptEdits'
+          defaultPermissionMode: 'acceptEdits',
+          worktreesDir: null,
+          worktreeBranchPrefix: 'pin',
+          worktreeBaseRef: 'fresh'
         },
         file: {
           bind: '127.0.0.1:8787',
           dataDir: '/home/user/.claude-remote-web',
           launcher: ['claude'],
           webDir: null,
-          defaultPermissionMode: 'acceptEdits'
+          defaultPermissionMode: 'acceptEdits',
+          worktreesDir: null,
+          worktreeBranchPrefix: 'pin',
+          worktreeBaseRef: 'fresh'
         },
         restartRequired: false
       }), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -281,15 +287,30 @@ afterEach(() => {
 });
 
 describe('App', () => {
+  it('renders the Claude-like shell regions with conversation and inspector areas', async () => {
+    render(<App />);
+
+    const primaryNavigation = await screen.findByRole('navigation', { name: 'Primary navigation' });
+    expect(primaryNavigation).toBeInTheDocument();
+    expect(within(primaryNavigation).getByRole('button', { name: 'Sessions' })).toHaveAttribute('aria-current', 'page');
+    expect(within(primaryNavigation).getByRole('button', { name: 'Config' })).toHaveAttribute('aria-current', 'false');
+    expect(screen.getByRole('complementary', { name: 'Session navigation' })).toBeInTheDocument();
+    expect(screen.getByRole('main', { name: 'Conversation workspace' })).toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: 'Session inspector' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'New chat' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Working directory')).not.toBeInTheDocument();
+  });
+
   it('loads sessions, tasks, and renders active event stream as conversation blocks', async () => {
     render(<App />);
 
     expect((await screen.findAllByText('Repo One')).length).toBeGreaterThan(0);
     expect(screen.getAllByText('/repo/one').length).toBeGreaterThan(0);
     expect(screen.getByText('Remote Claude session')).toBeInTheDocument();
-    expect(await screen.findByText('Tasks')).toBeInTheDocument();
-    expect(screen.getByText('Bash: sleep 10')).toBeInTheDocument();
-    expect(screen.getByText('Session tasks')).toBeInTheDocument();
+    const inspector = screen.getByRole('complementary', { name: 'Session inspector' });
+    expect(within(inspector).getByRole('tab', { name: 'Session tasks' })).toBeInTheDocument();
+    const sessionPanel = within(inspector).getByRole('tabpanel', { name: 'Session tasks' });
+    expect(await within(sessionPanel).findByText('Agent: Review branch')).toBeInTheDocument();
 
     await waitFor(() => expect(FakeWebSocket.instances.length).toBe(1));
     FakeWebSocket.instances[0].emit({
@@ -303,7 +324,7 @@ describe('App', () => {
     expect(await screen.findByText('hello from claude')).toBeInTheDocument();
   });
 
-  it('hides raw and system events from the event stream', async () => {
+  it('preserves raw and system events as raw details without rendering them as messages', async () => {
     render(<App />);
 
     await screen.findAllByText('Repo One');
@@ -334,17 +355,20 @@ describe('App', () => {
     expect(await screen.findByText('visible error event')).toBeInTheDocument();
     expect(screen.queryByText('raw event should stay hidden')).not.toBeInTheDocument();
     expect(screen.queryByText('system event should stay hidden')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Raw events').length).toBeGreaterThanOrEqual(2);
   });
 
   it('creates a session from the form and can include worktree request data', async () => {
     render(<App />);
 
+    fireEvent.click(await screen.findByRole('button', { name: 'New chat' }));
     fireEvent.change(await screen.findByLabelText('Working directory'), { target: { value: '/repo/two' } });
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'New Repo' } });
     fireEvent.click(screen.getByLabelText('Use git worktree'));
     fireEvent.click(screen.getByText('Create session'));
 
     expect((await screen.findAllByText('New Repo')).length).toBeGreaterThan(0);
+    expect(screen.queryByLabelText('Working directory')).not.toBeInTheDocument();
     const createCall = fetchMock.mock.calls.find(([url, init]) => url === '/api/sessions' && init?.method === 'POST');
     expect(JSON.parse(String(createCall?.[1]?.body))).toMatchObject({
       cwd: '/repo/two',
@@ -353,25 +377,27 @@ describe('App', () => {
     });
   });
 
-  it('switches to active mode when creating from deleted mode', async () => {
+  it('switches to active mode when creating from archived mode', async () => {
     render(<App />);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Deleted' }));
-    expect(await screen.findByRole('heading', { name: 'Deleted Repo' })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: 'Archived' }));
+    expect(await screen.findByRole('heading', { name: 'Archived Repo' })).toBeInTheDocument();
 
+    fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
     fireEvent.change(screen.getByLabelText('Working directory'), { target: { value: '/repo/two' } });
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'New Repo' } });
     fireEvent.click(screen.getByText('Create session'));
 
     expect(await screen.findByRole('heading', { name: 'New Repo' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Active' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('button', { name: 'Deleted' })).toHaveAttribute('aria-pressed', 'false');
-    expect(screen.queryByRole('button', { name: /Deleted Repo/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Archived' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByRole('button', { name: /Archived Repo/ })).not.toBeInTheDocument();
   });
 
   it('shows create session errors', async () => {
     render(<App />);
 
+    fireEvent.click(await screen.findByRole('button', { name: 'New chat' }));
     fireEvent.change(await screen.findByLabelText('Working directory'), { target: { value: '~' } });
     fireEvent.click(screen.getByText('Create session'));
 
@@ -381,6 +407,7 @@ describe('App', () => {
   it('shows recent working directory suggestions and fills the input', async () => {
     render(<App />);
 
+    fireEvent.click(await screen.findByRole('button', { name: 'New chat' }));
     const suggestions = await screen.findByLabelText('Recent working directories');
     expect(within(suggestions).getByText('/repo/one')).toBeInTheDocument();
     expect(within(suggestions).getByText('/repo/stopped')).toBeInTheDocument();
@@ -436,7 +463,7 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { name: 'Repo One' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Restart' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Archive' })).toBeInTheDocument();
 
     fireEvent.click(sessionButton('Stopped Repo'));
     expect(await screen.findByRole('heading', { name: 'Stopped Repo' })).toBeInTheDocument();
@@ -451,7 +478,7 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
   });
 
-  it('renders Stop and Delete actions for starting sessions', async () => {
+  it('renders Stop and Archive actions for starting sessions', async () => {
     sessions = [
       {
         ...baseSession,
@@ -466,12 +493,12 @@ describe('App', () => {
 
     expect(await screen.findByRole('heading', { name: 'Starting Repo' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Archive' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Restart' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
   });
 
-  it.each(['exited', 'failed'])('renders Resume and Delete actions for %s sessions', async (status) => {
+  it.each(['exited', 'failed'])('renders Resume and Archive actions for %s sessions', async (status) => {
     const name = `${status[0].toUpperCase()}${status.slice(1)} Repo`;
     sessions = [
       {
@@ -487,57 +514,59 @@ describe('App', () => {
 
     expect(await screen.findByRole('heading', { name })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Resume' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Archive' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Restart' })).not.toBeInTheDocument();
   });
 
-  it('soft deletes an active session and removes it from the active list', async () => {
+  it('archives an active session and removes it from the active list', async () => {
     render(<App />);
 
     expect(await screen.findByRole('heading', { name: 'Repo One' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Archive' }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1', expect.objectContaining({ method: 'DELETE' })));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/archive', expect.objectContaining({ method: 'POST' })));
     await waitFor(() => expect(querySessionButton('Repo One')).toBeNull());
     expect(await screen.findByRole('heading', { name: 'Stopped Repo' })).toBeInTheDocument();
   });
 
-  it('loads deleted sessions without opening a WebSocket or composer and restores them', async () => {
+  it('loads archived sessions without opening a WebSocket or composer and unarchives them', async () => {
     render(<App />);
 
     await screen.findByRole('heading', { name: 'Repo One' });
     FakeWebSocket.instances = [];
 
-    fireEvent.click(screen.getByRole('button', { name: 'Deleted' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Archived' }));
 
-    expect(await screen.findByRole('heading', { name: 'Deleted Repo' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Archived Repo' })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith('/api/sessions?deletedOnly=true', undefined);
     expect(screen.queryByLabelText('Message')).not.toBeInTheDocument();
-    expect(screen.queryByText('Session tasks')).not.toBeInTheDocument();
+    const inspector = screen.getByRole('complementary', { name: 'Session inspector' });
+    const sessionPanel = within(inspector).getByRole('tabpanel', { name: 'Session tasks' });
+    expect(within(sessionPanel).queryByText('Agent: Review branch')).not.toBeInTheDocument();
     expect(FakeWebSocket.instances).toHaveLength(0);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Unarchive' }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s3/restore', expect.objectContaining({ method: 'POST' })));
-    await waitFor(() => expect(screen.queryByRole('button', { name: /Deleted Repo/ })).not.toBeInTheDocument());
-    expect(screen.getByText('No deleted sessions.')).toBeInTheDocument();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s3/unarchive', expect.objectContaining({ method: 'POST' })));
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Archived Repo/ })).not.toBeInTheDocument());
+    expect(screen.getByText('No archived sessions.')).toBeInTheDocument();
   });
 
-  it('permanently deletes from the deleted list', async () => {
+  it('deletes archived session data from the archived list', async () => {
     render(<App />);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Deleted' }));
-    expect(await screen.findByRole('heading', { name: 'Deleted Repo' })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: 'Archived' }));
+    expect(await screen.findByRole('heading', { name: 'Archived Repo' })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Permanently delete' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s3?permanent=true', expect.objectContaining({ method: 'DELETE' })));
-    await waitFor(() => expect(screen.queryByRole('button', { name: /Deleted Repo/ })).not.toBeInTheDocument());
-    expect(screen.getByText('No deleted sessions.')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Archived Repo/ })).not.toBeInTheDocument());
+    expect(screen.getByText('No archived sessions.')).toBeInTheDocument();
   });
 
-  it('ignores stale active list responses after switching to deleted mode', async () => {
+  it('ignores stale active list responses after switching to archived mode', async () => {
     const activeList = createDeferredResponse({ sessions: defaultSessions });
     const deletedList = createDeferredResponse({ sessions: defaultDeletedSessions });
     fetchMock = vi.fn((input: RequestInfo | URL) => {
@@ -550,14 +579,14 @@ describe('App', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     render(<App />);
-    fireEvent.click(screen.getByRole('button', { name: 'Deleted' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Archived' }));
 
     await act(async () => {
       deletedList.resolve();
       await deletedList.promise;
     });
 
-    expect(await screen.findByRole('heading', { name: 'Deleted Repo' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Archived Repo' })).toBeInTheDocument();
 
     await act(async () => {
       activeList.resolve();
@@ -565,10 +594,10 @@ describe('App', () => {
     });
 
     await waitFor(() => expect(screen.queryByRole('heading', { name: 'Repo One' })).not.toBeInTheDocument());
-    expect(screen.getByRole('heading', { name: 'Deleted Repo' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Archived Repo' })).toBeInTheDocument();
   });
 
-  it('keeps a newer valid selection when delete completes', async () => {
+  it('keeps a newer valid selection when archive completes', async () => {
     const threeSessions = [
       ...defaultSessions,
       {
@@ -579,15 +608,15 @@ describe('App', () => {
         status: 'running'
       }
     ];
-    let resolveDelete!: () => void;
-    const deletePromise = new Promise<Response>((resolve) => {
-      resolveDelete = () => resolve(jsonResponse({ ...threeSessions[0], deletedAt: '2026-06-12T00:00:00Z' }));
+    let resolveArchive!: () => void;
+    const archivePromise = new Promise<Response>((resolve) => {
+      resolveArchive = () => resolve(jsonResponse({ ...threeSessions[0], deletedAt: '2026-06-12T00:00:00Z' }));
     });
     fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url === '/api/sessions' && !init) return Promise.resolve(jsonResponse({ sessions: threeSessions }));
       if (url === '/api/tasks' || url.endsWith('/tasks')) return Promise.resolve(jsonResponse(emptyTaskGroups));
-      if (url === '/api/sessions/s1' && init?.method === 'DELETE') return deletePromise;
+      if (url === '/api/sessions/s1/archive' && init?.method === 'POST') return archivePromise;
       return Promise.resolve(jsonResponse({ error: 'unexpected request' }, 500));
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -595,12 +624,12 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByRole('heading', { name: 'Repo One' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Archive' }));
     fireEvent.click(sessionButton('Newest Repo'));
 
     await act(async () => {
-      resolveDelete();
-      await deletePromise;
+      resolveArchive();
+      await archivePromise;
     });
 
     await waitFor(() => expect(querySessionButton('Repo One')).toBeNull());
@@ -632,13 +661,41 @@ describe('App', () => {
     expect(screen.getByText('Stop only')).toBeInTheDocument();
   });
 
+  it('shows session tasks in the inspector and can switch to all tasks and details', async () => {
+    render(<App />);
+
+    const inspector = await screen.findByRole('complementary', { name: 'Session inspector' });
+    const sessionPanel = within(inspector).getByRole('tabpanel', { name: 'Session tasks' });
+    expect(within(sessionPanel).getByRole('heading', { name: 'Session tasks' })).toBeInTheDocument();
+    expect(await within(sessionPanel).findByText('Agent: Review branch')).toBeInTheDocument();
+    expect(within(inspector).getByRole('tab', { name: 'Session tasks' })).toHaveAttribute('tabIndex', '0');
+    expect(within(inspector).getByRole('tab', { name: 'All tasks' })).toHaveAttribute('tabIndex', '-1');
+
+    fireEvent.keyDown(within(inspector).getByRole('tab', { name: 'Session tasks' }), { key: 'ArrowRight' });
+    expect(within(inspector).getByRole('tab', { name: 'All tasks' })).toHaveAttribute('aria-selected', 'true');
+    expect(within(inspector).getByRole('tab', { name: 'All tasks' })).toHaveFocus();
+    expect(within(inspector).getByRole('tab', { name: 'Session tasks' })).toHaveAttribute('tabIndex', '-1');
+
+    fireEvent.click(within(inspector).getByRole('tab', { name: 'All tasks' }));
+    const allTasksPanel = within(inspector).getByRole('tabpanel', { name: 'All tasks' });
+    expect(await within(allTasksPanel).findByText('Bash: sleep 10')).toBeInTheDocument();
+
+    fireEvent.click(within(inspector).getByRole('tab', { name: 'Details' }));
+    const detailsPanel = within(inspector).getByRole('tabpanel', { name: 'Details' });
+    expect(within(detailsPanel).getByText('Permission mode')).toBeInTheDocument();
+    expect(within(detailsPanel).getByText('acceptEdits')).toBeInTheDocument();
+  });
+
   it('selects the owning session and refreshes tasks when a task is clicked', async () => {
     render(<App />);
 
-    await screen.findByText('Bash: sleep 10');
+    const inspector = await screen.findByRole('complementary', { name: 'Session inspector' });
+    fireEvent.click(within(inspector).getByRole('tab', { name: 'All tasks' }));
+    const allTasksPanel = within(inspector).getByRole('tabpanel', { name: 'All tasks' });
+    const task = await within(allTasksPanel).findByText('Bash: sleep 10');
     const taskListCallsBeforeSelection = fetchMock.mock.calls.filter(([url]) => url === '/api/tasks').length;
 
-    fireEvent.click(screen.getAllByText('Bash: sleep 10')[0]);
+    fireEvent.click(task);
 
     await waitFor(() => expect(screen.getAllByText('Stopped Repo').length).toBeGreaterThan(0));
     expect(screen.getByRole('heading', { name: 'Stopped Repo' })).toBeInTheDocument();
@@ -664,40 +721,44 @@ describe('App', () => {
 
     render(<App />);
 
+    const inspector = await screen.findByRole('complementary', { name: 'Session inspector' });
+    fireEvent.click(within(inspector).getByRole('tab', { name: 'All tasks' }));
+    const allTasksPanel = within(inspector).getByRole('tabpanel', { name: 'All tasks' });
+
     await waitFor(() => expect(taskRequests.length).toBeGreaterThanOrEqual(2));
 
     await act(async () => {
       taskRequests.at(-1)?.resolve(jsonResponse(taskGroupsWithTitle('Fresh global task')));
     });
-    expect(await screen.findByText('Fresh global task')).toBeInTheDocument();
+    expect(await within(allTasksPanel).findByText('Fresh global task')).toBeInTheDocument();
 
     await act(async () => {
       taskRequests[0].resolve(jsonResponse(taskGroupsWithTitle('Stale global task')));
     });
 
-    expect(screen.getByText('Fresh global task')).toBeInTheDocument();
-    expect(screen.queryByText('Stale global task')).not.toBeInTheDocument();
+    expect(within(allTasksPanel).getByText('Fresh global task')).toBeInTheDocument();
+    expect(within(allTasksPanel).queryByText('Stale global task')).not.toBeInTheDocument();
   });
 
-  it('exposes selected state on the active and deleted list mode buttons', async () => {
+  it('exposes selected state on the active and archived list mode buttons', async () => {
     render(<App />);
 
     const activeButton = screen.getByRole('button', { name: 'Active' });
-    const deletedButton = screen.getByRole('button', { name: 'Deleted' });
+    const archivedButton = screen.getByRole('button', { name: 'Archived' });
 
     expect(activeButton).toHaveAttribute('aria-pressed', 'true');
-    expect(deletedButton).toHaveAttribute('aria-pressed', 'false');
+    expect(archivedButton).toHaveAttribute('aria-pressed', 'false');
 
-    fireEvent.click(deletedButton);
+    fireEvent.click(archivedButton);
 
     expect(activeButton).toHaveAttribute('aria-pressed', 'false');
-    expect(deletedButton).toHaveAttribute('aria-pressed', 'true');
+    expect(archivedButton).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('opens the config view from the sidebar', async () => {
     render(<App />);
 
-    fireEvent.click(await screen.findByText('Config'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Config' }));
 
     expect(await screen.findByText('Daemon config')).toBeInTheDocument();
   });

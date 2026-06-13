@@ -20,6 +20,7 @@ export type ToolBlock = {
   status: 'running' | 'completed' | 'failed';
   inputSummary: string;
   resultSummary: string;
+  resultDisplay: 'hidden' | 'collapsed' | 'visible';
   eventIds: number[];
   rawEvents: RawEventRef[];
 };
@@ -64,6 +65,7 @@ type NormalizedItem =
   | { type: 'message'; event: UiEvent; role: MessageBlock['role']; text: string }
   | { type: 'tool_use'; event: UiEvent; payload: ObjectPayload }
   | { type: 'tool_result'; event: UiEvent; payload: ObjectPayload }
+  | { type: 'raw'; event: UiEvent }
   | { type: 'error'; event: UiEvent; payload: ObjectPayload };
 
 function isObject(value: unknown): value is ObjectPayload {
@@ -158,11 +160,18 @@ function hasStructuredFailure(payload: ObjectPayload | undefined): boolean {
 }
 
 function hasClearFailureText(result: string): boolean {
-  return /(^|\n)\s*(error|failed|failure):/i.test(result);
+  return /(^|\n)\s*(error|failed|failure):|\bcommand failed\b|\bexit code\s+[1-9]\d*\b/i.test(result);
 }
 
 function hasFailedResult(resultPayload: ObjectPayload | undefined, result: string): boolean {
   return hasStructuredFailure(resultPayload) || hasClearFailureText(result);
+}
+
+function toolResultDisplay(name: string, status: ToolBlock['status'], result: string): ToolBlock['resultDisplay'] {
+  if (!result.trim()) return 'visible';
+  if (status === 'failed') return 'visible';
+  if (['Read', 'Glob', 'Grep'].includes(name)) return 'hidden';
+  return 'collapsed';
 }
 
 function isBackgroundBash(name: string, input: unknown, result: string): boolean {
@@ -259,27 +268,33 @@ function makeToolBlock(toolUse: UiEvent, usePayload: ObjectPayload, resultEvent?
     };
   }
 
+  const status: ToolBlock['status'] = resultEvent ? (hasFailedResult(resultPayload, result) ? 'failed' : 'completed') : 'running';
+
   return {
     id: `tool-${id}`,
     type: 'tool',
     name,
-    status: resultEvent ? (hasFailedResult(resultPayload, result) ? 'failed' : 'completed') : 'running',
+    status,
     inputSummary,
     resultSummary: result,
+    resultDisplay: toolResultDisplay(name, status, result),
     eventIds: events.map((event) => event.id),
     rawEvents: events.map(rawEvent)
   };
 }
 
 function makeStandaloneToolResult(event: UiEvent, payload: ObjectPayload): ToolBlock {
+  const name = toolName(payload);
   const result = resultSummary(payload);
+  const status: ToolBlock['status'] = hasFailedResult(payload, result) ? 'failed' : 'completed';
   return {
     id: `tool-result-${event.id}`,
     type: 'tool',
-    name: toolName(payload),
-    status: hasFailedResult(payload, result) ? 'failed' : 'completed',
+    name,
+    status,
     inputSummary: '',
     resultSummary: result,
+    resultDisplay: toolResultDisplay(name, status, result),
     eventIds: [event.id],
     rawEvents: [rawEvent(event)]
   };
@@ -298,11 +313,20 @@ function contentArray(payload: ObjectPayload): unknown[] | null {
   return null;
 }
 
+function isIgnorableErrorPayload(payload: ObjectPayload): boolean {
+  const line = stringField(payload, ['line']) ?? textContent(payload) ?? summarize(payload);
+  return /NODE_TLS_REJECT_UNAUTHORIZED|node --trace-warnings/i.test(line);
+}
+
 function normalizedItems(event: UiEvent): NormalizedItem[] | null {
   const payload = isObject(event.payload) ? event.payload : { value: event.payload };
   const type = payloadType(event, payload);
+  const isClaudeUserPayload = payload.type === 'user';
 
-  if (event.kind === 'error' || type === 'error') return [{ type: 'error', event, payload }];
+  if (event.kind === 'error' || type === 'error') {
+    return isIgnorableErrorPayload(payload) ? [{ type: 'raw', event }] : [{ type: 'error', event, payload }];
+  }
+  if (event.kind === 'raw' || event.kind === 'system') return [{ type: 'raw', event }];
 
   const role = roleFromEvent(event, payload);
   const items: NormalizedItem[] = [];
@@ -312,7 +336,7 @@ function normalizedItems(event: UiEvent): NormalizedItem[] | null {
       if (!isObject(entry)) continue;
       if (entry.type === 'text') {
         const text = stringField(entry, ['text']);
-        if (text && role) items.push({ type: 'message', event, role, text });
+        if (text && role && !isClaudeUserPayload) items.push({ type: 'message', event, role, text });
       } else if (entry.type === 'tool_use') {
         items.push({ type: 'tool_use', event, payload: entry });
       } else if (entry.type === 'tool_result') {
@@ -327,9 +351,9 @@ function normalizedItems(event: UiEvent): NormalizedItem[] | null {
   if (type === 'tool_result') return [{ type: 'tool_result', event, payload }];
 
   const text = textContent(payload);
-  if (text && role) return [{ type: 'message', event, role, text }];
+  if (text && role && !isClaudeUserPayload) return [{ type: 'message', event, role, text }];
 
-  return null;
+  return isClaudeUserPayload ? [{ type: 'raw', event }] : null;
 }
 
 export function buildConversationBlocks(events: UiEvent[]): ConversationBlock[] {
@@ -356,6 +380,17 @@ export function buildConversationBlocks(events: UiEvent[]): ConversationBlock[] 
           id: `error-${item.event.id}`,
           type: 'error',
           message: textContent(item.payload) ?? summarize(item.event.payload),
+          eventIds: [item.event.id],
+          rawEvents: [rawEvent(item.event)]
+        });
+        continue;
+      }
+
+      if (item.type === 'raw') {
+        blocks.push({
+          id: `raw-${item.event.id}`,
+          type: 'raw',
+          label: item.event.kind,
           eventIds: [item.event.id],
           rawEvents: [rawEvent(item.event)]
         });

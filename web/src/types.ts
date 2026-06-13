@@ -67,6 +67,9 @@ export type ConfigValues = {
   launcher: string[];
   webDir?: string | null;
   defaultPermissionMode: string;
+  worktreesDir?: string | null;
+  worktreeBranchPrefix: string;
+  worktreeBaseRef: 'fresh' | 'head';
 };
 
 export type ManagedConfig = {

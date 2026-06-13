@@ -90,6 +90,12 @@ pub struct ConfigValues {
     pub launcher: Vec<String>,
     pub web_dir: Option<String>,
     pub default_permission_mode: String,
+    #[serde(default)]
+    pub worktrees_dir: Option<String>,
+    #[serde(default = "default_worktree_branch_prefix_value")]
+    pub worktree_branch_prefix: String,
+    #[serde(default = "default_worktree_base_ref_value")]
+    pub worktree_base_ref: WorktreeBaseRef,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -115,6 +121,7 @@ impl Config {
         Ok(ResolvedConfig {
             bind: self
                 .bind
+                .or(file_config.bind)
                 .unwrap_or_else(|| "127.0.0.1:0".parse().expect("valid default bind")),
             data_dir: self
                 .data_dir
@@ -215,8 +222,23 @@ impl From<&ResolvedConfig> for ConfigValues {
                 .as_ref()
                 .map(|path| path.to_string_lossy().to_string()),
             default_permission_mode: config.default_permission_mode.clone(),
+            worktrees_dir: config
+                .worktree
+                .worktrees_dir
+                .as_ref()
+                .map(|path| path.to_string_lossy().to_string()),
+            worktree_branch_prefix: config.worktree.branch_prefix.clone(),
+            worktree_base_ref: config.worktree.base_ref.clone(),
         }
     }
+}
+
+fn default_worktree_branch_prefix_value() -> String {
+    "pin".to_string()
+}
+
+fn default_worktree_base_ref_value() -> WorktreeBaseRef {
+    WorktreeBaseRef::Fresh
 }
 
 fn values_from_file_config(file_config: FileConfig) -> ConfigValues {
@@ -226,7 +248,7 @@ fn values_from_file_config(file_config: FileConfig) -> ConfigValues {
         bind: file_config
             .bind
             .map(|bind| bind.to_string())
-            .unwrap_or_else(|| "127.0.0.1:8787".to_string()),
+            .unwrap_or_else(|| "127.0.0.1:0".to_string()),
         data_dir: file_config
             .data_dir
             .map(expand_home)
@@ -241,6 +263,16 @@ fn values_from_file_config(file_config: FileConfig) -> ConfigValues {
         default_permission_mode: file_config
             .default_permission_mode
             .unwrap_or_else(|| "acceptEdits".to_string()),
+        worktrees_dir: file_config
+            .worktrees_dir
+            .map(expand_home)
+            .map(|path| path.to_string_lossy().to_string()),
+        worktree_branch_prefix: file_config
+            .worktree_branch_prefix
+            .unwrap_or_else(|| "pin".to_string()),
+        worktree_base_ref: file_config
+            .worktree_base_ref
+            .unwrap_or(WorktreeBaseRef::Fresh),
     }
 }
 
@@ -260,6 +292,11 @@ fn validate_config_values(values: &ConfigValues) -> AppResult<()> {
     if values.default_permission_mode.trim().is_empty() {
         return Err(AppError::InvalidRequest(
             "defaultPermissionMode is empty".to_string(),
+        ));
+    }
+    if values.worktree_branch_prefix.trim().is_empty() {
+        return Err(AppError::InvalidRequest(
+            "worktreeBranchPrefix is empty".to_string(),
         ));
     }
     Ok(())
@@ -287,6 +324,22 @@ fn normalized_toml(values: &ConfigValues) -> String {
     content.push_str(&format!(
         "default_permission_mode = {}\n",
         toml_string(&values.default_permission_mode)
+    ));
+    if let Some(worktrees_dir) = &values.worktrees_dir
+        && !worktrees_dir.trim().is_empty()
+    {
+        content.push_str(&format!("worktrees_dir = {}\n", toml_string(worktrees_dir)));
+    }
+    content.push_str(&format!(
+        "worktree_branch_prefix = {}\n",
+        toml_string(&values.worktree_branch_prefix)
+    ));
+    content.push_str(&format!(
+        "worktree_base_ref = {}\n",
+        toml_string(match values.worktree_base_ref {
+            WorktreeBaseRef::Fresh => "fresh",
+            WorktreeBaseRef::Head => "head",
+        })
     ));
     content
 }
@@ -413,7 +466,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ignores_config_file_bind_and_expands_home_paths() {
+    async fn uses_config_file_bind_and_expands_home_paths() {
         let temp = tempfile::tempdir().unwrap();
         let config_path = temp.path().join("config.toml");
         fs::write(
@@ -445,7 +498,10 @@ default_permission_mode = "auto"
         let resolved = config.resolve().await.unwrap();
         let home = std::env::var_os("HOME").map(PathBuf::from).unwrap();
 
-        assert_eq!(resolved.bind, "127.0.0.1:0".parse::<SocketAddr>().unwrap());
+        assert_eq!(
+            resolved.bind,
+            "127.0.0.1:9999".parse::<SocketAddr>().unwrap()
+        );
         assert_eq!(resolved.data_dir, home.join("custom-data"));
         assert_eq!(
             resolved.launcher,
@@ -800,6 +856,7 @@ launcher = []
 
         assert!(response.exists);
         assert_eq!(response.current.launcher, vec!["ttadk", "claude"]);
+        assert_eq!(response.file.bind, "127.0.0.1:0");
         assert_eq!(response.file.launcher, vec!["claude".to_string()]);
         assert!(response.restart_required);
     }
@@ -857,6 +914,9 @@ launcher = []
                 launcher: vec!["claude".to_string()],
                 web_dir: None,
                 default_permission_mode: "acceptEdits".to_string(),
+                worktrees_dir: None,
+                worktree_branch_prefix: "pin".to_string(),
+                worktree_base_ref: WorktreeBaseRef::Fresh,
             })
             .await;
         let exists = path.exists();
@@ -891,6 +951,9 @@ launcher = []
                 launcher: vec!["ttadk".to_string(), "claude".to_string(), "-a".to_string()],
                 web_dir: Some("/tmp/crw-web".to_string()),
                 default_permission_mode: "auto".to_string(),
+                worktrees_dir: Some("/tmp/crw-worktrees".to_string()),
+                worktree_branch_prefix: "crw".to_string(),
+                worktree_base_ref: WorktreeBaseRef::Head,
             })
             .await
             .unwrap();
@@ -901,7 +964,7 @@ launcher = []
         let written = fs::read_to_string(path).unwrap();
         assert_eq!(
             written,
-            "bind = \"127.0.0.1:9999\"\ndata_dir = \"/tmp/crw-data\"\nlauncher = [\"ttadk\", \"claude\", \"-a\"]\nweb_dir = \"/tmp/crw-web\"\ndefault_permission_mode = \"auto\"\n"
+            "bind = \"127.0.0.1:9999\"\ndata_dir = \"/tmp/crw-data\"\nlauncher = [\"ttadk\", \"claude\", \"-a\"]\nweb_dir = \"/tmp/crw-web\"\ndefault_permission_mode = \"auto\"\nworktrees_dir = \"/tmp/crw-worktrees\"\nworktree_branch_prefix = \"crw\"\nworktree_base_ref = \"head\"\n"
         );
     }
 
@@ -929,6 +992,9 @@ launcher = []
                 launcher: vec!["claude".to_string()],
                 web_dir: None,
                 default_permission_mode: "acceptEdits".to_string(),
+                worktrees_dir: None,
+                worktree_branch_prefix: "pin".to_string(),
+                worktree_base_ref: WorktreeBaseRef::Fresh,
             })
             .await
             .unwrap_err();
@@ -960,6 +1026,9 @@ launcher = []
                 launcher: Vec::new(),
                 web_dir: None,
                 default_permission_mode: "acceptEdits".to_string(),
+                worktrees_dir: None,
+                worktree_branch_prefix: "pin".to_string(),
+                worktree_base_ref: WorktreeBaseRef::Fresh,
             })
             .await
             .unwrap_err();

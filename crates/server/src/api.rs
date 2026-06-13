@@ -64,6 +64,8 @@ pub fn build_router(state: AppState, web_dir: Option<PathBuf>) -> Router {
         )
         .route("/sessions/{id}/restart", post(restart_session))
         .route("/sessions/{id}/resume", post(resume_session))
+        .route("/sessions/{id}/archive", post(archive_session))
+        .route("/sessions/{id}/unarchive", post(unarchive_session))
         .route("/sessions/{id}/restore", post(restore_session))
         .route("/sessions/{id}/events", get(events_ws))
         .route("/config", get(get_config).merge(put(update_config)))
@@ -165,6 +167,20 @@ async fn resume_session(
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
     Ok(Json(json!(state.manager.resume_session(id).await?)))
+}
+
+async fn archive_session(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<serde_json::Value>> {
+    Ok(Json(json!(state.manager.archive_session(id).await?)))
+}
+
+async fn unarchive_session(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<serde_json::Value>> {
+    Ok(Json(json!(state.manager.unarchive_session(id).await?)))
 }
 
 async fn restore_session(
@@ -429,7 +445,7 @@ done
     }
 
     #[tokio::test]
-    async fn websocket_deleted_session_sends_deleted_error_text() {
+    async fn websocket_archived_session_sends_archived_error_text() {
         let temp = tempfile::tempdir().unwrap();
         let state = test_state(&temp).await;
         let session = state
@@ -458,7 +474,7 @@ done
             message["payload"]["message"]
                 .as_str()
                 .unwrap()
-                .contains("is deleted; restore it before continuing")
+                .contains("is archived; unarchive it before continuing")
         );
     }
 
@@ -527,6 +543,46 @@ done
             .await
             .unwrap();
         assert_eq!(resume_response.status(), StatusCode::OK);
+
+        let archive_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/sessions/{}/archive", session.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(archive_response.status(), StatusCode::OK);
+        let archive_body: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(archive_response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(archive_body["deletedAt"].as_str().is_some());
+
+        let unarchive_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/sessions/{}/unarchive", session.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(unarchive_response.status(), StatusCode::OK);
+        let unarchive_body: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(unarchive_response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(unarchive_body["deletedAt"].is_null());
 
         let delete_response = app
             .clone()

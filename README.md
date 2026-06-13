@@ -59,7 +59,7 @@ cd claude-remote-web-v0.1.0-linux-x86_64
 ./claude-remote-web
 ```
 
-Release binaries include the Web UI, so `web_dir` is optional. Keep the default `bind = "127.0.0.1:8787"` and use SSH port forwarding when accessing a remote devbox.
+Release binaries include the Web UI, so `web_dir` is optional. By default the daemon binds on loopback and may let the OS choose an available port; set `bind = "127.0.0.1:8787"` in the config file if you want a stable port. Use SSH port forwarding when accessing a remote devbox.
 
 macOS binaries are not signed or notarized in the initial release pipeline. If macOS blocks first launch, right-click the binary in Finder and choose Open, or run:
 

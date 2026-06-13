@@ -37,11 +37,17 @@ function ToolBlockView({ block }: { block: ToolBlock }) {
           <pre>{block.inputSummary}</pre>
         </section>
       )}
-      {block.resultSummary.trim() && (
+      {block.resultSummary.trim() && block.resultDisplay === 'visible' && (
         <section className="block-section">
           <h4>Result</h4>
           <pre>{block.resultSummary}</pre>
         </section>
+      )}
+      {block.resultSummary.trim() && block.resultDisplay === 'collapsed' && (
+        <details className="block-section collapsed-result">
+          <summary>Result</summary>
+          <pre>{block.resultSummary}</pre>
+        </details>
       )}
       <RawEventDetails rawEvents={block.rawEvents} />
     </article>

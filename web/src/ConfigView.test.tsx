@@ -12,14 +12,20 @@ const configResponse = {
     dataDir: '/home/user/.claude-remote-web',
     launcher: ['claude'],
     webDir: null,
-    defaultPermissionMode: 'acceptEdits'
+    defaultPermissionMode: 'acceptEdits',
+    worktreesDir: null,
+    worktreeBranchPrefix: 'pin',
+    worktreeBaseRef: 'fresh'
   },
   file: {
     bind: '127.0.0.1:8787',
     dataDir: '/home/user/.claude-remote-web',
     launcher: ['claude'],
     webDir: null,
-    defaultPermissionMode: 'acceptEdits'
+    defaultPermissionMode: 'acceptEdits',
+    worktreesDir: null,
+    worktreeBranchPrefix: 'pin',
+    worktreeBaseRef: 'fresh'
   },
   restartRequired: false
 };
@@ -59,6 +65,8 @@ describe('ConfigView', () => {
     expect(await screen.findByDisplayValue('127.0.0.1:8787')).toBeInTheDocument();
     expect(screen.getByText('/home/user/.claude-remote-web/config.toml')).toBeInTheDocument();
     expect(screen.getByDisplayValue('claude')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('pin')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('fresh')).toBeInTheDocument();
   });
 
   it('saves edited values and shows restart message', async () => {
@@ -67,6 +75,9 @@ describe('ConfigView', () => {
     fireEvent.change(await screen.findByLabelText('Bind address'), { target: { value: '127.0.0.1:8789' } });
     fireEvent.change(screen.getByLabelText('Launcher argv'), { target: { value: 'ttadk\nclaude\n-a' } });
     fireEvent.change(screen.getByLabelText('Default permission mode'), { target: { value: 'auto' } });
+    fireEvent.change(screen.getByLabelText('Worktrees directory'), { target: { value: '/tmp/worktrees' } });
+    fireEvent.change(screen.getByLabelText('Worktree branch prefix'), { target: { value: 'crw' } });
+    fireEvent.change(screen.getByLabelText('Worktree base ref'), { target: { value: 'head' } });
     fireEvent.click(screen.getByText('Save config'));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/config', expect.objectContaining({ method: 'PUT' })));
@@ -76,7 +87,10 @@ describe('ConfigView', () => {
       dataDir: '/home/user/.claude-remote-web',
       launcher: ['ttadk', 'claude', '-a'],
       webDir: null,
-      defaultPermissionMode: 'auto'
+      defaultPermissionMode: 'auto',
+      worktreesDir: '/tmp/worktrees',
+      worktreeBranchPrefix: 'crw',
+      worktreeBaseRef: 'head'
     });
     expect(await screen.findByText('Config saved. Restart the daemon for changes to take effect.')).toBeInTheDocument();
   });

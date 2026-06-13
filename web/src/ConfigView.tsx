@@ -8,6 +8,9 @@ type FormState = {
   launcher: string;
   webDir: string;
   defaultPermissionMode: string;
+  worktreesDir: string;
+  worktreeBranchPrefix: string;
+  worktreeBaseRef: 'fresh' | 'head';
 };
 
 function formFromConfig(config: ConfigValues): FormState {
@@ -16,7 +19,10 @@ function formFromConfig(config: ConfigValues): FormState {
     dataDir: config.dataDir,
     launcher: config.launcher.join('\n'),
     webDir: config.webDir ?? '',
-    defaultPermissionMode: config.defaultPermissionMode
+    defaultPermissionMode: config.defaultPermissionMode,
+    worktreesDir: config.worktreesDir ?? '',
+    worktreeBranchPrefix: config.worktreeBranchPrefix,
+    worktreeBaseRef: config.worktreeBaseRef
   };
 }
 
@@ -29,7 +35,10 @@ function configFromForm(form: FormState): ConfigValues {
       .map((value) => value.trim())
       .filter(Boolean),
     webDir: form.webDir.trim() || null,
-    defaultPermissionMode: form.defaultPermissionMode
+    defaultPermissionMode: form.defaultPermissionMode,
+    worktreesDir: form.worktreesDir.trim() || null,
+    worktreeBranchPrefix: form.worktreeBranchPrefix,
+    worktreeBaseRef: form.worktreeBaseRef
   };
 }
 
@@ -118,6 +127,21 @@ export default function ConfigView() {
               <option value="acceptEdits">acceptEdits</option>
               <option value="auto">auto</option>
               <option value="default">default</option>
+            </select>
+          </label>
+          <label>
+            Worktrees directory
+            <input value={form.worktreesDir} onChange={(event) => updateField('worktreesDir', event.target.value)} />
+          </label>
+          <label>
+            Worktree branch prefix
+            <input value={form.worktreeBranchPrefix} onChange={(event) => updateField('worktreeBranchPrefix', event.target.value)} />
+          </label>
+          <label>
+            Worktree base ref
+            <select value={form.worktreeBaseRef} onChange={(event) => updateField('worktreeBaseRef', event.target.value as FormState['worktreeBaseRef'])}>
+              <option value="fresh">fresh</option>
+              <option value="head">head</option>
             </select>
           </label>
           <button type="submit" disabled={saving}>{saving ? 'Saving...' : 'Save config'}</button>

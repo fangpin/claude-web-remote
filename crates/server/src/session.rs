@@ -194,7 +194,7 @@ impl SessionManager {
         let meta = self.store.load_meta(session_id).await?;
         if meta.deleted_at.is_some() {
             return Err(AppError::InvalidRequest(format!(
-                "session {session_id} is deleted; restore it before continuing"
+                "session {session_id} is archived; unarchive it before continuing"
             )));
         }
         Ok(meta)
@@ -262,7 +262,7 @@ impl SessionManager {
         result
     }
 
-    pub async fn delete_session(&self, session_id: Uuid) -> AppResult<SessionInfo> {
+    pub async fn archive_session(&self, session_id: Uuid) -> AppResult<SessionInfo> {
         let _meta = self.load_active_meta(session_id).await?;
         self.stop_running_process(session_id).await?;
         let meta = self
@@ -270,7 +270,7 @@ impl SessionManager {
             .update_meta(session_id, |meta| {
                 if meta.deleted_at.is_some() {
                     return Err(AppError::InvalidRequest(format!(
-                        "session {session_id} is deleted; restore it before continuing"
+                        "session {session_id} is archived; unarchive it before continuing"
                     )));
                 }
                 let now = Utc::now();
@@ -283,13 +283,51 @@ impl SessionManager {
         Ok(SessionInfo::from(meta))
     }
 
+    pub async fn delete_session(&self, session_id: Uuid) -> AppResult<SessionInfo> {
+        let _meta = self.load_active_meta(session_id).await?;
+        self.stop_running_process(session_id).await?;
+        let meta = self
+            .store
+            .update_meta(session_id, |meta| {
+                if meta.deleted_at.is_some() {
+                    return Err(AppError::InvalidRequest(format!(
+                        "session {session_id} is archived; unarchive it before continuing"
+                    )));
+                }
+                let now = Utc::now();
+                meta.deleted_at = Some(now);
+                meta.status = SessionStatus::Stopped;
+                meta.updated_at = now;
+                Ok(())
+            })
+            .await?;
+        Ok(SessionInfo::from(meta))
+    }
+
+    pub async fn unarchive_session(&self, session_id: Uuid) -> AppResult<SessionInfo> {
+        let meta = self
+            .store
+            .update_meta(session_id, |meta| {
+                if meta.deleted_at.is_none() {
+                    return Err(AppError::InvalidRequest(format!(
+                        "session {session_id} is not archived"
+                    )));
+                }
+                meta.deleted_at = None;
+                meta.updated_at = Utc::now();
+                Ok(())
+            })
+            .await?;
+        Ok(SessionInfo::from(meta))
+    }
+
     pub async fn restore_session(&self, session_id: Uuid) -> AppResult<SessionInfo> {
         let meta = self
             .store
             .update_meta(session_id, |meta| {
                 if meta.deleted_at.is_none() {
                     return Err(AppError::InvalidRequest(format!(
-                        "session {session_id} is not deleted"
+                        "session {session_id} is not archived"
                     )));
                 }
                 meta.deleted_at = None;
@@ -308,11 +346,11 @@ impl SessionManager {
         };
         if meta.deleted_at.is_none() {
             return Err(AppError::InvalidRequest(format!(
-                "session {session_id} must be deleted before permanent removal"
+                "session {session_id} must be archived before deletion"
             )));
         }
         self.stop_running_process(session_id).await?;
-        self.store.remove_session_dir(session_id).await
+        self.store.remove_archived_session_dir(session_id).await
     }
 
     pub async fn restore_active_sessions(&self) -> AppResult<()> {
@@ -396,7 +434,7 @@ impl SessionManager {
             .update_meta(meta.id, |latest| {
                 if latest.deleted_at.is_some() {
                     return Err(AppError::InvalidRequest(format!(
-                        "session {} is deleted; restore it before continuing",
+                        "session {} is archived; unarchive it before continuing",
                         latest.id
                     )));
                 }
@@ -478,13 +516,24 @@ impl SessionManager {
         };
 
         let (tx, _) = broadcast::channel(256);
-        self.running.lock().await.insert(
-            meta.id,
-            RunningSession {
-                process,
-                tx: tx.clone(),
-            },
-        );
+        {
+            let mut running = self.running.lock().await;
+            let latest = self.store.load_meta(meta.id).await?;
+            if latest.deleted_at.is_some() || latest.status == SessionStatus::Stopped {
+                process.kill().await?;
+                return Err(AppError::InvalidRequest(format!(
+                    "session {} start was cancelled",
+                    latest.id
+                )));
+            }
+            running.insert(
+                meta.id,
+                RunningSession {
+                    process,
+                    tx: tx.clone(),
+                },
+            );
+        }
 
         let store = self.store.clone();
         let running = self.running.clone();
@@ -1419,7 +1468,7 @@ done
     }
 
     #[tokio::test]
-    async fn soft_delete_hides_session_and_restore_shows_it_again() {
+    async fn archive_hides_session_and_unarchive_shows_it_again() {
         let temp = tempfile::tempdir().unwrap();
         let bin = fake_claude(temp.path());
         let store = EventStore::new(temp.path().join("data")).await.unwrap();
@@ -1432,16 +1481,16 @@ done
         let session = manager
             .create_session(CreateSessionRequest {
                 cwd: temp.path().to_path_buf(),
-                name: Some("delete me".to_string()),
+                name: Some("archive me".to_string()),
                 permission_mode: None,
                 worktree: None,
             })
             .await
             .unwrap();
 
-        let deleted = manager.delete_session(session.id).await.unwrap();
-        assert!(deleted.deleted_at.is_some());
-        assert_eq!(deleted.status, SessionStatus::Stopped);
+        let archived = manager.archive_session(session.id).await.unwrap();
+        assert!(archived.deleted_at.is_some());
+        assert_eq!(archived.status, SessionStatus::Stopped);
         assert!(
             manager
                 .list_sessions(SessionListFilter::Active)
@@ -1458,8 +1507,8 @@ done
             session.id
         );
 
-        let restored = manager.restore_session(session.id).await.unwrap();
-        assert_eq!(restored.deleted_at, None);
+        let unarchived = manager.unarchive_session(session.id).await.unwrap();
+        assert_eq!(unarchived.deleted_at, None);
         assert_eq!(
             manager
                 .list_sessions(SessionListFilter::Active)
@@ -1618,7 +1667,7 @@ done
     }
 
     #[tokio::test]
-    async fn delete_during_starting_reservation_prevents_late_running_resurrection() {
+    async fn archive_during_starting_reservation_prevents_late_running_resurrection() {
         let temp = tempfile::tempdir().unwrap();
         let wrapper = temp.path().join("slow-wrapper.sh");
         fs::write(
@@ -1660,12 +1709,12 @@ done
         let starting = wait_for_status(&store, session_id, SessionStatus::Starting).await;
         assert_eq!(starting.status, SessionStatus::Starting);
 
-        let deleted = manager.delete_session(session_id).await.unwrap();
+        let archived = manager.archive_session(session_id).await.unwrap();
         drop(busy_executable);
         let resume_result = resume.await.unwrap();
         let final_meta = store.load_meta(session_id).await.unwrap();
 
-        assert!(deleted.deleted_at.is_some());
+        assert!(archived.deleted_at.is_some());
         assert!(matches!(resume_result, Err(AppError::InvalidRequest(_))));
         assert!(final_meta.deleted_at.is_some());
         assert_eq!(final_meta.status, SessionStatus::Stopped);

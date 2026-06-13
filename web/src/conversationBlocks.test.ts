@@ -55,7 +55,7 @@ describe('buildConversationBlocks', () => {
     ]);
   });
 
-  it('merges consecutive system text events into one message block', () => {
+  it('preserves system text events as raw details only', () => {
     const blocks = buildConversationBlocks([
       event(1, 'system', { message: 'daemon notice' }),
       event(2, 'system', { status: 'session resumed' })
@@ -63,27 +63,28 @@ describe('buildConversationBlocks', () => {
 
     expect(blocks).toEqual([
       {
-        id: 'message-system-1',
-        type: 'message',
-        role: 'system',
-        text: 'daemon notice\n\nsession resumed',
-        eventIds: [1, 2],
-        rawEvents: [
-          { id: 1, kind: 'system', payload: { message: 'daemon notice' } },
-          { id: 2, kind: 'system', payload: { status: 'session resumed' } }
-        ]
+        id: 'raw-1',
+        type: 'raw',
+        label: 'system',
+        eventIds: [1],
+        rawEvents: [{ id: 1, kind: 'system', payload: { message: 'daemon notice' } }]
+      },
+      {
+        id: 'raw-2',
+        type: 'raw',
+        label: 'system',
+        eventIds: [2],
+        rawEvents: [{ id: 2, kind: 'system', payload: { status: 'session resumed' } }]
       }
     ]);
   });
 
-  it('extracts text from Claude stream-json content blocks', () => {
+  it('extracts assistant text and preserves Claude stream-json system content as raw details only', () => {
     const assistantPayload = { type: 'assistant', message: { content: [{ type: 'text', text: 'done' }] } };
-    const userPayload = { type: 'user', message: { content: [{ type: 'text', text: 'please continue' }] } };
     const systemPayload = { type: 'system', content: [{ type: 'text', text: 'session ready' }] };
     const blocks = buildConversationBlocks([
       event(1, 'assistant', assistantPayload),
-      event(2, 'user', userPayload),
-      event(3, 'system', systemPayload)
+      event(2, 'system', systemPayload)
     ]);
 
     expect(blocks).toEqual([
@@ -96,20 +97,29 @@ describe('buildConversationBlocks', () => {
         rawEvents: [{ id: 1, kind: 'assistant', payload: assistantPayload }]
       },
       {
-        id: 'message-user-2',
-        type: 'message',
-        role: 'user',
-        text: 'please continue',
+        id: 'raw-2',
+        type: 'raw',
+        label: 'system',
         eventIds: [2],
-        rawEvents: [{ id: 2, kind: 'user', payload: userPayload }]
-      },
+        rawEvents: [{ id: 2, kind: 'system', payload: systemPayload }]
+      }
+    ]);
+  });
+
+  it('preserves Claude stream-json user text content as raw details only', () => {
+    const userPayload = {
+      type: 'user',
+      message: { role: 'user', content: [{ type: 'text', text: 'Base directory for this skill: /tmp/skill' }] }
+    };
+    const blocks = buildConversationBlocks([event(1, 'user', userPayload)]);
+
+    expect(blocks).toEqual([
       {
-        id: 'message-system-3',
-        type: 'message',
-        role: 'system',
-        text: 'session ready',
-        eventIds: [3],
-        rawEvents: [{ id: 3, kind: 'system', payload: systemPayload }]
+        id: 'raw-1',
+        type: 'raw',
+        label: 'user',
+        eventIds: [1],
+        rawEvents: [{ id: 1, kind: 'user', payload: userPayload }]
       }
     ]);
   });
@@ -128,12 +138,47 @@ describe('buildConversationBlocks', () => {
         status: 'completed',
         inputSummary: 'command: git status',
         resultSummary: 'clean',
+        resultDisplay: 'collapsed',
         eventIds: [1, 2],
         rawEvents: [
           { id: 1, kind: 'tool', payload: { type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'git status' } } },
           { id: 2, kind: 'tool', payload: { type: 'tool_result', tool_use_id: 'toolu_1', content: 'clean' } }
         ]
       }
+    ]);
+  });
+
+  it('marks Bash tool results as collapsed by default', () => {
+    const blocks = buildConversationBlocks([
+      event(1, 'tool', { type: 'tool_use', id: 'toolu_bash', name: 'Bash', input: { command: 'npm test' } }),
+      event(2, 'tool', { type: 'tool_result', tool_use_id: 'toolu_bash', content: 'large stdout' })
+    ]);
+
+    expect(blocks[0]).toMatchObject({
+      id: 'tool-toolu_bash',
+      type: 'tool',
+      name: 'Bash',
+      status: 'completed',
+      inputSummary: 'command: npm test',
+      resultSummary: 'large stdout',
+      resultDisplay: 'collapsed'
+    });
+  });
+
+  it('marks Read Glob and Grep tool results as hidden by default', () => {
+    const blocks = buildConversationBlocks([
+      event(1, 'tool', { type: 'tool_use', id: 'toolu_read', name: 'Read', input: { file_path: '/tmp/a.txt' } }),
+      event(2, 'tool', { type: 'tool_result', tool_use_id: 'toolu_read', content: 'file contents' }),
+      event(3, 'tool', { type: 'tool_use', id: 'toolu_glob', name: 'Glob', input: { pattern: '**/*.ts' } }),
+      event(4, 'tool', { type: 'tool_result', tool_use_id: 'toolu_glob', content: '/tmp/a.ts\n/tmp/b.ts' }),
+      event(5, 'tool', { type: 'tool_use', id: 'toolu_grep', name: 'Grep', input: { pattern: 'TODO' } }),
+      event(6, 'tool', { type: 'tool_result', tool_use_id: 'toolu_grep', content: 'line 1\nline 2' })
+    ]);
+
+    expect(blocks).toMatchObject([
+      { id: 'tool-toolu_read', type: 'tool', name: 'Read', resultDisplay: 'hidden', resultSummary: 'file contents' },
+      { id: 'tool-toolu_glob', type: 'tool', name: 'Glob', resultDisplay: 'hidden', resultSummary: '/tmp/a.ts\n/tmp/b.ts' },
+      { id: 'tool-toolu_grep', type: 'tool', name: 'Grep', resultDisplay: 'hidden', resultSummary: 'line 1\nline 2' }
     ]);
   });
 
@@ -156,6 +201,7 @@ describe('buildConversationBlocks', () => {
         status: 'completed',
         inputSummary: 'file_path: /tmp/a.txt',
         resultSummary: 'contents',
+        resultDisplay: 'hidden',
         eventIds: [1, 2],
         rawEvents: [
           { id: 1, kind: 'assistant', payload: assistantPayload },
@@ -178,6 +224,7 @@ describe('buildConversationBlocks', () => {
         status: 'running',
         inputSummary: 'file_path: /tmp/example.txt',
         resultSummary: '',
+        resultDisplay: 'visible',
         eventIds: [1],
         rawEvents: [
           { id: 1, kind: 'tool', payload: { type: 'tool_use', id: 'toolu_read', name: 'Read', input: { file_path: '/tmp/example.txt' } } }
@@ -199,6 +246,7 @@ describe('buildConversationBlocks', () => {
       status: 'failed',
       inputSummary: 'file_path: /tmp/missing.txt',
       resultSummary: 'Error: file not found',
+      resultDisplay: 'visible',
       eventIds: [1, 2]
     });
   });
@@ -212,14 +260,17 @@ describe('buildConversationBlocks', () => {
       event(5, 'tool', { type: 'tool_use', id: 'toolu_structured_error', name: 'Read', input: { file_path: '/tmp/missing.txt' } }),
       event(6, 'tool', { type: 'tool_result', tool_use_id: 'toolu_structured_error', is_error: true, content: 'file missing' }),
       event(7, 'tool', { type: 'tool_use', id: 'toolu_status_error', name: 'Read', input: { file_path: '/tmp/missing2.txt' } }),
-      event(8, 'tool', { type: 'tool_result', tool_use_id: 'toolu_status_error', status: 'error', content: 'missing2' })
+      event(8, 'tool', { type: 'tool_result', tool_use_id: 'toolu_status_error', status: 'error', content: 'missing2' }),
+      event(9, 'tool', { type: 'tool_use', id: 'toolu_failed_text', name: 'Bash', input: { command: 'npm test' } }),
+      event(10, 'tool', { type: 'tool_result', tool_use_id: 'toolu_failed_text', content: 'Command failed with exit code 1' })
     ]);
 
     expect(blocks).toMatchObject([
-      { id: 'tool-toolu_success_text', type: 'tool', status: 'completed', resultSummary: 'Found 0 errors' },
-      { id: 'tool-toolu_no_errors', type: 'tool', status: 'completed', resultSummary: 'No errors detected' },
-      { id: 'tool-toolu_structured_error', type: 'tool', status: 'failed', resultSummary: 'file missing' },
-      { id: 'tool-toolu_status_error', type: 'tool', status: 'failed', resultSummary: 'missing2' }
+      { id: 'tool-toolu_success_text', type: 'tool', status: 'completed', resultSummary: 'Found 0 errors', resultDisplay: 'collapsed' },
+      { id: 'tool-toolu_no_errors', type: 'tool', status: 'completed', resultSummary: 'No errors detected', resultDisplay: 'hidden' },
+      { id: 'tool-toolu_structured_error', type: 'tool', status: 'failed', resultSummary: 'file missing', resultDisplay: 'visible' },
+      { id: 'tool-toolu_status_error', type: 'tool', status: 'failed', resultSummary: 'missing2', resultDisplay: 'visible' },
+      { id: 'tool-toolu_failed_text', type: 'tool', status: 'failed', resultSummary: 'Command failed with exit code 1', resultDisplay: 'visible' }
     ]);
   });
 
@@ -445,6 +496,34 @@ describe('buildConversationBlocks', () => {
         message: 'failed to start',
         eventIds: [1],
         rawEvents: [{ id: 1, kind: 'error', payload: { error: 'failed to start' } }]
+      }
+    ]);
+  });
+
+  it('preserves Node TLS warning stderr lines as raw details only', () => {
+    const firstPayload = {
+      line: "(node:3972575) Warning: Setting the NODE_TLS_REJECT_UNAUTHORIZED environment variable to '0' makes TLS connections and HTTPS requests insecure by disabling certificate verification."
+    };
+    const secondPayload = { line: 'Use `node --trace-warnings ...` to show where the warning was created' };
+    const blocks = buildConversationBlocks([
+      event(1, 'error', firstPayload),
+      event(2, 'error', secondPayload)
+    ]);
+
+    expect(blocks).toEqual([
+      {
+        id: 'raw-1',
+        type: 'raw',
+        label: 'error',
+        eventIds: [1],
+        rawEvents: [{ id: 1, kind: 'error', payload: firstPayload }]
+      },
+      {
+        id: 'raw-2',
+        type: 'raw',
+        label: 'error',
+        eventIds: [2],
+        rawEvents: [{ id: 2, kind: 'error', payload: secondPayload }]
       }
     ]);
   });

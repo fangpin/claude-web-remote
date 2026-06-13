@@ -141,6 +141,21 @@ impl EventStore {
         Ok(sessions)
     }
 
+    pub async fn remove_archived_session_dir(&self, session_id: Uuid) -> AppResult<()> {
+        let _guard = self.write_lock.lock().await;
+        let meta = self.load_meta_unlocked(session_id).await?;
+        if meta.deleted_at.is_none() {
+            return Err(AppError::InvalidRequest(format!(
+                "session {session_id} must be archived before deletion"
+            )));
+        }
+        let dir = self.session_dir(session_id);
+        if fs::try_exists(&dir).await? {
+            fs::remove_dir_all(dir).await?;
+        }
+        Ok(())
+    }
+
     pub async fn remove_session_dir(&self, session_id: Uuid) -> AppResult<()> {
         let _guard = self.write_lock.lock().await;
         let dir = self.session_dir(session_id);
@@ -408,6 +423,20 @@ mod tests {
             listed.iter().map(|meta| meta.id).collect::<Vec<_>>(),
             vec![id]
         );
+    }
+
+    #[tokio::test]
+    async fn remove_archived_session_dir_rejects_active_sessions() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = EventStore::new(temp.path()).await.unwrap();
+        let id = Uuid::new_v4();
+        let meta = meta(id, "active", Utc::now());
+        store.save_meta(&meta).await.unwrap();
+
+        let err = store.remove_archived_session_dir(id).await.unwrap_err();
+
+        assert!(err.to_string().contains("must be archived before deletion"));
+        assert!(store.load_meta(id).await.is_ok());
     }
 
     #[tokio::test]
