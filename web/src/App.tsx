@@ -24,6 +24,12 @@ import './App.css';
 
 const emptyTaskGroups: TaskGroups = { background: [], finished: [] };
 const EVENT_RENDER_LIMIT = 80;
+const EMPTY_STATE_PROMPTS = [
+  'Inspect the current project',
+  'Explain how this app is structured',
+  'Run the relevant tests',
+  'Review recent changes'
+];
 type SessionListMode = 'active' | 'archived';
 type AppView = 'sessions' | 'config';
 
@@ -51,6 +57,7 @@ export default function App() {
   const [permissionMode, setPermissionMode] = useState('bypassPermissions');
   const [useWorktree, setUseWorktree] = useState(false);
   const [message, setMessage] = useState('');
+  const [isSending, setIsSending] = useState(false);
   const messageInputRef = useRef<HTMLTextAreaElement | null>(null);
   const [autocompleteToken, setAutocompleteToken] = useState<SlashCommandToken | null>(null);
   const [suggestions, setSuggestions] = useState<ClaudeCommand[]>([]);
@@ -89,6 +96,9 @@ export default function App() {
   );
   const hiddenEventCount = displayableEvents.length - visibleEvents.length;
   const isActiveSessionMode = listMode === 'active' && !activeSession?.deletedAt;
+  const isComposerSession = isActiveSessionMode && activeSession?.status === 'running';
+  const hasDraft = message.trim().length > 0;
+  const canSend = isComposerSession && hasDraft && !isSending;
 
   const recentDirectories = useMemo(() => {
     const seen = new Set<string>();
@@ -294,9 +304,10 @@ export default function App() {
 
   async function onSend(event: FormEvent) {
     event.preventDefault();
-    if (!activeId || !message.trim() || !isActiveSessionMode) return;
+    if (!activeId || !canSend) return;
     const text = message;
     setError(null);
+    setIsSending(true);
     setMessage('');
     closeAutocomplete();
     try {
@@ -305,6 +316,8 @@ export default function App() {
       setError(err instanceof Error ? err.message : String(err));
       setMessage(text);
       refreshAutocomplete(text, text.length);
+    } finally {
+      setIsSending(false);
     }
   }
 
@@ -323,6 +336,15 @@ export default function App() {
     const suggestion = suggestions[activeSuggestionIndex];
     if (!suggestion) return;
     completeSuggestion(suggestion);
+  }
+
+  function useEmptyStatePrompt(prompt: string) {
+    setMessage(prompt);
+    closeAutocomplete();
+    requestAnimationFrame(() => {
+      messageInputRef.current?.focus();
+      messageInputRef.current?.setSelectionRange(prompt.length, prompt.length);
+    });
   }
 
   function onMessageKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -709,11 +731,34 @@ export default function App() {
                       Showing latest {EVENT_RENDER_LIMIT} events. {hiddenEventCount} older events hidden.
                     </div>
                   )}
+                  {activeBlocks.length === 0 && hiddenEventCount === 0 && (
+                    <section className="conversation-empty" aria-label="Conversation starter">
+                      <span className="empty-eyebrow">Ready when you are</span>
+                      <h3>What would you like Claude to do?</h3>
+                      <p>Ask Claude to inspect this repo, explain behavior, run tests, or make a change.</p>
+                      {isComposerSession && (
+                        <div className="empty-prompts" aria-label="Prompt suggestions">
+                          {EMPTY_STATE_PROMPTS.map((prompt) => (
+                            <button key={prompt} type="button" onClick={() => useEmptyStatePrompt(prompt)}>
+                              {prompt}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </section>
+                  )}
                   <ConversationBlockList blocks={activeBlocks} />
                 </div>
               </div>
-              {isActiveSessionMode && activeSession.status === 'running' && (
+              {isComposerSession && (
                 <form className="composer" onSubmit={onSend} ref={composerRef} aria-label="Message composer">
+                  <div className="composer-context" aria-label="Composer context">
+                    <span title={activeSession.cwd}>cwd: {activeSession.cwd}</span>
+                    <span>permission: {activeSession.permissionMode}</span>
+                    <span>status: {runtimeStatusLabels[activeSession.runtimeStatus ?? activeSession.status]}</span>
+                    {activeSession.worktree && <span title={activeSession.worktree.branch}>branch: {activeSession.worktree.branch}</span>}
+                    {activeSession.worktree && <span title={activeSession.worktree.sourceCwd}>source: {activeSession.worktree.sourceCwd}</span>}
+                  </div>
                   <div className="composer-input">
                     <label className="sr-only" htmlFor="message-input">Message</label>
                     <textarea
@@ -721,7 +766,7 @@ export default function App() {
                       ref={messageInputRef}
                       value={message}
                       aria-label="Message"
-                      placeholder="Ask Claude to inspect, edit, test, or explain..."
+                      placeholder="Ask Claude to inspect code, explain behavior, run tests, or make a change..."
                       onChange={(event) => {
                         setMessage(event.target.value);
                         refreshAutocomplete(event.target.value, event.target.selectionStart);
@@ -732,6 +777,10 @@ export default function App() {
                     />
                     {suggestions.length > 0 && autocompleteToken && (
                       <div className="autocomplete" role="listbox" aria-label="Claude command suggestions">
+                        <div className="autocomplete-header">
+                          <strong>Commands</strong>
+                          <span>Use ↑↓ to navigate, Enter to insert, Esc to close</span>
+                        </div>
                         {suggestions.map((suggestion, index) => (
                           <button
                             key={suggestion.name}
@@ -749,7 +798,13 @@ export default function App() {
                       </div>
                     )}
                   </div>
-                  <button className="send-button" type="submit">Send</button>
+                  <div className="composer-actions">
+                    <span>Type / for commands</span>
+                    <div>
+                      <button className="composer-stop-button" type="button" onClick={() => onStop(false)}>Stop session</button>
+                      <button className="send-button" type="submit" disabled={!canSend}>{isSending ? 'Sending...' : 'Send'}</button>
+                    </div>
+                  </div>
                 </form>
               )}
             </>
