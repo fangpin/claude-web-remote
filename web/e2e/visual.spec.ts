@@ -45,6 +45,14 @@ const sessions = [
     cwd: '/Users/example/repos/other-project',
     status: 'exited',
     runtimeStatus: 'ended'
+  },
+  {
+    ...baseSession,
+    id: 's4',
+    name: 'Empty Conversation Starter',
+    cwd: '/Users/example/repos/empty-state-validation-with-long-directory-name',
+    status: 'running',
+    runtimeStatus: 'waiting'
   }
 ];
 
@@ -72,16 +80,18 @@ const taskGroups = {
       sessionName: 'Visual Regression Session',
       sessionCwd: sessions[0].cwd,
       toolKind: 'Agent',
-      title: 'Agent: inspect responsive Claude-like output rendering for overlap and overflow',
+      title: 'Agent: inspect responsive Claude-like output rendering for overlap and overflow with a deliberately long task title',
       status: 'completed',
       startedAt: '2026-06-12T00:01:00Z',
       finishedAt: '2026-06-12T00:02:00Z',
       startEventId: 7,
       finishEventId: 8,
-      summary: 'Checked sidebar, inspector, composer, conversation blocks, and task cards.'
+      summary: 'Checked sidebar, inspector, composer, conversation blocks, task cards, and long summaries that must wrap without widening the inspector.'
     }
   ]
 };
+
+const longToken = 'supercalifragilisticexpialidocious'.repeat(8);
 
 const visualEvents = [
   {
@@ -98,7 +108,7 @@ const visualEvents = [
     kind: 'assistant',
     payload: {
       message:
-        'I will inspect the session timeline, run browser layout checks, and keep raw event details collapsed for replay.'
+        `I will inspect the session timeline, run browser layout checks, and keep raw event details collapsed for replay. A long token should wrap safely: ${longToken}.`
     }
   },
   {
@@ -108,11 +118,11 @@ const visualEvents = [
     kind: 'tool',
     payload: {
       type: 'tool_use',
-      id: 'tool-read',
-      name: 'Read',
+      id: 'tool-bash',
+      name: 'Bash',
       input: {
-        file_path:
-          '/Users/example/repos/claude-web-remote/web/src/App.css'
+        command: 'git status --short',
+        description: 'Inspect working tree state'
       }
     }
   },
@@ -123,8 +133,8 @@ const visualEvents = [
     kind: 'tool',
     payload: {
       type: 'tool_result',
-      tool_use_id: 'tool-read',
-      content: 'Read 420 lines from App.css. Result should stay compact and collapsed when useful.'
+      tool_use_id: 'tool-bash',
+      content: ' M web/e2e/visual.spec.ts\n M web/src/App.css'
     }
   },
   {
@@ -188,7 +198,7 @@ const visualEvents = [
     kind: 'assistant',
     payload: {
       message:
-        'The visible conversation now includes ordinary text, compact tool activity, background Bash activity, and Agent task activity.'
+        'The visible conversation now includes ordinary text, compact tool activity, background Bash activity, Agent task activity, and a deliberately long token: /Users/example/repos/claude-web-remote/web/src/components/really-long-path/branch-pin-visual-responsive-layout-validation-with-long-branch-name.tsx'
     }
   }
 ];
@@ -246,7 +256,11 @@ async function installWebSocketMock(page: Page) {
         window.setTimeout(() => {
           this.readyState = VisualWebSocket.OPEN;
           this.onopen?.(new Event('open'));
-          for (const event of events as unknown[]) {
+          const url = new URL(this.url);
+          const sessionMatch = url.pathname.match(/\/api\/sessions\/([^/]+)\/events/);
+          const sessionId = sessionMatch?.[1];
+          const visibleEvents = (events as { sessionId?: string }[]).filter((event) => event.sessionId === sessionId);
+          for (const event of visibleEvents) {
             this.onmessage?.(new MessageEvent('message', { data: JSON.stringify(event) }));
           }
         }, 25);
@@ -318,11 +332,25 @@ async function expectViewportContains(locator: Locator, name: string) {
   expect(box.x, `${name} should not render past the left viewport edge`).toBeGreaterThanOrEqual(-1);
 }
 
+async function expectNoHorizontalElementOverflow(locator: Locator, name: string) {
+  const overflow = await locator.evaluate((element) => element.scrollWidth - element.clientWidth);
+  expect(overflow, `${name} should not create horizontal element overflow`).toBeLessThanOrEqual(1);
+}
+
+async function expectComposerPinnedBelowEvents(page: Page) {
+  const eventsBox = await boxFor(page.locator('.events'), 'conversation event stream');
+  const composerBox = await boxFor(page.getByRole('form', { name: 'Message composer' }), 'composer');
+  expect(composerBox.y, 'composer should sit below the scrollable event stream').toBeGreaterThanOrEqual(
+    eventsBox.y + eventsBox.height - 1
+  );
+}
+
 test.beforeEach(async ({ page }) => {
   await installWebSocketMock(page);
   await installApiMocks(page);
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Visual Regression Session' })).toBeVisible();
+  await expect(page.locator('button.session', { hasText: 'Visual Regression Session' })).toBeVisible();
+  await expect(page.locator('.message-block.assistant').first()).toContainText('browser layout checks');
   await expect(page.locator('.tool-block')).toHaveCount(1);
   await expect(page.locator('.task-block')).toHaveCount(2);
 });
@@ -338,26 +366,62 @@ test('Claude-like UI stays readable across key viewports', async ({ page }) => {
   await boxFor(rail, 'primary rail');
   await boxFor(sidebar, 'session sidebar');
   await boxFor(workspace, 'conversation workspace');
-  await boxFor(inspector, 'session inspector');
   await boxFor(events, 'conversation event stream');
   await boxFor(composer, 'composer');
   await expect(page.locator('.message-block.assistant').first()).toContainText('browser layout checks');
-  await expect(page.locator('.tool-block.completed')).toContainText('Read');
+  await expect(page.locator('.tool-block.completed')).toContainText('Bash');
+  await expect(page.locator('.tool-block.completed')).toContainText('git status --short');
   await expect(page.locator('.task-block.running')).toContainText('Run browser visual layout verification');
   await expect(page.locator('.task-block.completed')).toContainText('Inspect responsive UI affordances');
-  await expect(page.getByRole('tabpanel', { name: 'Session tasks' })).toContainText('visual smoke checks');
 
   await expectNoHorizontalPageOverflow(page);
   await expectViewportContains(composer, 'composer');
-  await expectNoMeaningfulOverlap(events, composer, 'event stream and composer');
+  await expectComposerPinnedBelowEvents(page);
+  await expectNoHorizontalElementOverflow(events, 'event stream');
 
   const viewport = test.info().project.use.viewport!;
-  if (viewport.width > 760) {
-    await expectNoMeaningfulOverlap(sidebar, workspace, 'sidebar and workspace');
-  }
   if (viewport.width > 1020) {
+    await boxFor(inspector, 'session inspector');
+    await expect(inspector.getByRole('button', { name: 'Hide', exact: true })).toBeVisible();
+    await expect(page.getByRole('tabpanel', { name: 'Session tasks' })).toContainText('visual smoke checks');
+    await expectNoMeaningfulOverlap(sidebar, workspace, 'sidebar and workspace');
     await expectNoMeaningfulOverlap(workspace, inspector, 'workspace and inspector');
+  } else {
+    await expectNoMeaningfulOverlap(sidebar, workspace, 'sidebar and workspace');
+
+    const beforeOpenWorkspace = await boxFor(workspace, 'workspace before inspector opens');
+    const showInspector = inspector.getByRole('button', { name: 'Show inspector' });
+    if (await showInspector.isVisible()) {
+      await showInspector.click();
+    }
+    await expect(inspector.getByRole('button', { name: 'Hide', exact: true })).toBeVisible();
+    await expect(page.getByRole('tabpanel', { name: 'Session tasks' })).toContainText('visual smoke checks');
+    const afterOpenWorkspace = await boxFor(workspace, 'workspace after inspector opens');
+    expect(
+      Math.abs(afterOpenWorkspace.width - beforeOpenWorkspace.width),
+      'opening inspector on constrained viewports should not shrink the chat workspace'
+    ).toBeLessThanOrEqual(1);
+    await expectViewportContains(inspector, 'inspector drawer');
   }
+});
+
+test('conversation content can scroll to the final block without composer obstruction', async ({ page }) => {
+  const events = page.locator('.events');
+  const finalMessage = page.locator('.message-block.assistant').last();
+  await events.evaluate((element) => {
+    element.style.scrollBehavior = 'auto';
+    element.scrollTop = element.scrollHeight;
+  });
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+
+  const finalBox = await boxFor(finalMessage, 'final assistant message');
+  const eventsBox = await boxFor(events, 'event stream');
+  const composerBox = await boxFor(page.getByRole('form', { name: 'Message composer' }), 'composer');
+
+  expect(finalBox.y + finalBox.height, 'final block should remain within the scrollable event viewport').toBeLessThanOrEqual(
+    eventsBox.y + eventsBox.height + 1
+  );
+  expect(intersectionArea(finalBox, composerBox), 'composer should not cover the final conversation block').toBeLessThanOrEqual(1);
 });
 
 test('autocomplete remains within the composer and viewport', async ({ page }) => {
@@ -380,4 +444,19 @@ test('autocomplete remains within the composer and viewport', async ({ page }) =
     autocompleteBox.y + autocompleteBox.height,
     'autocomplete should stay above the textarea instead of covering typed text'
   ).toBeLessThanOrEqual(composerBox.y + composerBox.height);
+});
+
+test('empty conversation starter stays visible without colliding with composer', async ({ page }) => {
+  await page.getByRole('button', { name: /Empty Conversation Starter/ }).evaluate((element) => {
+    (element as HTMLButtonElement).click();
+  });
+
+  const starter = page.getByRole('region', { name: 'Conversation starter' });
+  const composer = page.getByRole('form', { name: 'Message composer' });
+
+  await expect(starter).toContainText('What would you like Claude to do?');
+  await boxFor(starter, 'empty conversation starter');
+  await expectViewportContains(composer, 'empty-state composer');
+  await expectNoHorizontalPageOverflow(page);
+  await expectNoMeaningfulOverlap(starter, composer, 'empty starter and composer');
 });

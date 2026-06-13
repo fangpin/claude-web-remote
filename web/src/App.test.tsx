@@ -604,7 +604,7 @@ describe('App', () => {
     const context = await screen.findByLabelText('Composer context');
     expect(within(context).getByText('cwd: /repo/one')).toBeInTheDocument();
     expect(within(context).getByText('permission: acceptEdits')).toBeInTheDocument();
-    expect(within(context).getByText('status: Waiting for you')).toBeInTheDocument();
+    expect(context).toHaveTextContent('status: Waiting for you');
 
     fireEvent.click(sessionButton('Worktree Repo'));
 
@@ -691,6 +691,8 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { name: 'Starting Repo' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Archive' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Message')).toBeDisabled();
+    expect(screen.getByText('Claude is starting. You can send once the session is ready.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Restart' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
   });

@@ -27,13 +27,18 @@ const emptyTaskGroups: TaskGroups = { background: [], finished: [] };
 const EVENT_RENDER_LIMIT = 80;
 const MESSAGE_INPUT_MAX_HEIGHT = 220;
 const EMPTY_STATE_PROMPTS = [
-  'Inspect the current project',
-  'Explain how this app is structured',
+  'Summarize this repository',
+  'Review my current changes',
   'Run the relevant tests',
-  'Review recent changes'
+  'Plan the smallest fix'
 ];
 type SessionListMode = 'active' | 'archived';
 type AppView = 'sessions' | 'config';
+type ObjectPayload = Record<string, unknown>;
+type PendingMessage = {
+  id: number;
+  text: string;
+};
 
 const runtimeStatusLabels = {
   starting: 'Starting',
@@ -44,6 +49,44 @@ const runtimeStatusLabels = {
   stopped: 'Stopped',
   failed: 'Failed'
 };
+
+function isObjectPayload(value: unknown): value is ObjectPayload {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function textFromContent(value: unknown): string | null {
+  if (typeof value === 'string' && value.trim()) return value;
+  if (!Array.isArray(value)) return null;
+  const text = value
+    .map((entry) => (isObjectPayload(entry) && entry.type === 'text' && typeof entry.text === 'string' ? entry.text : null))
+    .filter((entry): entry is string => Boolean(entry?.trim()))
+    .join('\n');
+  return text || null;
+}
+
+function textFromEventPayload(payload: unknown): string | null {
+  if (typeof payload === 'string' && payload.trim()) return payload;
+  if (!isObjectPayload(payload)) return null;
+  const directMessage = payload.message;
+  if (typeof directMessage === 'string' && directMessage.trim()) return directMessage;
+  const directText = payload.text;
+  if (typeof directText === 'string' && directText.trim()) return directText;
+  const directContent = textFromContent(payload.content);
+  if (directContent) return directContent;
+  if (isObjectPayload(directMessage)) {
+    if (typeof directMessage.text === 'string' && directMessage.text.trim()) return directMessage.text;
+    return textFromContent(directMessage.content);
+  }
+  return null;
+}
+
+function normalizedMessageText(text: string): string {
+  return text.replace(/\r\n/g, '\n').trim();
+}
+
+function userEventText(event: UiEvent): string | null {
+  return event.kind === 'user' ? textFromEventPayload(event.payload) : null;
+}
 
 export default function App() {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
@@ -60,7 +103,9 @@ export default function App() {
   const [useWorktree, setUseWorktree] = useState(false);
   const [message, setMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [awaitingClaudeSessionIds, setAwaitingClaudeSessionIds] = useState<Set<string>>(() => new Set());
   const messageInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const autocompleteOptionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [autocompleteToken, setAutocompleteToken] = useState<SlashCommandToken | null>(null);
   const [suggestions, setSuggestions] = useState<ClaudeCommand[]>([]);
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(0);
@@ -78,6 +123,7 @@ export default function App() {
   const sessionTaskRefreshIdRef = useRef(0);
   const listRefreshIdRef = useRef(0);
   const skipNextListRefresh = useRef(false);
+  const pendingMessagesRef = useRef<Record<string, PendingMessage[]>>({});
 
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeId) ?? null,
@@ -103,9 +149,27 @@ export default function App() {
   const hiddenEventCount = displayableEvents.length - visibleEvents.length;
   const isActiveSessionMode = listMode === 'active' && !activeSession?.deletedAt;
   const isComposerSession = isActiveSessionMode && activeSession?.status === 'running';
+  const isAwaitingClaude = activeId ? awaitingClaudeSessionIds.has(activeId) : false;
   const hasDraft = message.trim().length > 0;
   const canSend = isComposerSession && hasDraft && !isSending;
-  const sendStatusText = isSending ? 'Sending message...' : hasDraft ? 'Ready to send' : 'Write a message to send';
+  const composerDisabledReason = !activeSession
+    ? 'Select a session to send a message.'
+    : listMode === 'archived' || activeSession.deletedAt
+      ? 'Archived sessions are read-only. Unarchive to continue.'
+      : activeSession.status === 'starting'
+        ? 'Claude is starting. You can send once the session is ready.'
+        : activeSession.status !== 'running'
+          ? 'This session is stopped. Resume it to continue.'
+          : '';
+  const sendStatusText = !isComposerSession
+    ? composerDisabledReason
+    : isSending
+      ? 'Sending...'
+      : isAwaitingClaude
+        ? 'Sent. Waiting for Claude...'
+        : hasDraft
+          ? 'Ready to send'
+          : 'Message Claude';
 
   const recentDirectories = useMemo(() => {
     const seen = new Set<string>();
@@ -144,6 +208,68 @@ export default function App() {
     });
   }, [sessionSearch, sessions]);
 
+  function addPendingMessage(sessionId: string, text: string): number {
+    const eventId = -Date.now();
+    const pendingEvent: UiEvent = {
+      id: eventId,
+      sessionId,
+      time: new Date().toISOString(),
+      kind: 'user',
+      payload: { message: text, pending: true }
+    };
+    pendingMessagesRef.current = {
+      ...pendingMessagesRef.current,
+      [sessionId]: [...(pendingMessagesRef.current[sessionId] ?? []), { id: eventId, text }]
+    };
+    setEvents((current) => ({
+      ...current,
+      [sessionId]: [...(current[sessionId] ?? []), pendingEvent]
+    }));
+    return eventId;
+  }
+
+  function removePendingMessage(sessionId: string, eventId: number) {
+    const remaining = (pendingMessagesRef.current[sessionId] ?? []).filter((item) => item.id !== eventId);
+    pendingMessagesRef.current = {
+      ...pendingMessagesRef.current,
+      [sessionId]: remaining
+    };
+    setEvents((current) => ({
+      ...current,
+      [sessionId]: (current[sessionId] ?? []).filter((event) => event.id !== eventId)
+    }));
+  }
+
+  function replaceMatchingPendingMessage(sessionId: string, event: UiEvent): boolean {
+    const text = userEventText(event);
+    if (!text) return false;
+    const pendingMessages = pendingMessagesRef.current[sessionId] ?? [];
+    const matching = pendingMessages.find((item) => normalizedMessageText(item.text) === normalizedMessageText(text));
+    if (!matching) return false;
+    const remaining = pendingMessages.filter((item) => item.id !== matching.id);
+    pendingMessagesRef.current = {
+      ...pendingMessagesRef.current,
+      [sessionId]: remaining
+    };
+    setEvents((current) => ({
+      ...current,
+      [sessionId]: (current[sessionId] ?? []).map((currentEvent) => (currentEvent.id === matching.id ? event : currentEvent))
+    }));
+    return true;
+  }
+
+  function markAwaitingClaude(sessionId: string, awaiting: boolean) {
+    setAwaitingClaudeSessionIds((current) => {
+      const next = new Set(current);
+      if (awaiting) {
+        next.add(sessionId);
+      } else {
+        next.delete(sessionId);
+      }
+      return next;
+    });
+  }
+
   function refreshAutocomplete(value: string, cursor: number | null | undefined) {
     const token = findSlashCommandToken(value, cursor);
     const nextSuggestions = token ? getCommandSuggestions(token.query) : [];
@@ -156,6 +282,7 @@ export default function App() {
     setAutocompleteToken(null);
     setSuggestions([]);
     setActiveSuggestionIndex(0);
+    autocompleteOptionRefs.current = [];
   }
 
   function resizeMessageInput(element: HTMLTextAreaElement | null) {
@@ -273,10 +400,17 @@ export default function App() {
     let socket: WebSocket | null = null;
     const connectTimeoutId = window.setTimeout(() => {
       if (activeIdRef.current !== sessionId) return;
-      const afterId = events[sessionId]?.at(-1)?.id ?? 0;
+      const afterId = (events[sessionId] ?? []).reduce((latest, event) => (event.id > latest ? event.id : latest), 0);
       socket = new WebSocket(eventsUrl(sessionId, afterId));
       socket.onmessage = (message) => {
         const event = JSON.parse(message.data) as UiEvent;
+        if (event.kind === 'user' && replaceMatchingPendingMessage(sessionId, event)) {
+          markAwaitingClaude(sessionId, true);
+          return;
+        }
+        if (event.kind === 'assistant' || event.kind === 'error') {
+          markAwaitingClaude(sessionId, false);
+        }
         setEvents((current) => ({
           ...current,
           [sessionId]: [...(current[sessionId] ?? []), event]
@@ -300,6 +434,15 @@ export default function App() {
   useEffect(() => {
     resizeMessageInput(messageInputRef.current);
   }, [message, isComposerSession]);
+
+  useEffect(() => {
+    autocompleteOptionRefs.current[activeSuggestionIndex]?.scrollIntoView({ block: 'nearest' });
+  }, [activeSuggestionIndex, suggestions]);
+
+  useEffect(() => {
+    if (!activeId || isComposerSession) return;
+    markAwaitingClaude(activeId, false);
+  }, [activeId, isComposerSession]);
 
   useEffect(() => {
     const eventsElement = eventsRef.current;
@@ -349,18 +492,23 @@ export default function App() {
   async function onSend(event: FormEvent) {
     event.preventDefault();
     if (!activeId || !canSend) return;
+    const sessionId = activeId;
     const text = message;
+    const pendingEventId = addPendingMessage(sessionId, text);
     setError(null);
     setIsSending(true);
+    markAwaitingClaude(sessionId, true);
     setMessage('');
     closeAutocomplete();
     try {
-      const updatedSession = await sendInput(activeId, text);
+      const updatedSession = await sendInput(sessionId, text);
       if (updatedSession) {
         setSessions((current) => current.map((session) => session.id === updatedSession.id ? updatedSession : session));
       }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
+      removePendingMessage(sessionId, pendingEventId);
+      markAwaitingClaude(sessionId, false);
       setMessage(text);
       refreshAutocomplete(text, text.length);
     } finally {
@@ -418,6 +566,18 @@ export default function App() {
       if (event.key === 'ArrowUp') {
         event.preventDefault();
         setActiveSuggestionIndex((current) => (current - 1 + suggestions.length) % suggestions.length);
+        return;
+      }
+
+      if (event.key === 'Home') {
+        event.preventDefault();
+        setActiveSuggestionIndex(0);
+        return;
+      }
+
+      if (event.key === 'End') {
+        event.preventDefault();
+        setActiveSuggestionIndex(suggestions.length - 1);
         return;
       }
 
@@ -848,12 +1008,19 @@ export default function App() {
                   <ConversationBlockList blocks={activeBlocks} />
                 </div>
               </div>
-              {isComposerSession && (
-                <form className="composer" onSubmit={onSend} ref={composerRef} aria-label="Message composer">
+              <form
+                className={`composer ${isComposerSession ? '' : 'composer-disabled'} ${isAwaitingClaude ? 'awaiting-claude' : ''}`}
+                onSubmit={onSend}
+                ref={composerRef}
+                aria-label="Message composer"
+              >
                   <div className="composer-context" aria-label="Composer context">
+                    <span className="composer-status-pill">
+                      <span aria-hidden="true" className="composer-status-dot" />
+                      status: {isAwaitingClaude ? 'Waiting for Claude' : runtimeStatusLabels[activeSession.runtimeStatus ?? activeSession.status]}
+                    </span>
                     <span title={activeSession.cwd}>cwd: {activeSession.cwd}</span>
                     <span>permission: {activeSession.permissionMode}</span>
-                    <span>status: {runtimeStatusLabels[activeSession.runtimeStatus ?? activeSession.status]}</span>
                     {activeSession.worktree && <span title={activeSession.worktree.branch}>branch: {activeSession.worktree.branch}</span>}
                     {activeSession.worktree && <span title={activeSession.worktree.sourceCwd}>source: {activeSession.worktree.sourceCwd}</span>}
                   </div>
@@ -864,7 +1031,11 @@ export default function App() {
                       ref={messageInputRef}
                       value={message}
                       aria-label="Message"
-                      placeholder="Ask Claude to inspect code, explain behavior, run tests, or make a change..."
+                      aria-activedescendant={suggestions.length > 0 && autocompleteToken ? `autocomplete-option-${activeSuggestionIndex}` : undefined}
+                      aria-autocomplete="list"
+                      aria-controls={suggestions.length > 0 && autocompleteToken ? 'command-autocomplete' : undefined}
+                      disabled={!isComposerSession}
+                      placeholder={isComposerSession ? 'Message Claude...' : composerDisabledReason}
                       onChange={(event) => {
                         setMessage(event.target.value);
                         resizeMessageInput(event.currentTarget);
@@ -875,19 +1046,24 @@ export default function App() {
                       rows={1}
                     />
                     {suggestions.length > 0 && autocompleteToken && (
-                      <div className="autocomplete" role="listbox" aria-label="Claude command suggestions">
+                      <div id="command-autocomplete" className="autocomplete" role="listbox" aria-label="Claude command suggestions">
                         <div className="autocomplete-header">
                           <strong>Commands</strong>
-                          <span>Tab or Enter to insert</span>
+                          <span>Use arrows, Tab, or Enter</span>
                         </div>
                         {suggestions.map((suggestion, index) => (
                           <button
                             key={suggestion.name}
+                            id={`autocomplete-option-${index}`}
                             type="button"
                             role="option"
                             aria-selected={index === activeSuggestionIndex}
                             className={index === activeSuggestionIndex ? 'autocomplete-option active' : 'autocomplete-option'}
+                            ref={(element) => {
+                              autocompleteOptionRefs.current[index] = element;
+                            }}
                             onMouseDown={(event) => event.preventDefault()}
+                            onMouseEnter={() => setActiveSuggestionIndex(index)}
                             onClick={() => completeSuggestion(suggestion)}
                           >
                             <span className="autocomplete-command">{suggestion.name}</span>
@@ -900,7 +1076,9 @@ export default function App() {
                   <div className="composer-actions">
                     <span id="composer-send-status" aria-live="polite">{sendStatusText}</span>
                     <div>
-                      <button className="composer-stop-button" type="button" onClick={() => onStop(false)}>Stop session</button>
+                      {isComposerSession && (
+                        <button className="composer-stop-button" type="button" onClick={() => onStop(false)}>Stop session</button>
+                      )}
                       <button
                         className="send-button"
                         type="submit"
@@ -917,7 +1095,6 @@ export default function App() {
                     </div>
                   </div>
                 </form>
-              )}
             </>
           ) : (
             <div className="empty-state">Create or select a session.</div>

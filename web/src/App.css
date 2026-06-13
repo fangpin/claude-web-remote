@@ -598,6 +598,7 @@ button.danger:hover {
 .conversation-content {
   width: min(100%, 920px);
   margin: 0 auto;
+  min-height: 0;
 }
 
 .event-limit-note {
@@ -1660,22 +1661,73 @@ button.danger:hover {
 }
 
 @media (max-width: 1020px) {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
   body {
-    overflow: auto;
+    overflow: hidden;
   }
 
   .app-shell,
   .app-shell.inspector-closed {
-    grid-template-columns: 64px minmax(240px, 320px) minmax(0, 1fr);
-    grid-template-rows: minmax(520px, 1fr) auto;
-    height: auto;
-    min-height: 100vh;
+    grid-template-columns: 64px minmax(220px, 280px) minmax(0, 1fr);
+    grid-template-rows: 1fr;
+    height: 100vh;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .workspace {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .conversation-workspace,
+  .conversation-workspace.with-deleted-note {
+    grid-template-rows: auto minmax(0, 1fr) auto;
+  }
+
+  .events {
+    min-height: 0;
+    overflow: auto;
+    padding-bottom: 26px;
   }
 
   .inspector {
-    grid-column: 2 / 4;
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    grid-column: auto;
+    width: min(360px, calc(100vw - 72px));
+    border-top: 0;
+    border-left: 1px solid var(--border);
+    box-shadow: var(--shadow-popover);
+  }
+
+  .app-shell.inspector-closed .inspector {
+    width: 44px;
+    overflow: visible;
     border-left: 0;
-    border-top: 1px solid var(--border);
+    background: transparent;
+    box-shadow: none;
+    pointer-events: none;
+  }
+
+  .app-shell.inspector-closed .inspector-edge-toggle {
+    right: 10px;
+    left: auto;
+    pointer-events: auto;
+  }
+
+  .app-shell.inspector-closed .inspector-header,
+  .app-shell.inspector-closed .inspector-tabs,
+  .app-shell.inspector-closed .inspector [role='tabpanel'] {
+    display: none !important;
   }
 }
 
@@ -1683,16 +1735,17 @@ button.danger:hover {
   .app-shell,
   .app-shell.inspector-closed {
     grid-template-columns: 1fr;
-    grid-template-rows: auto auto minmax(520px, auto) auto;
+    grid-template-rows: auto minmax(180px, 30vh) minmax(0, 1fr) auto;
   }
 
   .app-shell.view-config,
   .app-shell.view-config.inspector-closed {
-    grid-template-rows: auto minmax(520px, auto);
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
   .primary-rail,
   .session-sidebar,
+  .workspace,
   .inspector {
     grid-column: auto;
   }
@@ -1701,10 +1754,24 @@ button.danger:hover {
     grid-template-columns: auto repeat(3, minmax(0, 1fr));
     grid-template-rows: auto;
     align-items: center;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+    padding: 8px 10px;
+  }
+
+  .primary-rail button {
+    width: auto;
   }
 
   .rail-brand {
     margin: 0;
+  }
+
+  .session-sidebar {
+    max-height: none;
+    min-height: 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
   }
 
   .config-workspace {
@@ -1712,9 +1779,38 @@ button.danger:hover {
     padding: 16px;
   }
 
+  .sidebar-header {
+    padding: 10px 12px;
+  }
+
+  .new-session-panel {
+    max-height: 200px;
+    overflow: auto;
+  }
+
+  .sessions {
+    display: grid;
+    align-content: start;
+    gap: 7px;
+    overflow: auto;
+    padding: 10px 12px 12px;
+  }
+
+  .session-list-toolbar,
+  .session-search {
+    position: static;
+    width: auto;
+    background: transparent;
+  }
+
+  .session {
+    min-height: 0;
+  }
+
   .conversation-header {
-    align-items: stretch;
-    flex-direction: column;
+    display: grid;
+    gap: 10px;
+    padding: 12px 14px;
   }
 
   .actions {
@@ -1722,17 +1818,29 @@ button.danger:hover {
     min-width: 0;
   }
 
-  .events {
-    padding: 18px 16px;
+  .actions button {
+    flex: 1 1 140px;
   }
 
-  .message-block.user {
-    max-width: min(100%, 680px);
+  .events {
+    min-height: 0;
+    overflow: auto;
+    padding: 14px 12px 20px;
+  }
+
+  .conversation-content {
+    width: 100%;
+  }
+
+  .message-block.user,
+  .message-block.assistant,
+  .message-block.system {
+    max-width: 100%;
   }
 
   .composer {
-    width: calc(100% - 24px);
-    margin-bottom: 12px;
+    width: calc(100% - 20px);
+    margin-bottom: 8px;
   }
 
   .composer-actions {
@@ -1742,6 +1850,12 @@ button.danger:hover {
 
   .composer-actions > div {
     justify-content: flex-end;
+  }
+
+  .inspector,
+  .app-shell.inspector-closed .inspector {
+    top: 50px;
+    width: min(340px, calc(100vw - 20px));
   }
 
   .conversation-empty {

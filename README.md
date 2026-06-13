@@ -211,6 +211,7 @@ cargo fmt --manifest-path Cargo.toml -- --check
 cargo test --manifest-path Cargo.toml
 npm --prefix web test
 npm --prefix web run build
+npm --prefix web run test:visual
 ```
 
 Expected current coverage:
@@ -218,6 +219,7 @@ Expected current coverage:
 - Backend unit tests and API integration tests pass
 - Frontend Vitest suite passes
 - Frontend production build succeeds
+- Frontend Playwright visual smoke checks pass across wide desktop, desktop, and narrow viewports without screenshot snapshots
 
 ## Security notes
 
