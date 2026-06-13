@@ -42,12 +42,17 @@ describe('TasksPanel', () => {
     render(<TasksPanel title="Tasks" tasks={groups} onSelectTask={() => undefined} />);
 
     expect(screen.getByText('Tasks')).toBeInTheDocument();
-    expect(screen.getByText('Background tasks')).toBeInTheDocument();
-    expect(screen.getByText('Finished tasks')).toBeInTheDocument();
+    expect(screen.getByText('1 running · 1 finished')).toBeInTheDocument();
+    expect(screen.getByText('Background')).toBeInTheDocument();
+    expect(screen.getByText('Still running')).toBeInTheDocument();
+    expect(screen.getByText('Finished')).toBeInTheDocument();
+    expect(screen.getByText('Completed, failed, or interrupted')).toBeInTheDocument();
     expect(screen.getByText('Agent: Explore the branch')).toBeInTheDocument();
     expect(screen.getByText('Agent: Review the branch')).toBeInTheDocument();
-    expect(screen.getByText('completed')).toBeInTheDocument();
+    expect(screen.getByText('Running')).toBeInTheDocument();
+    expect(screen.getByText('Completed')).toBeInTheDocument();
     expect(screen.getByText('No issues found')).toBeInTheDocument();
+    expect(screen.getAllByText('Open')).toHaveLength(2);
   });
 
   it('calls onSelectTask when a task is clicked', () => {
@@ -77,6 +82,21 @@ describe('TasksPanel', () => {
     expect(screen.queryByText('Agent task 9')).not.toBeInTheDocument();
   });
 
+  it('keeps long task titles constrained while preserving the full title', () => {
+    const longTitle = 'Agent: Investigate why the deployment verification job keeps reporting a timeout after the remote log stream has already finished';
+    render(
+      <TasksPanel
+        title="Tasks"
+        tasks={{ background: [task({ id: 's1:toolu_long', title: longTitle })], finished: [] }}
+        onSelectTask={() => undefined}
+      />
+    );
+
+    const taskButton = screen.getByRole('button', { name: new RegExp(longTitle) });
+    expect(taskButton).toHaveAttribute('title', `Open task: ${longTitle}`);
+    expect(screen.getByText(longTitle)).toHaveClass('task-card-title');
+  });
+
   it('renders an empty state and non-blocking error', () => {
     render(
       <TasksPanel
@@ -87,7 +107,18 @@ describe('TasksPanel', () => {
       />
     );
 
+    expect(screen.getByText('0 running · 0 finished')).toBeInTheDocument();
+    expect(screen.getByText('Task refresh failed')).toBeInTheDocument();
     expect(screen.getByText('failed to load tasks')).toBeInTheDocument();
-    expect(screen.getByText('No tasks yet.')).toBeInTheDocument();
+    expect(screen.getByText('No agent activity yet')).toBeInTheDocument();
+    expect(screen.getByText('This session is quiet.')).toBeInTheDocument();
+  });
+
+  it('renders per-section empty states when only one lane has tasks', () => {
+    render(<TasksPanel title="Tasks" tasks={{ background: groups.background, finished: [] }} onSelectTask={() => undefined} />);
+
+    expect(screen.getByText('1 running · 0 finished')).toBeInTheDocument();
+    expect(screen.getByText('No finished tasks')).toBeInTheDocument();
+    expect(screen.queryByText('No agent activity yet')).not.toBeInTheDocument();
   });
 });
