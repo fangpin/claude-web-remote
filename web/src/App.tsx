@@ -1,10 +1,12 @@
 import { KeyboardEvent, useCallback, useRef, useState } from 'react';
 import AppShell, { type AppView } from './AppShell';
+import { buildActivityTimeline, waitingCopy, type ActivityItem } from './activityTimeline';
 import ConversationWorkspace from './ConversationWorkspace';
 import InspectorPanel, { type InspectorTab } from './InspectorPanel';
 import SessionSidebar from './SessionSidebar';
 import type { TaskInfo } from './types';
 import { useComposerState } from './useComposerState';
+import { useDiagnostics } from './useDiagnostics';
 import { useSessionEvents } from './useSessionEvents';
 import { useSessions } from './useSessions';
 import { useTasks } from './useTasks';
@@ -17,6 +19,11 @@ const EMPTY_STATE_PROMPTS = [
   'Run the relevant tests',
   'Plan the smallest fix'
 ];
+
+type ApiError = {
+  message: string;
+  detail: string | null;
+};
 
 type TaskActions = {
   refreshTasks: () => Promise<void>;
@@ -32,7 +39,8 @@ export default function App() {
   const [view, setView] = useState<AppView>('sessions');
   const [isInspectorOpen, setIsInspectorOpen] = useState(true);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('session');
-  const [error, setError] = useState<string | null>(null);
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
+  const isDiagnosticsVisible = view === 'sessions' && isInspectorOpen && inspectorTab === 'diagnostics';
   const taskActionsRef = useRef<TaskActions>({
     refreshTasks: async () => undefined,
     refreshSessionTasks: async (_sessionId: string) => undefined
@@ -45,9 +53,12 @@ export default function App() {
   const refreshTasks = useCallback(() => taskActionsRef.current.refreshTasks(), []);
   const refreshSessionTasks = useCallback((sessionId: string) => taskActionsRef.current.refreshSessionTasks(sessionId), []);
   const removeSessionEvents = useCallback((sessionId: string) => eventActionsRef.current.removeSessionEvents(sessionId), []);
+  const reportApiError = useCallback((detail: string | null) => {
+    setErrorDetail(detail);
+  }, []);
 
   const sessionState = useSessions({
-    setError,
+    setError: reportApiError,
     onTasksChanged: () => {
       void refreshTasks();
     },
@@ -93,9 +104,23 @@ export default function App() {
     listMode: sessionState.listMode,
     markAwaitingClaude: eventState.markAwaitingClaude,
     removePendingMessage: eventState.removePendingMessage,
-    setError,
+    setError: reportApiError,
     setSessions: sessionState.setSessions
   });
+  const diagnosticsState = useDiagnostics({
+    activeSessionId: sessionState.activeSession?.id ?? null,
+    enabled: isDiagnosticsVisible
+  });
+
+  const apiError: ApiError | null = errorDetail
+    ? {
+        message: 'The daemon could not complete that request. Try again from the same place.',
+        detail: errorDetail
+      }
+    : null;
+  const activities = buildActivityTimeline(eventState.activeEvents, eventState.activeBlockEventIds);
+  const latestPermissionActivity = activities.find((activity) => activity.isPermissionLike && ['running', 'waiting'].includes(activity.status));
+  const waitingMessage = waitingCopy(sessionState.activeSession, latestPermissionActivity ?? null);
 
   function onSelectTask(task: TaskInfo) {
     if (sessionState.listMode !== 'active') {
@@ -105,8 +130,12 @@ export default function App() {
     eventState.setPendingEventId(task.startEventId);
   }
 
+  function onSelectActivity(activity: ActivityItem) {
+    eventState.setPendingEventId(activity.anchorEventId);
+  }
+
   function onInspectorTabKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
-    const tabs: Array<typeof inspectorTab> = ['session', 'global', 'plan'];
+    const tabs: Array<typeof inspectorTab> = ['activity', 'session', 'global', 'plan', 'diagnostics'];
     const currentIndex = tabs.indexOf(inspectorTab);
     let nextIndex = currentIndex;
 
@@ -204,6 +233,7 @@ export default function App() {
           cwd={sessionState.cwd}
           isListLoading={sessionState.isListLoading}
           isNewSessionOpen={sessionState.isNewSessionOpen}
+          listError={sessionState.listError}
           listMode={sessionState.listMode}
           permissionMode={sessionState.permissionMode}
           recentDirectories={sessionState.recentDirectories}
@@ -220,6 +250,10 @@ export default function App() {
           onSetSessionSearch={sessionState.setSessionSearch}
           onSetUseWorktree={sessionState.setUseWorktree}
           onToggleNewSession={sessionState.toggleNewSession}
+          onRetryList={() => {
+            reportApiError(null);
+            void sessionState.refreshSessions(sessionState.listMode, { reset: true });
+          }}
         />
       }
       workspace={
@@ -233,13 +267,16 @@ export default function App() {
           composerDisabledReason={composerState.composerDisabledReason}
           composerRef={composerState.composerRef}
           emptyStatePrompts={EMPTY_STATE_PROMPTS}
-          error={error}
+          error={apiError}
+          eventConnectionError={eventState.activeConnection.error}
+          eventConnectionState={eventState.activeConnection.state}
           eventRenderLimit={EVENT_RENDER_LIMIT}
           eventsRef={eventState.eventsRef}
           hiddenEventCount={eventState.hiddenEventCount}
           isAwaitingClaude={eventState.isAwaitingClaude}
           isComposerSession={isComposerSession}
           isSending={composerState.isSending}
+          isSessionListLoading={sessionState.isListLoading}
           listMode={sessionState.listMode}
           message={composerState.message}
           messageInputRef={composerState.messageInputRef}
@@ -254,21 +291,31 @@ export default function App() {
           onSend={composerState.onSend}
           onSetActiveSuggestionIndex={composerState.setActiveSuggestionIndex}
           onStopSession={() => sessionState.onStop(false)}
+          onDismissError={() => reportApiError(null)}
+          onRetryEvents={eventState.retryActiveEvents}
           onUseEmptyStatePrompt={composerState.useEmptyStatePrompt}
         />
       }
       inspector={
         <InspectorPanel
+          activities={activities}
           activePlan={eventState.activePlan}
           activeSession={sessionState.activeSession}
+          diagnostics={diagnosticsState.diagnostics}
+          diagnosticsError={diagnosticsState.error}
           inspectorTab={inspectorTab}
           isActiveSessionMode={sessionState.isActiveSessionMode}
+          isDiagnosticsLoading={diagnosticsState.isLoading}
           isInspectorOpen={isInspectorOpen}
+          sessionDiagnostics={diagnosticsState.sessionDiagnostics}
           sessionTaskError={taskState.sessionTaskError}
           sessionTasks={taskState.sessionTasks}
           taskError={taskState.taskError}
           tasks={taskState.tasks}
+          waitingMessage={waitingMessage}
           onInspectorTabKeyDown={onInspectorTabKeyDown}
+          onRefreshDiagnostics={diagnosticsState.refreshDiagnostics}
+          onSelectActivity={onSelectActivity}
           onSelectTask={onSelectTask}
           onSetInspectorOpen={setIsInspectorOpen}
           onSetInspectorTab={setInspectorTab}

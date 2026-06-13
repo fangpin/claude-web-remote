@@ -274,6 +274,35 @@ async fn wait_for_file_content(path: &Path, predicate: impl Fn(&str) -> bool) ->
     fs::read_to_string(path).unwrap_or_default()
 }
 
+async fn wait_for_session_claude_id(
+    client: &reqwest::Client,
+    addr: SocketAddr,
+    session_id: &str,
+    expected: &str,
+) {
+    for _ in 0..50 {
+        let session: Value = client
+            .get(format!("http://{addr}/api/sessions/{session_id}"))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        if session["claudeSessionId"].as_str() == Some(expected) {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    panic!("session {session_id} did not persist claude session id {expected}");
+}
+
+async fn wait_for_args_log_entries(path: &Path, count: usize) -> String {
+    wait_for_file_content(path, |args| args.lines().count() >= count).await
+}
+
 #[tokio::test]
 async fn creates_session_accepts_input_and_streams_events() {
     let temp = tempfile::tempdir().unwrap();
@@ -491,7 +520,7 @@ async fn restart_uses_persisted_claude_session_id() {
         .unwrap();
 
     let session_id = created["id"].as_str().unwrap();
-    wait_for_file_content(&args_log, |args| args.contains("resume-session")).await;
+    wait_for_session_claude_id(&client, addr, session_id, "resume-session").await;
 
     client
         .post(format!("http://{addr}/api/sessions/{session_id}/restart"))
@@ -501,8 +530,7 @@ async fn restart_uses_persisted_claude_session_id() {
         .error_for_status()
         .unwrap();
 
-    let args =
-        wait_for_file_content(&args_log, |args| args.contains("--resume resume-session")).await;
+    let args = wait_for_args_log_entries(&args_log, 2).await;
     assert!(args.contains("--resume resume-session"));
 }
 
@@ -538,7 +566,7 @@ async fn wrapper_launcher_receives_native_args_after_prefix() {
         .unwrap();
 
     let session_id = created["id"].as_str().unwrap();
-    wait_for_file_content(&args_log, |args| args.contains("resume-session")).await;
+    wait_for_session_claude_id(&client, addr, session_id, "resume-session").await;
 
     client
         .post(format!("http://{addr}/api/sessions/{session_id}/restart"))
@@ -548,11 +576,7 @@ async fn wrapper_launcher_receives_native_args_after_prefix() {
         .error_for_status()
         .unwrap();
 
-    let args = wait_for_file_content(&args_log, |args| {
-        args.contains("claude -m gpt-5.5 --skip-check -a --input-format stream-json")
-            && args.contains("--resume resume-session")
-    })
-    .await;
+    let args = wait_for_args_log_entries(&args_log, 2).await;
     assert!(args.contains("claude -m gpt-5.5 --skip-check -a --input-format stream-json"));
     assert!(args.contains("--resume resume-session"));
 }

@@ -5,6 +5,8 @@ import { applyCommandCompletion, findSlashCommandToken, getCommandSuggestions, t
 import type { SessionInfo } from './types';
 
 const MESSAGE_INPUT_MAX_HEIGHT = 220;
+const PROMPT_HISTORY_KEY = 'claude-remote-web:prompt-history';
+const PROMPT_HISTORY_LIMIT = 50;
 
 type UseComposerStateOptions = {
   activeId: string | null;
@@ -31,6 +33,28 @@ function resizeMessageInput(element: HTMLTextAreaElement | null) {
   element.style.overflowY = contentHeight > MESSAGE_INPUT_MAX_HEIGHT ? 'auto' : 'hidden';
 }
 
+function readPromptHistory(): string[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(PROMPT_HISTORY_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).slice(0, PROMPT_HISTORY_LIMIT);
+  } catch {
+    return [];
+  }
+}
+
+function writePromptHistory(history: string[]) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(PROMPT_HISTORY_KEY, JSON.stringify(history.slice(0, PROMPT_HISTORY_LIMIT)));
+  } catch {
+    // localStorage can be unavailable in private or constrained browser contexts.
+  }
+}
+
 export function useComposerState({
   activeId,
   activeSession,
@@ -51,6 +75,9 @@ export function useComposerState({
   const [autocompleteToken, setAutocompleteToken] = useState<SlashCommandToken | null>(null);
   const [suggestions, setSuggestions] = useState<ClaudeCommand[]>([]);
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(0);
+  const [promptHistory, setPromptHistory] = useState<string[]>(() => readPromptHistory());
+  const [historyIndex, setHistoryIndex] = useState<number | null>(null);
+  const draftBeforeHistoryRef = useRef<string | null>(null);
 
   const hasDraft = message.trim().length > 0;
   const canSend = isComposerSession && hasDraft && !isSending;
@@ -63,12 +90,17 @@ export function useComposerState({
         : activeSession.status !== 'running'
           ? 'This session is stopped. Resume it to continue.'
           : '';
+  const runtimeStatus = activeSession?.runtimeStatus ?? activeSession?.status;
   const sendStatusText = !isComposerSession
     ? composerDisabledReason
     : isSending
-      ? 'Sending...'
+      ? 'Sending to Claude...'
       : isAwaitingClaude
-        ? 'Sent. Waiting for Claude...'
+        ? 'Claude is working...'
+        : runtimeStatus === 'failed'
+          ? 'Session failed'
+          : runtimeStatus === 'stopped' || runtimeStatus === 'ended' || runtimeStatus === 'exited'
+            ? 'Session stopped'
         : hasDraft
           ? 'Ready to send'
           : 'Message Claude';
@@ -93,6 +125,54 @@ export function useComposerState({
     autocompleteOptionRefs.current = [];
   }
 
+  function rememberPrompt(prompt: string) {
+    if (prompt.trim().length === 0) return;
+    setPromptHistory((current) => {
+      const nextHistory = [prompt, ...current.filter((item) => item !== prompt)].slice(0, PROMPT_HISTORY_LIMIT);
+      writePromptHistory(nextHistory);
+      return nextHistory;
+    });
+  }
+
+  function restorePromptFromHistory(index: number | null) {
+    const nextMessage = index === null ? draftBeforeHistoryRef.current ?? '' : promptHistory[index] ?? '';
+    setHistoryIndex(index);
+    setMessage(nextMessage);
+    closeAutocomplete();
+    requestAnimationFrame(() => {
+      const input = messageInputRef.current;
+      if (!input) return;
+      input.focus();
+      input.setSelectionRange(nextMessage.length, nextMessage.length);
+      resizeMessageInput(input);
+    });
+  }
+
+  function canRecallPreviousPrompt(element: HTMLTextAreaElement) {
+    if (promptHistory.length === 0) return false;
+    if (historyIndex !== null) return true;
+    if (message.trim().length === 0) return true;
+    if (message.includes('\n')) return false;
+    return element.selectionStart === 0 && element.selectionEnd === 0;
+  }
+
+  function recallPreviousPrompt(element: HTMLTextAreaElement) {
+    if (!canRecallPreviousPrompt(element)) return false;
+    const nextIndex = historyIndex === null ? 0 : Math.min(historyIndex + 1, promptHistory.length - 1);
+    if (historyIndex === null) {
+      draftBeforeHistoryRef.current = message;
+    }
+    restorePromptFromHistory(nextIndex);
+    return true;
+  }
+
+  function recallNextPrompt() {
+    if (historyIndex === null) return false;
+    const nextIndex = historyIndex - 1;
+    restorePromptFromHistory(nextIndex >= 0 ? nextIndex : null);
+    return true;
+  }
+
   async function onSend(event: FormEvent) {
     event.preventDefault();
     if (!activeId || !canSend) return;
@@ -109,6 +189,9 @@ export function useComposerState({
       if (updatedSession) {
         setSessions((current) => current.map((session) => session.id === updatedSession.id ? updatedSession : session));
       }
+      rememberPrompt(text);
+      draftBeforeHistoryRef.current = null;
+      setHistoryIndex(null);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
       removePendingMessage(sessionId, pendingEventId);
@@ -139,6 +222,8 @@ export function useComposerState({
 
   function useEmptyStatePrompt(prompt: string) {
     setMessage(prompt);
+    setHistoryIndex(null);
+    draftBeforeHistoryRef.current = null;
     closeAutocomplete();
     requestAnimationFrame(() => {
       messageInputRef.current?.focus();
@@ -148,6 +233,8 @@ export function useComposerState({
 
   function onMessageChange(value: string, element: HTMLTextAreaElement) {
     setMessage(value);
+    setHistoryIndex(null);
+    draftBeforeHistoryRef.current = null;
     resizeMessageInput(element);
     refreshAutocomplete(value, element.selectionStart);
   }
@@ -202,6 +289,16 @@ export function useComposerState({
         closeAutocomplete();
         return;
       }
+    }
+
+    if (event.key === 'ArrowUp' && !event.altKey && !event.ctrlKey && !event.metaKey && recallPreviousPrompt(event.currentTarget)) {
+      event.preventDefault();
+      return;
+    }
+
+    if (event.key === 'ArrowDown' && !event.altKey && !event.ctrlKey && !event.metaKey && recallNextPrompt()) {
+      event.preventDefault();
+      return;
     }
 
     if (event.key !== 'Enter' || event.shiftKey || isComposing) return;

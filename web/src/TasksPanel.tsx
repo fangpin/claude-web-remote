@@ -1,7 +1,9 @@
+import { useMemo, useState } from 'react';
 import type { TaskGroups, TaskInfo, TaskStatus } from './types';
 import './TasksPanel.css';
 
 const TASK_SECTION_LIMIT = 8;
+type TaskFilter = 'all' | 'running' | 'failed' | 'finished';
 
 type Props = {
   title: string;
@@ -10,6 +12,13 @@ type Props = {
   compact?: boolean;
   onSelectTask: (task: TaskInfo) => void;
 };
+
+const taskFilters: Array<{ value: TaskFilter; label: string }> = [
+  { value: 'all', label: 'All' },
+  { value: 'running', label: 'Active' },
+  { value: 'failed', label: 'Failed' },
+  { value: 'finished', label: 'Done' }
+];
 
 const taskStatusLabels: Record<TaskStatus, string> = {
   background: 'Running',
@@ -31,6 +40,20 @@ function taskCountLabel(count: number, label: string) {
 
 function sessionLabel(task: TaskInfo): string {
   return task.sessionName?.trim() || task.sessionCwd;
+}
+
+function matchesFilter(task: TaskInfo, filter: TaskFilter): boolean {
+  if (filter === 'all') return true;
+  if (filter === 'running') return task.status === 'background';
+  if (filter === 'failed') return task.status === 'failed' || task.status === 'interrupted';
+  return task.status === 'completed' || task.status === 'failed' || task.status === 'interrupted';
+}
+
+function filterTasks(tasks: TaskGroups, filter: TaskFilter): TaskGroups {
+  return {
+    background: tasks.background.filter((task) => matchesFilter(task, filter)),
+    finished: tasks.finished.filter((task) => matchesFilter(task, filter))
+  };
 }
 
 function TaskSection({
@@ -105,7 +128,10 @@ function TaskSection({
 }
 
 export default function TasksPanel({ title, tasks, error, compact = false, onSelectTask }: Props) {
+  const [filter, setFilter] = useState<TaskFilter>('all');
+  const filteredTasks = useMemo(() => filterTasks(tasks, filter), [tasks, filter]);
   const empty = tasks.background.length === 0 && tasks.finished.length === 0;
+  const filteredEmpty = filteredTasks.background.length === 0 && filteredTasks.finished.length === 0;
   const panelClassName = compact ? 'tasks-panel task-center compact' : 'tasks-panel task-center';
 
   return (
@@ -116,16 +142,37 @@ export default function TasksPanel({ title, tasks, error, compact = false, onSel
           <p>{taskCountLabel(tasks.background.length, 'running')} · {taskCountLabel(tasks.finished.length, 'finished')}</p>
         </div>
       </header>
+      {!empty && (
+        <div className="task-filter" role="group" aria-label={`${title} filters`}>
+          {taskFilters.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={filter === option.value ? 'selected' : ''}
+              aria-pressed={filter === option.value}
+              onClick={() => setFilter(option.value)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      )}
       {error && (
         <div role="alert" className="task-error">
           <span className="task-error-title">Task refresh failed</span>
           <span>{error}</span>
+          <span>Showing the last task snapshot available.</span>
         </div>
       )}
       {empty ? (
         <div className="task-panel-empty">
           <span className="task-panel-empty-title">No agent activity yet</span>
-          <span>This session is quiet.</span>
+          <span>{compact ? 'This session is quiet.' : 'Background and finished task cards will appear here when Claude starts longer-running work.'}</span>
+        </div>
+      ) : filteredEmpty ? (
+        <div className="task-panel-empty">
+          <span className="task-panel-empty-title">No matching tasks</span>
+          <span>Try a different status filter.</span>
         </div>
       ) : (
         <>
@@ -133,7 +180,7 @@ export default function TasksPanel({ title, tasks, error, compact = false, onSel
             heading="Background"
             description="Still running"
             emptyLabel="No background tasks"
-            tasks={tasks.background}
+            tasks={filteredTasks.background}
             tone="background"
             onSelectTask={onSelectTask}
           />
@@ -141,7 +188,7 @@ export default function TasksPanel({ title, tasks, error, compact = false, onSel
             heading="Finished"
             description="Completed, failed, or interrupted"
             emptyLabel="No finished tasks"
-            tasks={tasks.finished}
+            tasks={filteredTasks.finished}
             tone="finished"
             onSelectTask={onSelectTask}
           />

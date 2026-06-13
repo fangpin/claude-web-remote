@@ -1,4 +1,13 @@
-import type { ConfigValues, CreateSessionInput, ManagedConfig, SessionInfo, TaskGroups } from './types';
+import type {
+  ConfigValues,
+  CreateSessionInput,
+  DiagnosticsResponse,
+  ManagedConfig,
+  SessionDiagnosticsResponse,
+  SessionInfo,
+  TaskGroups,
+  UiEvent
+} from './types';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const requestInit: RequestInit | undefined = init
@@ -37,6 +46,14 @@ export async function listSessionTasks(sessionId: string): Promise<TaskGroups> {
   return request<TaskGroups>(`/api/sessions/${sessionId}/tasks`);
 }
 
+export async function listSessionEvents(sessionId: string, afterId = 0): Promise<UiEvent[]> {
+  const params = new URLSearchParams();
+  if (afterId > 0) params.set('afterId', String(afterId));
+  const query = params.toString();
+  const result = await request<{ events: UiEvent[] }>(`/api/sessions/${sessionId}/transcript${query ? `?${query}` : ''}`);
+  return Array.isArray(result.events) ? result.events : [];
+}
+
 export async function createSession(input: CreateSessionInput): Promise<SessionInfo> {
   return request<SessionInfo>('/api/sessions', {
     method: 'POST',
@@ -53,6 +70,14 @@ export async function updateConfig(input: ConfigValues): Promise<ManagedConfig> 
     method: 'PUT',
     body: JSON.stringify(input)
   });
+}
+
+export async function getDiagnostics(): Promise<DiagnosticsResponse> {
+  return request<DiagnosticsResponse>('/api/diagnostics');
+}
+
+export async function getSessionDiagnostics(sessionId: string): Promise<SessionDiagnosticsResponse> {
+  return request<SessionDiagnosticsResponse>(`/api/sessions/${sessionId}/diagnostics`);
 }
 
 export async function sendInput(sessionId: string, text: string): Promise<SessionInfo | null> {
@@ -90,7 +115,6 @@ export async function unarchiveSession(sessionId: string): Promise<SessionInfo> 
 export async function deleteSession(sessionId: string): Promise<void> {
   await request<{ ok: true }>(`/api/sessions/${sessionId}?permanent=true`, { method: 'DELETE' });
 }
-
 
 export function eventsUrl(sessionId: string, afterId = 0): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';

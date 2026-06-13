@@ -685,7 +685,7 @@ test('empty search results and no-task inspector states stay stable', async ({ p
   await search.fill('definitely-no-session-matches-this-query');
 
   const sidebar = page.getByRole('complementary', { name: 'Session navigation' });
-  await expect(sidebar).toContainText('No sessions match "definitely-no-session-matches-this-query".');
+  await expect(sidebar).toContainText('No chats match "definitely-no-session-matches-this-query".');
   await expectNoHorizontalPageOverflow(page);
   await expectNoHorizontalElementOverflow(sidebar, 'empty search sidebar');
 

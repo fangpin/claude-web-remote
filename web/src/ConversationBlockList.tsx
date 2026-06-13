@@ -1,6 +1,7 @@
 import RawEventDetails from './RawEventDetails';
 import type { ConversationBlock, ErrorBlock, MessageBlock, RawBlock, TaskBlock, ToolBlock } from './conversationBlocks';
 import ReactMarkdown, { type Components } from 'react-markdown';
+import React, { useState } from 'react';
 import './ConversationBlockList.css';
 
 function roleLabel(role: MessageBlock['role']): string {
@@ -14,11 +15,139 @@ function blockElementId(block: ConversationBlock): string | undefined {
   return firstEventId === undefined ? undefined : `event-${firstEventId}`;
 }
 
-const markdownComponents: Components = {
-  pre({ children }) {
-    return <pre className="message-code">{children}</pre>;
+function textFromReactNode(node: React.ReactNode): string {
+  if (node === null || node === undefined || typeof node === 'boolean') return '';
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(textFromReactNode).join('');
+  if (React.isValidElement(node)) {
+    const element = node as React.ReactElement<{ children?: React.ReactNode }>;
+    return textFromReactNode(element.props.children);
   }
-};
+  return '';
+}
+
+function languageFromClassName(className?: string): string | undefined {
+  return className?.match(/(?:^|\s)language-([^\s]+)/)?.[1];
+}
+
+function prettyLanguage(language?: string): string {
+  if (!language) return 'Text';
+  const labels: Record<string, string> = {
+    js: 'JavaScript',
+    jsx: 'JSX',
+    ts: 'TypeScript',
+    tsx: 'TSX',
+    sh: 'Shell',
+    bash: 'Bash',
+    json: 'JSON',
+    md: 'Markdown',
+    py: 'Python',
+    rs: 'Rust',
+    yaml: 'YAML',
+    yml: 'YAML'
+  };
+  return labels[language.toLowerCase()] ?? language;
+}
+
+async function copyToClipboard(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.top = '-1000px';
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand('copy');
+  textarea.remove();
+}
+
+function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function onCopy() {
+    await copyToClipboard(text);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1400);
+  }
+
+  return (
+    <button className="copy-button" type="button" onClick={onCopy} aria-label={label} title={label}>
+      {copied ? 'Copied' : 'Copy'}
+    </button>
+  );
+}
+
+function CodeFrame({
+  code,
+  language,
+  children,
+  className,
+  variant = 'message'
+}: {
+  code: string;
+  language?: string;
+  children?: React.ReactNode;
+  className?: string;
+  variant?: 'message' | 'tool';
+}) {
+  return (
+    <div className={`code-frame ${variant}-code-frame`}>
+      <div className="code-frame-header">
+        <span className="code-language">{prettyLanguage(language)}</span>
+        <CopyButton text={code} label="Copy code" />
+      </div>
+      <pre className={className}>
+        {children ?? <code className={language ? `language-${language}` : undefined}>{code}</code>}
+      </pre>
+    </div>
+  );
+}
+
+function DiffResult({ code }: { code: string }) {
+  return (
+    <CodeFrame code={code} language="diff" className="tool-result-pre diff" variant="tool">
+      <code className="language-diff">
+        {code.split('\n').map((line, index) => {
+          const kind =
+            line.startsWith('+') && !line.startsWith('+++')
+              ? 'addition'
+              : line.startsWith('-') && !line.startsWith('---')
+                ? 'deletion'
+                : line.startsWith('@@')
+                  ? 'hunk'
+                  : line.startsWith('diff --git') || line.startsWith('index ') || line.startsWith('---') || line.startsWith('+++')
+                    ? 'meta'
+                    : 'context';
+          return (
+            <span className={`diff-line ${kind}`} key={`${index}-${line}`}>
+              {line || ' '}
+            </span>
+          );
+        })}
+      </code>
+    </CodeFrame>
+  );
+}
+
+const markdownComponents = {
+  pre({ children }: { children?: React.ReactNode }) {
+    const codeElement = React.Children.toArray(children).find(React.isValidElement) as
+      | React.ReactElement<{ className?: string; children?: React.ReactNode }>
+      | undefined;
+    const language = languageFromClassName(codeElement?.props.className);
+    const code = textFromReactNode(codeElement?.props.children ?? children).replace(/\n$/, '');
+    return (
+      <CodeFrame code={code} language={language} className="message-code">
+        {children}
+      </CodeFrame>
+    );
+  }
+} satisfies Components;
 
 function MessageMarkdown({ text }: { text: string }) {
   return (
@@ -58,23 +187,27 @@ function pathLines(text: string): string[] {
 function ToolResultContent({ block }: { block: ToolBlock }) {
   if (block.resultKind === 'paths') {
     return (
-      <ul className="tool-path-list">
-        {pathLines(block.resultSummary).map((path, index) => (
-          <li key={`${path}-${index}`}>
-            <code>{path}</code>
-          </li>
-        ))}
-      </ul>
+      <div className="tool-path-frame">
+        <div className="tool-path-header">
+          <span>{pathLines(block.resultSummary).length} paths</span>
+          <CopyButton text={block.resultSummary} label="Copy paths" />
+        </div>
+        <ul className="tool-path-list">
+          {pathLines(block.resultSummary).map((path, index) => (
+            <li key={`${path}-${index}`}>
+              <code>{path}</code>
+            </li>
+          ))}
+        </ul>
+      </div>
     );
   }
 
   const code = block.resultKind === 'code' ? stripCodeFence(block.resultSummary) : block.resultSummary;
-  const languageClass = block.resultLanguage ? `language-${block.resultLanguage}` : undefined;
+  if (block.resultKind === 'diff') return <DiffResult code={code} />;
 
   return (
-    <pre className={`tool-result-pre ${block.resultKind}`}>
-      <code className={languageClass}>{code}</code>
-    </pre>
+    <CodeFrame code={code} language={block.resultLanguage} className={`tool-result-pre ${block.resultKind}`} variant="tool" />
   );
 }
 
@@ -181,6 +314,7 @@ function RawBlockView({ block }: { block: RawBlock }) {
 }
 
 function ConversationBlockView({ block }: { block: ConversationBlock }) {
+  if (block.type === 'anchor') return <span id={blockElementId(block)} className="conversation-anchor" aria-hidden="true" />;
   if (block.type === 'message') return <MessageBlockView block={block} />;
   if (block.type === 'tool') return <ToolBlockView block={block} />;
   if (block.type === 'task') return <TaskBlockView block={block} />;

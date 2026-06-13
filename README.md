@@ -187,6 +187,16 @@ Permission mode: bypassPermissions
 
 The daemon starts the configured launcher in that working directory, streams events back to the browser, and names the session from the first user message.
 
+## Session History API
+
+Session transcripts can be read without attaching to a running Claude process:
+
+```text
+GET /api/sessions/<session-id>/transcript?afterId=<last-seen-event-id>
+```
+
+This returns persisted append-only UI events as `{ "events": [...] }` for active, stopped, ended, failed, or archived sessions. `GET /api/sessions/<session-id>/events?afterId=...` remains the WebSocket replay-then-live stream for running sessions. Archived sessions remain read-only and reject mutation routes such as input, stop, restart, and resume until unarchived.
+
 ## Data layout
 
 Default data directory:

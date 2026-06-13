@@ -1,8 +1,8 @@
 /// <reference types="node" />
 
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import ConversationBlockList from './ConversationBlockList';
 import type { ConversationBlock } from './conversationBlocks';
 
@@ -37,6 +37,8 @@ describe('ConversationBlockList', () => {
     expect(within(article).getByText('inline code')).toHaveProperty('tagName', 'CODE');
     expect(within(article).getByText('first item')).toHaveProperty('tagName', 'LI');
     expect(within(article).getByText(/const answer = 42/).closest('pre')).toHaveClass('message-code');
+    expect(within(article).getByText('TypeScript')).toHaveClass('code-language');
+    expect(within(article).getByRole('button', { name: 'Copy code' })).toHaveClass('copy-button');
     expect(within(article).getByText('Raw events')).toBeInTheDocument();
   });
 
@@ -270,11 +272,43 @@ describe('ConversationBlockList', () => {
     const articles = screen.getAllByRole('article');
     expect(within(articles[0]).getByText('Diff')).toBeInTheDocument();
     expect(within(articles[0]).getByText(/diff --git/).closest('pre')).toHaveClass('tool-result-pre', 'diff');
+    expect(within(articles[0]).getByText('-old')).toHaveClass('diff-line', 'deletion');
+    expect(within(articles[0]).getByText('+new')).toHaveClass('diff-line', 'addition');
+    expect(within(articles[0]).getByRole('button', { name: 'Copy code' })).toHaveClass('copy-button');
     expect(within(articles[1]).getByText('Failure')).toBeInTheDocument();
+    expect(within(articles[1]).getByText('TSX')).toHaveClass('code-language');
     expect(within(articles[1]).getByText('const answer = 42;')).toHaveProperty('tagName', 'CODE');
     expect(within(articles[1]).getByText('const answer = 42;').closest('pre')).toHaveClass('tool-result-pre', 'code');
     expect(within(articles[2]).getByText('Paths')).toBeInTheDocument();
     expect(within(articles[2]).getByText('web/src/App.tsx').closest('ul')).toHaveClass('tool-path-list');
+    expect(within(articles[2]).getByText('2 paths')).toBeInTheDocument();
+    expect(within(articles[2]).getByRole('button', { name: 'Copy paths' })).toHaveClass('copy-button');
+  });
+
+  it('copies message code without interfering with raw payload visibility', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText }
+    });
+    const blocks: ConversationBlock[] = [
+      {
+        id: 'message-copy-code',
+        type: 'message',
+        role: 'assistant',
+        text: '```ts\nconst copied = true;\n```',
+        eventIds: [1],
+        rawEvents: [rawEvent(1, { content: '```ts\nconst copied = true;\n```', rawOnly: true })]
+      }
+    ];
+
+    render(<ConversationBlockList blocks={blocks} />);
+
+    screen.getByRole('button', { name: 'Copy code' }).click();
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('const copied = true;'));
+    expect(screen.getByText('Raw events').closest('details')).not.toHaveAttribute('open');
+    expect(await screen.findByText('Copied')).toBeInTheDocument();
   });
 
   it('renders task activity with output path when present', () => {

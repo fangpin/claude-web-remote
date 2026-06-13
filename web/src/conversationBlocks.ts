@@ -60,7 +60,14 @@ export type RawBlock = {
   rawEvents: RawEventRef[];
 };
 
-export type ConversationBlock = MessageBlock | ToolBlock | TaskBlock | ErrorBlock | RawBlock;
+export type AnchorBlock = {
+  id: string;
+  type: 'anchor';
+  eventIds: number[];
+  rawEvents: RawEventRef[];
+};
+
+export type ConversationBlock = MessageBlock | ToolBlock | TaskBlock | ErrorBlock | RawBlock | AnchorBlock;
 
 type PendingTool = {
   event: UiEvent;
@@ -577,6 +584,15 @@ function makeStandaloneToolResult(event: UiEvent, payload: ObjectPayload): ToolB
   };
 }
 
+function makeAnchorBlock(id: string, events: UiEvent[]): AnchorBlock {
+  return {
+    id: `anchor-${id}-${events.at(-1)?.id ?? events[0]?.id ?? 'event'}`,
+    type: 'anchor',
+    eventIds: events.map((event) => event.id),
+    rawEvents: events.map(rawEvent)
+  };
+}
+
 function roleFromEvent(event: UiEvent, payload: ObjectPayload): MessageBlock['role'] | null {
   if (event.kind === 'assistant' || event.kind === 'user' || event.kind === 'system') return event.kind;
   if (payload.type === 'assistant' || payload.type === 'user' || payload.type === 'system') return payload.type;
@@ -699,10 +715,7 @@ export function buildConversationBlocks(events: UiEvent[]): ConversationBlock[] 
         if (pending) {
           const block = makeToolBlock(pending.event, pending.payload, item.event, item.payload);
           if (block.type === 'tool' && toolPresentation(block.name, block.status, block.resultSummary).visibility === 'hidden') {
-            blocks.splice(pending.blockIndex, 1);
-            for (const pendingTool of pendingTools.values()) {
-              if (pendingTool.blockIndex > pending.blockIndex) pendingTool.blockIndex -= 1;
-            }
+            blocks[pending.blockIndex] = makeAnchorBlock(id, [pending.event, item.event]);
           } else {
             blocks[pending.blockIndex] = block;
           }

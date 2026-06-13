@@ -1,7 +1,7 @@
 import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
-import type { SessionInfo, SessionStatus } from './types';
+import type { SessionInfo, SessionStatus, UiEvent } from './types';
 
 const baseSession = {
   permissionMode: 'acceptEdits',
@@ -114,8 +114,11 @@ const taskGroups = {
 
 const emptyTaskGroups = { background: [], finished: [] };
 
+const defaultEventsBySession: Record<string, UiEvent[]> = {};
+
 let sessions: SessionInfo[] = defaultSessions;
 let deletedSessions: SessionInfo[] = defaultDeletedSessions;
+let eventsBySession: Record<string, UiEvent[]> = defaultEventsBySession;
 let fetchMock: ReturnType<typeof vi.fn>;
 let scrollIntoViewMock: ReturnType<typeof vi.fn>;
 
@@ -152,6 +155,81 @@ function taskGroupsWithTitle(title: string, sessionId = 's1') {
   };
 }
 
+function eventsResponse(url: string): Response | null {
+  const match = url.match(/\/api\/sessions\/([^/?]+)\/(?:events|transcript)(?:\?([^#]*))?/);
+  if (!match) return null;
+  const sessionId = match[1];
+  const params = new URLSearchParams(match[2] ?? '');
+  const afterId = Number(params.get('afterId') ?? 0);
+  const events = (eventsBySession[sessionId] ?? []).filter((event) => event.id > afterId);
+  return jsonResponse({ events });
+}
+
+function diagnosticsResponse() {
+  return jsonResponse({
+    status: 'healthy',
+    config: {
+      configPath: '/home/user/.claude-remote-web/config.toml',
+      configFileExists: true,
+      restartRequired: false,
+      bind: '127.0.0.1:8787',
+      defaultPermissionMode: 'bypassPermissions',
+      worktreesDir: null,
+      worktreeBranchPrefix: 'pin',
+      worktreeBaseRef: 'fresh'
+    },
+    launcher: {
+      argv: ['claude'],
+      nativeArgsPreview: ['--input-format', 'stream-json', '--output-format', 'stream-json', '--permission-mode', 'bypassPermissions', '--verbose'],
+      fullArgvPreview: ['claude', '--input-format', 'stream-json', '--output-format', 'stream-json', '--permission-mode', 'bypassPermissions', '--verbose'],
+      status: 'healthy',
+      issues: []
+    },
+    webDir: {
+      status: 'healthy',
+      path: null,
+      mode: 'embedded',
+      exists: true,
+      isDirectory: true,
+      writable: null,
+      hasIndexHtml: true,
+      message: 'Using embedded web assets.'
+    },
+    dataDir: {
+      status: 'healthy',
+      path: '/home/user/.claude-remote-web',
+      mode: 'data',
+      exists: true,
+      isDirectory: true,
+      writable: true,
+      hasIndexHtml: null,
+      message: 'Data directory exists and is writable.'
+    },
+    recentSessionFailures: []
+  });
+}
+
+function sessionDiagnosticsResponse(sessionId: string) {
+  const session = [...sessions, ...deletedSessions].find((item) => item.id === sessionId) ?? sessions[0];
+  return jsonResponse({
+    session: {
+      id: session.id,
+      name: session.name,
+      cwd: session.cwd,
+      status: session.status,
+      permissionMode: session.permissionMode,
+      claudeSessionIdPresent: Boolean(session.claudeSessionId),
+      updatedAt: session.updatedAt
+    },
+    status: session.status === 'failed' ? 'error' : 'healthy',
+    summary: 'No recent process errors recorded for this session.',
+    recentStderr: [],
+    recentErrors: [],
+    recentSystemEvents: [],
+    guidance: ['Review recent stderr and system events, then restart the session after correcting the cause.']
+  });
+}
+
 function sessionButton(name: string): HTMLElement {
   const button = querySessionButton(name);
   if (!button) throw new Error(`session button not found: ${name}`);
@@ -183,8 +261,10 @@ class FakeWebSocket {
 
 beforeEach(() => {
   cleanup();
+  window.localStorage.clear();
   sessions = defaultSessions;
   deletedSessions = defaultDeletedSessions;
+  eventsBySession = defaultEventsBySession;
   FakeWebSocket.instances = [];
   scrollIntoViewMock = vi.fn();
   Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
@@ -193,6 +273,15 @@ beforeEach(() => {
   });
   fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
+    const eventResponse = !init ? eventsResponse(url) : null;
+    if (eventResponse) return eventResponse;
+    if (url === '/api/diagnostics' && !init) {
+      return diagnosticsResponse();
+    }
+    const sessionDiagnosticsMatch = url.match(/^\/api\/sessions\/([^/?]+)\/diagnostics$/);
+    if (sessionDiagnosticsMatch && !init) {
+      return sessionDiagnosticsResponse(sessionDiagnosticsMatch[1]);
+    }
     if (url === '/api/sessions' && !init) {
       return jsonResponse({ sessions });
     }
@@ -322,6 +411,17 @@ describe('App', () => {
   });
 
   it('loads sessions, tasks, and renders active event stream as conversation blocks', async () => {
+    eventsBySession = {
+      s1: [
+        {
+          id: 1,
+          sessionId: 's1',
+          time: '2026-06-11T00:00:00Z',
+          kind: 'assistant',
+          payload: { message: 'hello from history' }
+        }
+      ]
+    };
     render(<App />);
 
     expect((await screen.findAllByText('Repo One')).length).toBeGreaterThan(0);
@@ -329,13 +429,14 @@ describe('App', () => {
     expect(screen.getByRole('heading', { name: 'Waiting' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Running' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Recent stopped' })).toBeInTheDocument();
-    expect(screen.getByText('Ready for your reply')).toBeInTheDocument();
+    expect(screen.getAllByText('Ready for your reply').length).toBeGreaterThan(0);
     expectSessionStatus('Repo One', 'Waiting for you');
     expectSessionStatus('Worktree Repo', 'Running');
     expectSessionStatus('Stopped Repo', 'Ended');
     expect(screen.getByText('Remote Claude session')).toBeInTheDocument();
     const inspector = screen.getByRole('complementary', { name: 'Session inspector' });
     expect(within(inspector).getByRole('tab', { name: 'Session tasks' })).toBeInTheDocument();
+    fireEvent.click(within(inspector).getByRole('tab', { name: 'Session tasks' }));
     const sessionPanel = within(inspector).getByRole('tabpanel', { name: 'Session tasks' });
     expect(await within(sessionPanel).findByText('Agent: Review branch')).toBeInTheDocument();
 
@@ -479,7 +580,7 @@ describe('App', () => {
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search sessions' }), { target: { value: 'missing-branch' } });
 
     expect(screen.getByRole('heading', { name: 'Search results' })).toBeInTheDocument();
-    expect(screen.getByText('No sessions match "missing-branch".')).toBeInTheDocument();
+    expect(screen.getByText('No chats match "missing-branch".')).toBeInTheDocument();
     expect(screen.getByText('Try a repo name, branch, path, or status.')).toBeInTheDocument();
   });
 
@@ -529,6 +630,36 @@ describe('App', () => {
     expect(inputCallCount()).toBe(sentBeforeKeyboardChecks);
   });
 
+  it('stores successful prompts and recalls them with Up and Down without stealing multiline editing', async () => {
+    render(<App />);
+
+    const messageInput = await screen.findByLabelText('Message') as HTMLTextAreaElement;
+
+    fireEvent.change(messageInput, { target: { value: 'first prompt' } });
+    fireEvent.keyDown(messageInput, { key: 'Enter' });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/input', expect.objectContaining({ method: 'POST' })));
+
+    fireEvent.change(messageInput, { target: { value: 'second prompt' } });
+    fireEvent.keyDown(messageInput, { key: 'Enter' });
+    await waitFor(() => {
+      const sent = fetchMock.mock.calls.filter(([url]) => String(url) === '/api/sessions/s1/input');
+      expect(sent).toHaveLength(2);
+    });
+
+    fireEvent.keyDown(messageInput, { key: 'ArrowUp' });
+    expect(messageInput).toHaveValue('second prompt');
+
+    fireEvent.keyDown(messageInput, { key: 'ArrowUp' });
+    expect(messageInput).toHaveValue('first prompt');
+
+    fireEvent.keyDown(messageInput, { key: 'ArrowDown' });
+    expect(messageInput).toHaveValue('second prompt');
+
+    fireEvent.change(messageInput, { target: { value: 'line one\nline two', selectionStart: 9, selectionEnd: 9 } });
+    fireEvent.keyDown(messageInput, { key: 'ArrowUp' });
+    expect(messageInput).toHaveValue('line one\nline two');
+  });
+
   it('auto-resizes the message textarea for multi-line drafts and caps tall content', async () => {
     render(<App />);
 
@@ -558,13 +689,15 @@ describe('App', () => {
     render(<App />);
 
     fireEvent.change(await screen.findByLabelText('Message'), { target: { value: 'do work' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    fireEvent.click(screen.getByRole('button', { name: /Send/ }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/input', expect.objectContaining({ method: 'POST' })));
     expect(await screen.findByRole('heading', { name: 'Do work' })).toBeInTheDocument();
 
     fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      const eventResponse = init?.method === undefined ? eventsResponse(url) : null;
+      if (eventResponse) return eventResponse;
       if (url === '/api/sessions' && !init) return jsonResponse({ sessions: defaultSessions });
       if (url === '/api/tasks' || url.endsWith('/tasks')) return jsonResponse(emptyTaskGroups);
       if (url === '/api/sessions/s1/input' && init?.method === 'POST') return jsonResponse({ error: 'input failed' }, 500);
@@ -574,17 +707,19 @@ describe('App', () => {
     render(<App />);
 
     fireEvent.change(await screen.findByLabelText('Message'), { target: { value: 'retry work' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    fireEvent.click(screen.getByRole('button', { name: /Send/ }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('input failed');
+    expect(await screen.findByText('input failed')).toBeInTheDocument();
     expect(screen.getByLabelText('Message')).toHaveValue('retry work');
-    expect(screen.getByRole('button', { name: 'Send' })).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: /Send/ })).not.toBeDisabled();
   });
 
   it('disables send for empty input and prevents duplicate sends while pending', async () => {
     const inputDeferred = createDeferredResponse({ ok: true });
     fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      const eventResponse = init?.method === undefined ? eventsResponse(url) : null;
+      if (eventResponse) return eventResponse;
       if (url === '/api/sessions' && !init) return jsonResponse({ sessions: defaultSessions });
       if (url === '/api/tasks' || url.endsWith('/tasks')) return jsonResponse(emptyTaskGroups);
       if (url === '/api/sessions/s1/input' && init?.method === 'POST') return inputDeferred.promise;
@@ -594,7 +729,7 @@ describe('App', () => {
     render(<App />);
 
     const messageInput = await screen.findByLabelText('Message');
-    const sendButton = screen.getByRole('button', { name: 'Send' });
+    const sendButton = screen.getByRole('button', { name: /Send/ });
     expect(sendButton).toBeDisabled();
 
     fireEvent.change(messageInput, { target: { value: 'do work' } });
@@ -606,7 +741,7 @@ describe('App', () => {
     expect(fetchMock.mock.calls.filter(([url]) => String(url) === '/api/sessions/s1/input')).toHaveLength(1);
 
     await act(async () => inputDeferred.resolve());
-    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Send/ })).toBeDisabled();
   });
 
   it('stops the active session from the composer', async () => {
@@ -633,8 +768,11 @@ describe('App', () => {
   });
 
   it('shows an empty conversation state and fills suggestions without sending', async () => {
+    eventsBySession = {};
     fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      const eventResponse = init?.method === undefined ? eventsResponse(url) : null;
+      if (eventResponse) return eventResponse;
       if (url === '/api/sessions' && !init) return jsonResponse({ sessions: defaultSessions });
       if (url === '/api/tasks' || url.endsWith('/tasks')) return jsonResponse(emptyTaskGroups);
       if (url.endsWith('/input')) return jsonResponse({ ok: true });
@@ -643,6 +781,8 @@ describe('App', () => {
 
     render(<App />);
 
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBe(1));
+    act(() => FakeWebSocket.instances[0].onopen?.());
     expect(await screen.findByRole('heading', { name: 'What would you like Claude to do?' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Run the relevant tests' }));
 
@@ -750,6 +890,17 @@ describe('App', () => {
   });
 
   it('loads archived sessions without opening a WebSocket or composer and unarchives them', async () => {
+    eventsBySession = {
+      s3: [
+        {
+          id: 1,
+          sessionId: 's3',
+          time: '2026-06-11T00:00:00Z',
+          kind: 'assistant',
+          payload: { message: 'archived session history' }
+        }
+      ]
+    };
     render(<App />);
 
     await screen.findByRole('heading', { name: 'Repo One' });
@@ -759,8 +910,10 @@ describe('App', () => {
 
     expect(await screen.findByRole('heading', { name: 'Archived Repo' })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith('/api/sessions?deletedOnly=true', undefined);
+    expect(await screen.findByText('archived session history')).toBeInTheDocument();
     expect(screen.getByLabelText('Message')).toBeDisabled();
     const inspector = screen.getByRole('complementary', { name: 'Session inspector' });
+    fireEvent.click(within(inspector).getByRole('tab', { name: 'Session tasks' }));
     const sessionPanel = within(inspector).getByRole('tabpanel', { name: 'Session tasks' });
     expect(within(sessionPanel).queryByText('Agent: Review branch')).not.toBeInTheDocument();
     expect(FakeWebSocket.instances).toHaveLength(0);
@@ -770,6 +923,35 @@ describe('App', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s3/unarchive', expect.objectContaining({ method: 'POST' })));
     await waitFor(() => expect(screen.queryByRole('button', { name: /Archived Repo/ })).not.toBeInTheDocument());
     expect(screen.getByRole('heading', { name: 'No archived sessions.' })).toBeInTheDocument();
+  });
+
+  it('loads stopped session history without opening a WebSocket until resumed', async () => {
+    eventsBySession = {
+      s2: [
+        {
+          id: 7,
+          sessionId: 's2',
+          time: '2026-06-11T00:00:00Z',
+          kind: 'assistant',
+          payload: { message: 'stopped session history' }
+        }
+      ]
+    };
+    render(<App />);
+
+    await screen.findByRole('heading', { name: 'Repo One' });
+    FakeWebSocket.instances = [];
+    fireEvent.click(sessionButton('Stopped Repo'));
+
+    expect(await screen.findByRole('heading', { name: 'Stopped Repo' })).toBeInTheDocument();
+    expect(await screen.findByText('stopped session history')).toBeInTheDocument();
+    expect(FakeWebSocket.instances).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Resume' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s2/resume', expect.objectContaining({ method: 'POST' })));
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBe(1));
+    expect(FakeWebSocket.instances[0].url).toContain('/api/sessions/s2/events?afterId=7');
   });
 
   it('deletes archived session data from the archived list', async () => {
@@ -790,6 +972,8 @@ describe('App', () => {
     const deletedList = createDeferredResponse({ sessions: defaultDeletedSessions });
     fetchMock = vi.fn((input: RequestInfo | URL) => {
       const url = String(input);
+      const eventResponse = eventsResponse(url);
+      if (eventResponse) return Promise.resolve(eventResponse);
       if (url === '/api/sessions') return activeList.promise;
       if (url === '/api/sessions?deletedOnly=true') return deletedList.promise;
       if (url === '/api/tasks' || url.endsWith('/tasks')) return Promise.resolve(jsonResponse(emptyTaskGroups));
@@ -834,6 +1018,8 @@ describe('App', () => {
     });
     fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      const eventResponse = !init ? eventsResponse(url) : null;
+      if (eventResponse) return Promise.resolve(eventResponse);
       if (url === '/api/sessions' && !init) return Promise.resolve(jsonResponse({ sessions: threeSessions }));
       if (url === '/api/tasks' || url.endsWith('/tasks')) return Promise.resolve(jsonResponse(emptyTaskGroups));
       if (url === '/api/sessions/s1/archive' && init?.method === 'POST') return archivePromise;
@@ -885,6 +1071,7 @@ describe('App', () => {
     render(<App />);
 
     const inspector = await screen.findByRole('complementary', { name: 'Session inspector' });
+    fireEvent.click(within(inspector).getByRole('tab', { name: 'Session tasks' }));
     const sessionPanel = within(inspector).getByRole('tabpanel', { name: 'Session tasks' });
     expect(within(sessionPanel).getByRole('heading', { name: 'Session tasks' })).toBeInTheDocument();
     expect(await within(sessionPanel).findByText('Agent: Review branch')).toBeInTheDocument();
@@ -923,6 +1110,21 @@ describe('App', () => {
     expect(within(planPanel).getByText('From ExitPlanMode')).toBeInTheDocument();
   });
 
+  it('shows runtime diagnostics in the inspector', async () => {
+    render(<App />);
+
+    const inspector = await screen.findByRole('complementary', { name: 'Session inspector' });
+    fireEvent.click(within(inspector).getByRole('tab', { name: 'Diagnostics' }));
+
+    const diagnosticsPanel = within(inspector).getByRole('tabpanel', { name: 'Diagnostics' });
+    expect(await within(diagnosticsPanel).findByText('Daemon health checks are passing.')).toBeInTheDocument();
+    expect(within(diagnosticsPanel).getByText('Data directory exists and is writable.')).toBeInTheDocument();
+    expect(within(diagnosticsPanel).getByText('claude --input-format stream-json --output-format stream-json --permission-mode bypassPermissions --verbose')).toBeInTheDocument();
+    expect(within(diagnosticsPanel).getByText('No recent process errors recorded for this session.')).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith('/api/diagnostics', undefined);
+    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/diagnostics', undefined);
+  });
+
   it('selects the owning session and refreshes tasks when a task is clicked', async () => {
     render(<App />);
 
@@ -946,6 +1148,8 @@ describe('App', () => {
     const taskRequests: DeferredResponse[] = [];
     fetchMock.mockImplementation((input: RequestInfo | URL) => {
       const url = String(input);
+      const eventResponse = eventsResponse(url);
+      if (eventResponse) return Promise.resolve(eventResponse);
       if (url === '/api/sessions') return Promise.resolve(jsonResponse({ sessions }));
       if (url === '/api/tasks') {
         const request = createDeferredResponse(emptyTaskGroups);

@@ -54,6 +54,42 @@
   overflow-wrap: anywhere;
 }
 
+.task-filter {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 3px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgb(255 253 250 / 0.62);
+  padding: 3px;
+}
+
+.task-filter button {
+  min-width: 0;
+  border-color: transparent;
+  border-radius: 6px;
+  color: var(--muted);
+  background: transparent;
+  padding: 5px 6px;
+  font-size: 11px;
+  font-weight: 720;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-filter button:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.task-filter button.selected {
+  border-color: var(--border);
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgb(45 42 38 / 0.04);
+}
+
 .tasks-panel.task-center .task-section {
   display: grid;
   gap: 8px;

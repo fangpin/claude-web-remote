@@ -1,5 +1,6 @@
 pub mod api;
 pub mod config;
+pub mod diagnostics;
 pub mod embedded_assets;
 pub mod error;
 pub mod event;
@@ -13,6 +14,7 @@ pub use api::{AppState, build_router};
 pub use config::{
     Config, ConfigStore, ConfigValues, ResolvedConfig, WorktreeBaseRef, WorktreeConfig,
 };
+pub use diagnostics::{DiagnosticsResponse, SessionDiagnosticsResponse};
 pub use error::{AppError, AppResult};
 pub use event::{EventKind, UiEvent, extract_claude_session_id, normalize_claude_stdout};
 pub use process::{ClaudeProcess, ClaudeProcessConfig, ProcessEvent};

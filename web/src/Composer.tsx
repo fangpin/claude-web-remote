@@ -51,6 +51,22 @@ export default function Composer({
   onStopSession
 }: Props) {
   const hasAutocomplete = suggestions.length > 0 && autocompleteToken;
+  const runtimeStatus = activeSession.runtimeStatus ?? activeSession.status;
+  const statusLabel = isAwaitingClaude ? 'Claude is working' : runtimeStatusLabels[runtimeStatus];
+  const contextSummary = [
+    activeSession.permissionMode,
+    activeSession.worktree?.branch ?? 'direct cwd'
+  ].join(' / ');
+  const contextDetails = [
+    { label: 'cwd', value: activeSession.cwd },
+    { label: 'permission', value: activeSession.permissionMode },
+    ...(activeSession.worktree
+      ? [
+          { label: 'branch', value: activeSession.worktree.branch },
+          { label: 'source', value: activeSession.worktree.sourceCwd }
+        ]
+      : [])
+  ];
 
   return (
     <form
@@ -62,12 +78,26 @@ export default function Composer({
       <div className="composer-context" aria-label="Composer context">
         <span className="composer-status-pill">
           <span aria-hidden="true" className="composer-status-dot" />
-          status: {isAwaitingClaude ? 'Waiting for Claude' : runtimeStatusLabels[activeSession.runtimeStatus ?? activeSession.status]}
+          status: {statusLabel}
         </span>
-        <span title={activeSession.cwd}>cwd: {activeSession.cwd}</span>
-        <span>permission: {activeSession.permissionMode}</span>
-        {activeSession.worktree && <span title={activeSession.worktree.branch}>branch: {activeSession.worktree.branch}</span>}
-        {activeSession.worktree && <span title={activeSession.worktree.sourceCwd}>source: {activeSession.worktree.sourceCwd}</span>}
+        <span className="composer-context-chip composer-context-wide" title={activeSession.cwd}>cwd: {activeSession.cwd}</span>
+        <span className="composer-context-chip composer-context-wide">permission: {activeSession.permissionMode}</span>
+        {activeSession.worktree && <span className="composer-context-chip composer-context-wide" title={activeSession.worktree.branch}>branch: {activeSession.worktree.branch}</span>}
+        {activeSession.worktree && <span className="composer-context-chip composer-context-wide" title={activeSession.worktree.sourceCwd}>source: {activeSession.worktree.sourceCwd}</span>}
+        <details className="composer-context-menu">
+          <summary aria-label="Show composer context">
+            <span>Context</span>
+            <strong>{contextSummary}</strong>
+          </summary>
+          <dl>
+            {contextDetails.map((item) => (
+              <div key={item.label}>
+                <dt>{item.label}</dt>
+                <dd title={item.value}>{item.value}</dd>
+              </div>
+            ))}
+          </dl>
+        </details>
       </div>
       <div className="composer-input">
         <label className="sr-only" htmlFor="message-input">Message</label>
@@ -89,8 +119,11 @@ export default function Composer({
         {hasAutocomplete && (
           <div id="command-autocomplete" className="autocomplete" role="listbox" aria-label="Claude command suggestions">
             <div className="autocomplete-header">
-              <strong>Commands</strong>
-              <span>Use arrows, Tab, or Enter</span>
+              <div>
+                <strong>{autocompleteToken.query === '/' ? 'Command palette' : 'Commands'}</strong>
+                <span>{suggestions.length} available</span>
+              </div>
+              <span>Arrows, Tab, Enter</span>
             </div>
             {suggestions.map((suggestion, index) => (
               <button
@@ -107,7 +140,10 @@ export default function Composer({
                 onMouseEnter={() => onSetActiveSuggestionIndex(index)}
                 onClick={() => onCompleteSuggestion(suggestion)}
               >
-                <span className="autocomplete-command">{suggestion.name}</span>
+                <span className="autocomplete-option-main">
+                  <span className="autocomplete-command">{suggestion.name}</span>
+                  <span className="autocomplete-category">{suggestion.category}</span>
+                </span>
                 <span className="autocomplete-description">{suggestion.description}</span>
               </button>
             ))}
@@ -117,8 +153,19 @@ export default function Composer({
       <div className="composer-actions">
         <span id="composer-send-status" aria-live="polite">{sendStatusText}</span>
         <div>
+          <button
+            className="composer-attach-button"
+            type="button"
+            disabled
+            aria-label="Attach file context coming soon"
+            title="File attachments are not implemented yet"
+          >
+            <span aria-hidden="true">+</span>
+          </button>
           {isComposerSession && (
-            <button className="composer-stop-button" type="button" onClick={onStopSession}>Stop session</button>
+            <button className="composer-stop-button" type="button" onClick={onStopSession} disabled={isSending}>
+              Stop session
+            </button>
           )}
           <button
             className="send-button"
@@ -126,7 +173,7 @@ export default function Composer({
             disabled={!canSend}
             aria-label={isSending ? 'Sending message' : 'Send'}
             aria-describedby="composer-send-status"
-            title={isSending ? 'Sending message' : 'Send message'}
+            title={isSending ? 'Sending message' : isAwaitingClaude ? 'Send another message while Claude is working' : 'Send message'}
           >
             <span className="sr-only">{isSending ? 'Sending message' : 'Send'}</span>
             <svg aria-hidden="true" viewBox="0 0 16 16" focusable="false">

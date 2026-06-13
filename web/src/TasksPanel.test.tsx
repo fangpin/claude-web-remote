@@ -45,14 +45,15 @@ describe('TasksPanel', () => {
     expect(screen.getByText('1 running · 1 finished')).toBeInTheDocument();
     expect(screen.getByText('Background')).toBeInTheDocument();
     expect(screen.getByText('Still running')).toBeInTheDocument();
-    expect(screen.getByText('Finished')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Finished' })).toBeInTheDocument();
     expect(screen.getByText('Completed, failed, or interrupted')).toBeInTheDocument();
     expect(screen.getByText('Agent: Explore the branch')).toBeInTheDocument();
     expect(screen.getByText('Agent: Review the branch')).toBeInTheDocument();
-    expect(screen.getByText('Running')).toBeInTheDocument();
+    expect(screen.getAllByText('Running').some((element) => element.closest('.task-status-pill'))).toBe(true);
     expect(screen.getByText('Completed')).toBeInTheDocument();
     expect(screen.getByText('No issues found')).toBeInTheDocument();
     expect(screen.getAllByText('Open')).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('calls onSelectTask when a task is clicked', () => {
@@ -111,7 +112,7 @@ describe('TasksPanel', () => {
     expect(screen.getByText('Task refresh failed')).toBeInTheDocument();
     expect(screen.getByText('failed to load tasks')).toBeInTheDocument();
     expect(screen.getByText('No agent activity yet')).toBeInTheDocument();
-    expect(screen.getByText('This session is quiet.')).toBeInTheDocument();
+    expect(screen.getByText('Background and finished task cards will appear here when Claude starts longer-running work.')).toBeInTheDocument();
   });
 
   it('renders per-section empty states when only one lane has tasks', () => {
@@ -120,5 +121,36 @@ describe('TasksPanel', () => {
     expect(screen.getByText('1 running · 0 finished')).toBeInTheDocument();
     expect(screen.getByText('No finished tasks')).toBeInTheDocument();
     expect(screen.queryByText('No agent activity yet')).not.toBeInTheDocument();
+  });
+
+  it('filters by failed and running task state', () => {
+    render(
+      <TasksPanel
+        title="Tasks"
+        tasks={{
+          background: groups.background,
+          finished: [
+            groups.finished[0],
+            task({
+              id: 's1:toolu_failed',
+              title: 'Agent: Failed verification',
+              status: 'failed',
+              finishedAt: '2026-06-12T00:02:00Z',
+              summary: 'Command failed'
+            })
+          ]
+        }}
+        onSelectTask={() => undefined}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Failed' }));
+    expect(screen.getByText('Agent: Failed verification')).toBeInTheDocument();
+    expect(screen.queryByText('Agent: Explore the branch')).not.toBeInTheDocument();
+    expect(screen.queryByText('Agent: Review the branch')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Active' }));
+    expect(screen.getByText('Agent: Explore the branch')).toBeInTheDocument();
+    expect(screen.queryByText('Agent: Failed verification')).not.toBeInTheDocument();
   });
 });

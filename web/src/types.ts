@@ -80,3 +80,81 @@ export type ManagedConfig = {
   file: ConfigValues;
   restartRequired: boolean;
 };
+
+export type DiagnosticStatus = 'healthy' | 'warning' | 'error';
+
+export type PathDiagnostics = {
+  status: DiagnosticStatus;
+  path?: string | null;
+  mode?: string | null;
+  exists: boolean;
+  isDirectory: boolean;
+  writable?: boolean | null;
+  hasIndexHtml?: boolean | null;
+  message: string;
+};
+
+export type LauncherDiagnostics = {
+  argv: string[];
+  nativeArgsPreview: string[];
+  fullArgvPreview: string[];
+  status: DiagnosticStatus;
+  issues: string[];
+};
+
+export type ConfigDiagnostics = {
+  configPath: string;
+  configFileExists: boolean;
+  restartRequired: boolean;
+  bind: string;
+  defaultPermissionMode: string;
+  worktreesDir?: string | null;
+  worktreeBranchPrefix: string;
+  worktreeBaseRef: 'fresh' | 'head';
+};
+
+export type SessionFailureSummary = {
+  sessionId: string;
+  sessionName?: string | null;
+  cwd: string;
+  status: SessionStatus;
+  updatedAt: string;
+  message: string;
+  stderr: string[];
+};
+
+export type DiagnosticsResponse = {
+  status: DiagnosticStatus;
+  config: ConfigDiagnostics;
+  launcher: LauncherDiagnostics;
+  webDir: PathDiagnostics;
+  dataDir: PathDiagnostics;
+  recentSessionFailures: SessionFailureSummary[];
+};
+
+export type DiagnosticEventSummary = {
+  id: number;
+  time: string;
+  kind: EventKind;
+  message: string;
+};
+
+export type SessionDiagnosticMeta = {
+  id: string;
+  name?: string | null;
+  cwd: string;
+  status: SessionStatus;
+  permissionMode: string;
+  claudeSessionIdPresent: boolean;
+  updatedAt: string;
+};
+
+export type SessionDiagnosticsResponse = {
+  session: SessionDiagnosticMeta;
+  status: DiagnosticStatus;
+  summary: string;
+  recentStderr: string[];
+  recentErrors: DiagnosticEventSummary[];
+  recentSystemEvents: DiagnosticEventSummary[];
+  guidance: string[];
+};

@@ -1,13 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { eventsUrl } from './api';
+import { eventsUrl, listSessionEvents } from './api';
 import { buildConversationBlocks } from './conversationBlocks';
 import { extractSessionPlan } from './sessionPlan';
 import type { SessionInfo, UiEvent } from './types';
+
+export type EventConnectionState = 'idle' | 'connecting' | 'open' | 'reconnecting' | 'error' | 'closed';
 
 type ObjectPayload = Record<string, unknown>;
 type PendingMessage = {
   id: number;
   text: string;
+};
+
+type SessionConnection = {
+  state: EventConnectionState;
+  error: string | null;
 };
 
 type UseSessionEventsOptions = {
@@ -58,6 +65,33 @@ function userEventText(event: UiEvent): string | null {
   return event.kind === 'user' ? textFromEventPayload(event.payload) : null;
 }
 
+function latestPersistedEventId(events: UiEvent[]): number {
+  return events.reduce((latest, event) => (event.id > latest ? event.id : latest), 0);
+}
+
+function mergeEvents(current: UiEvent[], incoming: UiEvent[] = []): UiEvent[] {
+  if (incoming.length === 0) return current;
+  const incomingUserTexts = new Set(
+    incoming
+      .map(userEventText)
+      .filter((text): text is string => Boolean(text))
+      .map(normalizedMessageText)
+  );
+  const pendingEvents = current.filter((event) => {
+    if (event.id >= 0) return false;
+    const text = userEventText(event);
+    return !text || !incomingUserTexts.has(normalizedMessageText(text));
+  });
+  const byId = new Map<number, UiEvent>();
+  for (const event of current) {
+    if (event.id >= 0) byId.set(event.id, event);
+  }
+  for (const event of incoming) {
+    if (event.id >= 0) byId.set(event.id, event);
+  }
+  return [...Array.from(byId.values()).sort((a, b) => a.id - b.id), ...pendingEvents];
+}
+
 export function useSessionEvents({
   activeId,
   activeSession,
@@ -68,8 +102,10 @@ export function useSessionEvents({
   refreshSessionTasks
 }: UseSessionEventsOptions) {
   const [events, setEvents] = useState<Record<string, UiEvent[]>>({});
+  const [connections, setConnections] = useState<Record<string, SessionConnection>>({});
   const [awaitingClaudeSessionIds, setAwaitingClaudeSessionIds] = useState<Set<string>>(() => new Set());
   const [pendingEventId, setPendingEventId] = useState<number | null>(null);
+  const [connectionRetryToken, setConnectionRetryToken] = useState(0);
   const activeIdRef = useRef<string | null>(null);
   const eventsRef = useRef<HTMLDivElement | null>(null);
   const pendingMessagesRef = useRef<Record<string, PendingMessage[]>>({});
@@ -87,12 +123,36 @@ export function useSessionEvents({
     () => buildConversationBlocks(visibleEvents),
     [visibleEvents]
   );
+  const activeBlockEventIds = useMemo(
+    () => activeBlocks.flatMap((block) => block.eventIds),
+    [activeBlocks]
+  );
   const activePlan = useMemo(
     () => extractSessionPlan(activeEvents),
     [activeEvents]
   );
+  const defaultActiveConnection: SessionConnection = {
+    state: activeSession && isActiveSessionMode && (activeSession.status === 'running' || activeSession.status === 'starting') ? 'connecting' : 'idle',
+    error: null
+  };
+  const activeConnection: SessionConnection = activeId
+    ? connections[activeId] ?? defaultActiveConnection
+    : defaultActiveConnection;
   const hiddenEventCount = activeEvents.length - visibleEvents.length;
   const isAwaitingClaude = activeId ? awaitingClaudeSessionIds.has(activeId) : false;
+
+  function setConnection(sessionId: string, update: Partial<SessionConnection>) {
+    setConnections((current) => {
+      const previous = current[sessionId] ?? { state: 'idle' as const, error: null };
+      return {
+        ...current,
+        [sessionId]: {
+          ...previous,
+          ...update
+        }
+      };
+    });
+  }
 
   function addPendingMessage(sessionId: string, text: string): number {
     const eventId = -Date.now();
@@ -169,17 +229,71 @@ export function useSessionEvents({
     markAwaitingClaude(sessionId, false);
   }
 
+  function retryActiveEvents() {
+    if (!activeId) return;
+    setConnection(activeId, { state: events[activeId]?.length ? 'reconnecting' : 'connecting', error: null });
+    setConnectionRetryToken((token) => token + 1);
+  }
+
   useEffect(() => {
-    if (!activeSession || !isActiveSessionMode) return;
-    if (activeSession.status !== 'running' && activeSession.status !== 'starting') return;
+    if (!activeSession) return;
+    const sessionId = activeSession.id;
+    let cancelled = false;
+
+    async function loadHistory() {
+      try {
+        const loaded = await listSessionEvents(sessionId, latestPersistedEventId(events[sessionId] ?? []));
+        if (cancelled || activeIdRef.current !== sessionId) return;
+        setEvents((current) => ({
+          ...current,
+          [sessionId]: mergeEvents(current[sessionId] ?? [], loaded)
+        }));
+      } catch (error) {
+        if (cancelled || activeIdRef.current !== sessionId) return;
+        const detail = error instanceof Error ? error.message : 'Could not load this session transcript.';
+        setConnection(sessionId, { state: 'error', error: detail });
+      }
+    }
+
+    void loadHistory();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSession?.id, activeSession?.updatedAt, connectionRetryToken]);
+
+  useEffect(() => {
+    if (!activeSession || !isActiveSessionMode) {
+      return;
+    }
+    if (activeSession.status !== 'running' && activeSession.status !== 'starting') {
+      setConnection(activeSession.id, { state: 'idle', error: null });
+      return;
+    }
     const sessionId = activeSession.id;
     let socket: WebSocket | null = null;
+    let didOpen = false;
+    let hadSocketError = false;
+    setConnection(sessionId, { state: events[sessionId]?.length ? 'reconnecting' : 'connecting', error: null });
     const connectTimeoutId = window.setTimeout(() => {
       if (activeIdRef.current !== sessionId) return;
-      const afterId = (events[sessionId] ?? []).reduce((latest, event) => (event.id > latest ? event.id : latest), 0);
+      const afterId = latestPersistedEventId(events[sessionId] ?? []);
       socket = new WebSocket(eventsUrl(sessionId, afterId));
+      socket.onopen = () => {
+        didOpen = true;
+        setConnection(sessionId, { state: 'open', error: null });
+      };
       socket.onmessage = (message) => {
-        const event = JSON.parse(message.data) as UiEvent;
+        let event: UiEvent;
+        try {
+          event = JSON.parse(message.data) as UiEvent;
+        } catch {
+          setConnection(sessionId, { state: 'error', error: 'Claude sent an unreadable event. Reconnect by selecting the session again.' });
+          return;
+        }
+        if (event.kind === 'error' && (typeof event.id !== 'number' || typeof event.sessionId !== 'string')) {
+          setConnection(sessionId, { state: 'error', error: textFromEventPayload(event.payload) ?? 'Could not load this session transcript.' });
+          return;
+        }
         if (event.kind === 'user' && replaceMatchingPendingMessage(sessionId, event)) {
           markAwaitingClaude(sessionId, true);
           return;
@@ -189,18 +303,28 @@ export function useSessionEvents({
         }
         setEvents((current) => ({
           ...current,
-          [sessionId]: [...(current[sessionId] ?? []), event]
+          [sessionId]: mergeEvents(current[sessionId] ?? [], [event])
         }));
         void refreshTasks();
         void refreshSessionTasks(sessionId);
       };
-      socket.onclose = () => undefined;
+      socket.onerror = () => {
+        hadSocketError = true;
+        setConnection(sessionId, { state: 'error', error: 'Connection to Claude events was interrupted.' });
+      };
+      socket.onclose = () => {
+        if (hadSocketError) return;
+        setConnection(sessionId, {
+          state: didOpen ? 'closed' : 'error',
+          error: didOpen ? null : 'Could not connect to Claude events.'
+        });
+      };
     }, 0);
     return () => {
       window.clearTimeout(connectTimeoutId);
       socket?.close();
     };
-  }, [activeSession?.id, activeSession?.status, activeSession?.updatedAt, isActiveSessionMode, refreshTasks, refreshSessionTasks]);
+  }, [activeSession?.id, activeSession?.status, activeSession?.updatedAt, connectionRetryToken, isActiveSessionMode, refreshTasks, refreshSessionTasks]);
 
   useEffect(() => {
     if (!activeId || isComposerSession) return;
@@ -227,6 +351,8 @@ export function useSessionEvents({
 
   return {
     activeBlocks,
+    activeBlockEventIds,
+    activeConnection,
     activeEvents,
     activePlan,
     addPendingMessage,
@@ -237,6 +363,7 @@ export function useSessionEvents({
     markAwaitingClaude,
     removePendingMessage,
     removeSessionEvents,
+    retryActiveEvents,
     setPendingEventId,
     visibleEvents
   };

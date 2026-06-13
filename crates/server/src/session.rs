@@ -427,6 +427,15 @@ impl SessionManager {
         self.store.load_events_after(session_id, after_id).await
     }
 
+    pub async fn transcript_events_after(
+        &self,
+        session_id: Uuid,
+        after_id: u64,
+    ) -> AppResult<Vec<UiEvent>> {
+        let _meta = self.store.load_meta(session_id).await?;
+        self.store.load_events_after(session_id, after_id).await
+    }
+
     async fn stop_running_process(&self, session_id: Uuid) -> AppResult<()> {
         let running = self.running.lock().await.remove(&session_id);
         if let Some(session) = running {
@@ -1956,7 +1965,7 @@ done
     }
 
     #[tokio::test]
-    async fn deleted_sessions_reject_input_resume_restart_and_events() {
+    async fn deleted_sessions_reject_input_resume_restart_and_subscribe() {
         let temp = tempfile::tempdir().unwrap();
         let bin = fake_claude(temp.path());
         let store = EventStore::new(temp.path().join("data")).await.unwrap();
@@ -1999,13 +2008,81 @@ done
             Err(AppError::InvalidRequest(_))
         ));
         assert!(matches!(
-            manager.events_after(session.id, 0).await,
-            Err(AppError::InvalidRequest(_))
-        ));
-        assert!(matches!(
             manager.tasks_for_session(session.id).await,
             Err(AppError::InvalidRequest(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn transcript_events_are_readable_for_active_and_archived_sessions() {
+        let temp = tempfile::tempdir().unwrap();
+        let bin = fake_claude(temp.path());
+        let store = EventStore::new(temp.path().join("data")).await.unwrap();
+        let manager = SessionManager::new(
+            store,
+            vec![bin.to_string_lossy().to_string()],
+            "acceptEdits".to_string(),
+            worktree_config(),
+        );
+        let session = manager
+            .create_session(CreateSessionRequest {
+                cwd: temp.path().to_path_buf(),
+                name: None,
+                permission_mode: None,
+                worktree: None,
+            })
+            .await
+            .unwrap();
+
+        let active_events =
+            wait_for_event_kind(&manager.store, session.id, EventKind::System).await;
+        manager.archive_session(session.id).await.unwrap();
+
+        let archived_events = manager
+            .transcript_events_after(session.id, 0)
+            .await
+            .unwrap();
+        assert!(
+            active_events
+                .iter()
+                .all(|event| archived_events.iter().any(|archived| archived == event))
+        );
+    }
+
+    #[tokio::test]
+    async fn transcript_events_after_id_filters_events() {
+        let temp = tempfile::tempdir().unwrap();
+        let bin = fake_claude(temp.path());
+        let store = EventStore::new(temp.path().join("data")).await.unwrap();
+        let manager = SessionManager::new(
+            store,
+            vec![bin.to_string_lossy().to_string()],
+            "acceptEdits".to_string(),
+            worktree_config(),
+        );
+        let session = manager
+            .create_session(CreateSessionRequest {
+                cwd: temp.path().to_path_buf(),
+                name: None,
+                permission_mode: None,
+                worktree: None,
+            })
+            .await
+            .unwrap();
+        manager
+            .send_input(session.id, "hello".to_string())
+            .await
+            .unwrap();
+        let events = wait_for_event_kind(&manager.store, session.id, EventKind::Assistant).await;
+        let first_id = events.first().unwrap().id;
+
+        let filtered = manager
+            .transcript_events_after(session.id, first_id)
+            .await
+            .unwrap();
+
+        assert!(!filtered.is_empty());
+        assert!(filtered.iter().all(|event| event.id > first_id));
     }
 
     #[tokio::test]

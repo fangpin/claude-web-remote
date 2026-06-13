@@ -24,6 +24,12 @@ describe('autocomplete helpers', () => {
     expect(getCommandSuggestions('/perm').map((command) => command.name)).toEqual(['/permissions']);
   });
 
+  it('keeps command palette metadata available for empty slash and fuzzy command search', () => {
+    expect(getCommandSuggestions('/')).toHaveLength(CLAUDE_COMMANDS.length);
+    expect(getCommandSuggestions('/pull request').map((command) => command.name)).toEqual(['/pr-comments']);
+    expect(CLAUDE_COMMANDS.every((command) => command.category.length > 0)).toBe(true);
+  });
+
   it('returns no suggestions for text that is not a slash prefix', () => {
     expect(getCommandSuggestions('help')).toEqual([]);
     expect(getCommandSuggestions('')).toEqual([]);

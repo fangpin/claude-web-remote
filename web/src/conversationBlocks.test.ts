@@ -147,7 +147,7 @@ describe('buildConversationBlocks', () => {
     });
   });
 
-  it('hides completed Read Glob and Grep tool blocks', () => {
+  it('hides completed Read Glob and Grep tool blocks behind anchors', () => {
     const blocks = buildConversationBlocks([
       event(1, 'tool', { type: 'tool_use', id: 'toolu_read', name: 'Read', input: { file_path: '/tmp/a.txt' } }),
       event(2, 'tool', { type: 'tool_result', tool_use_id: 'toolu_read', content: 'file contents' }),
@@ -157,10 +157,14 @@ describe('buildConversationBlocks', () => {
       event(6, 'tool', { type: 'tool_result', tool_use_id: 'toolu_grep', content: 'line 1\nline 2' })
     ]);
 
-    expect(blocks).toEqual([]);
+    expect(blocks).toMatchObject([
+      { id: 'anchor-toolu_read-2', type: 'anchor', eventIds: [1, 2] },
+      { id: 'anchor-toolu_glob-4', type: 'anchor', eventIds: [3, 4] },
+      { id: 'anchor-toolu_grep-6', type: 'anchor', eventIds: [5, 6] }
+    ]);
   });
 
-  it('hides completed nested Claude Read tool_use and tool_result content blocks', () => {
+  it('hides completed nested Claude Read tool_use and tool_result content blocks behind an anchor', () => {
     const assistantPayload = {
       type: 'assistant',
       message: { content: [{ type: 'tool_use', id: 'toolu_1', name: 'Read', input: { file_path: '/tmp/a.txt' } }] }
@@ -171,7 +175,7 @@ describe('buildConversationBlocks', () => {
     };
     const blocks = buildConversationBlocks([event(1, 'assistant', assistantPayload), event(2, 'user', userPayload)]);
 
-    expect(blocks).toEqual([]);
+    expect(blocks).toMatchObject([{ id: 'anchor-toolu_1-2', type: 'anchor', eventIds: [1, 2] }]);
   });
 
   it('adjusts pending tool indexes after hiding a completed read-only tool', () => {
@@ -183,6 +187,11 @@ describe('buildConversationBlocks', () => {
     ]);
 
     expect(blocks).toMatchObject([
+      {
+        id: 'anchor-toolu_read-3',
+        type: 'anchor',
+        eventIds: [1, 3]
+      },
       {
         id: 'tool-toolu_bash',
         type: 'tool',
@@ -315,6 +324,7 @@ describe('buildConversationBlocks', () => {
 
     expect(blocks).toMatchObject([
       { id: 'tool-toolu_success_text', type: 'tool', status: 'completed', resultSummary: 'Found 0 errors', resultDisplay: 'collapsed' },
+      { id: 'anchor-toolu_no_errors-4', type: 'anchor', eventIds: [3, 4] },
       { id: 'tool-toolu_structured_error', type: 'tool', status: 'failed', resultSummary: 'file missing', resultDisplay: 'visible' },
       { id: 'tool-toolu_status_error', type: 'tool', status: 'failed', resultSummary: 'missing2', resultDisplay: 'visible' },
       { id: 'tool-toolu_failed_text', type: 'tool', status: 'failed', resultSummary: 'Command failed with exit code 1', resultDisplay: 'visible' }

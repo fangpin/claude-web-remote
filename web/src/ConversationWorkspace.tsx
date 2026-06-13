@@ -5,7 +5,13 @@ import Composer from './Composer';
 import type { AppView, SessionListMode } from './AppShell';
 import type { ClaudeCommand, SlashCommandToken } from './autocomplete';
 import type { ConversationBlock } from './conversationBlocks';
+import type { EventConnectionState } from './useSessionEvents';
 import type { SessionInfo } from './types';
+
+type ApiError = {
+  message: string;
+  detail: string | null;
+};
 
 type Props = {
   activeBlocks: ConversationBlock[];
@@ -17,13 +23,16 @@ type Props = {
   composerDisabledReason: string;
   composerRef: RefObject<HTMLFormElement | null>;
   emptyStatePrompts: string[];
-  error: string | null;
+  error: ApiError | null;
+  eventConnectionError: string | null;
+  eventConnectionState: EventConnectionState;
   eventRenderLimit: number;
   eventsRef: RefObject<HTMLDivElement | null>;
   hiddenEventCount: number;
   isAwaitingClaude: boolean;
   isComposerSession: boolean;
   isSending: boolean;
+  isSessionListLoading: boolean;
   listMode: SessionListMode;
   message: string;
   messageInputRef: RefObject<HTMLTextAreaElement | null>;
@@ -38,8 +47,51 @@ type Props = {
   onSend: (event: FormEvent) => void;
   onSetActiveSuggestionIndex: (index: number) => void;
   onStopSession: () => void;
+  onDismissError: () => void;
+  onRetryEvents: () => void;
   onUseEmptyStatePrompt: (prompt: string) => void;
 };
+
+function connectionLabel(state: EventConnectionState): string | null {
+  if (state === 'connecting') return 'Loading conversation...';
+  if (state === 'reconnecting') return 'Reconnecting...';
+  if (state === 'error') return 'Conversation connection interrupted';
+  return null;
+}
+
+function LoadingConversation() {
+  return (
+    <div className="conversation-loading" aria-label="Loading conversation">
+      <span />
+      <span />
+      <span />
+    </div>
+  );
+}
+
+function ApiErrorBanner({
+  error,
+  onDismiss
+}: {
+  error: ApiError;
+  onDismiss: () => void;
+}) {
+  return (
+    <section role="alert" className="api-error">
+      <div>
+        <span className="state-kicker">Something needs attention</span>
+        <p>{error.message}</p>
+      </div>
+      <button type="button" onClick={onDismiss}>Dismiss</button>
+      {error.detail && (
+        <details>
+          <summary>Details</summary>
+          <pre>{error.detail}</pre>
+        </details>
+      )}
+    </section>
+  );
+}
 
 export default function ConversationWorkspace({
   activeBlocks,
@@ -52,12 +104,15 @@ export default function ConversationWorkspace({
   composerRef,
   emptyStatePrompts,
   error,
+  eventConnectionError,
+  eventConnectionState,
   eventRenderLimit,
   eventsRef,
   hiddenEventCount,
   isAwaitingClaude,
   isComposerSession,
   isSending,
+  isSessionListLoading,
   listMode,
   message,
   messageInputRef,
@@ -72,6 +127,8 @@ export default function ConversationWorkspace({
   onSend,
   onSetActiveSuggestionIndex,
   onStopSession,
+  onDismissError,
+  onRetryEvents,
   onUseEmptyStatePrompt
 }: Props) {
   if (view === 'config') {
@@ -84,7 +141,7 @@ export default function ConversationWorkspace({
 
   return (
     <main className={listMode === 'archived' ? 'workspace conversation-workspace with-deleted-note' : 'workspace conversation-workspace'} aria-label="Conversation workspace">
-      {error && <p role="alert" className="error">{error}</p>}
+      {error && <ApiErrorBanner error={error} onDismiss={onDismissError} />}
       {activeSession ? (
         <>
           <header className="conversation-header">
@@ -106,12 +163,32 @@ export default function ConversationWorkspace({
           )}
           <div className="events" ref={eventsRef}>
             <div className="conversation-content">
+              {connectionLabel(eventConnectionState) && (
+                <div className={`connection-state connection-state-${eventConnectionState}`} role={eventConnectionState === 'error' ? 'alert' : 'status'}>
+                  <span aria-hidden="true" className="connection-dot" />
+                  <span>{connectionLabel(eventConnectionState)}</span>
+                  {eventConnectionState === 'error' && (
+                    <>
+                      <button type="button" onClick={onRetryEvents}>Retry</button>
+                      {eventConnectionError && (
+                        <details>
+                          <summary>Details</summary>
+                          <pre>{eventConnectionError}</pre>
+                        </details>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+              {(eventConnectionState === 'connecting' || eventConnectionState === 'reconnecting') && activeBlocks.length === 0 && hiddenEventCount === 0 && (
+                <LoadingConversation />
+              )}
               {hiddenEventCount > 0 && (
                 <div className="event-limit-note">
                   Showing latest {eventRenderLimit} events. {hiddenEventCount} older events hidden.
                 </div>
               )}
-              {activeBlocks.length === 0 && hiddenEventCount === 0 && (
+              {activeBlocks.length === 0 && hiddenEventCount === 0 && eventConnectionState !== 'connecting' && eventConnectionState !== 'reconnecting' && (
                 <section className="conversation-empty" aria-label="Conversation starter">
                   <span className="empty-eyebrow">Ready when you are</span>
                   <h3>What would you like Claude to do?</h3>
@@ -155,7 +232,19 @@ export default function ConversationWorkspace({
           />
         </>
       ) : (
-        <div className="empty-state">Create or select a session.</div>
+        isSessionListLoading ? (
+          <section className="empty-state empty-state-loading" aria-label="Loading sessions">
+            <span className="state-kicker">Loading</span>
+            <h2>Finding your chats...</h2>
+            <LoadingConversation />
+          </section>
+        ) : (
+          <section className="empty-state" aria-label="No session selected">
+            <span className="state-kicker">{listMode === 'archived' ? 'Archive' : 'New chat'}</span>
+            <h2>{listMode === 'archived' ? 'No archived chat selected.' : 'Choose a chat or start one.'}</h2>
+            <p>{listMode === 'archived' ? 'Archived conversations are read-only once selected.' : 'Claude conversations stay focused here while setup and history sit to the side.'}</p>
+          </section>
+        )
       )}
     </main>
   );

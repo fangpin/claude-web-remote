@@ -1,6 +1,6 @@
 use crate::{
     AppError, AppResult, ConfigStore, ConfigValues, CreateSessionRequest, EventStore,
-    SessionListFilter, SessionManager, embedded_assets,
+    SessionListFilter, SessionManager, diagnostics, embedded_assets,
 };
 use axum::{
     Json, Router,
@@ -67,8 +67,11 @@ pub fn build_router(state: AppState, web_dir: Option<PathBuf>) -> Router {
         .route("/sessions/{id}/archive", post(archive_session))
         .route("/sessions/{id}/unarchive", post(unarchive_session))
         .route("/sessions/{id}/restore", post(restore_session))
+        .route("/sessions/{id}/diagnostics", get(get_session_diagnostics))
         .route("/sessions/{id}/events", get(events_ws))
+        .route("/sessions/{id}/transcript", get(get_session_transcript))
         .route("/config", get(get_config).merge(put(update_config)))
+        .route("/diagnostics", get(get_diagnostics))
         .fallback(api_not_found)
         .with_state(state);
 
@@ -214,6 +217,18 @@ async fn events_ws(
     })
 }
 
+async fn get_session_transcript(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Query(query): Query<EventsQuery>,
+) -> AppResult<Json<serde_json::Value>> {
+    let events = state
+        .manager
+        .transcript_events_after(id, query.after_id.unwrap_or(0))
+        .await?;
+    Ok(Json(json!({ "events": events })))
+}
+
 async fn get_config(State(state): State<AppState>) -> AppResult<Json<serde_json::Value>> {
     Ok(Json(json!(state.config.get().await?)))
 }
@@ -223,6 +238,21 @@ async fn update_config(
     Json(request): Json<ConfigValues>,
 ) -> AppResult<Json<serde_json::Value>> {
     Ok(Json(json!(state.config.save(request).await?)))
+}
+
+async fn get_diagnostics(State(state): State<AppState>) -> AppResult<Json<serde_json::Value>> {
+    Ok(Json(json!(
+        diagnostics::diagnostics(&state.config, &state.store).await?
+    )))
+}
+
+async fn get_session_diagnostics(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<serde_json::Value>> {
+    Ok(Json(json!(
+        diagnostics::session_diagnostics(&state.store, id).await?
+    )))
 }
 
 async fn handle_events_socket(
@@ -359,6 +389,78 @@ done
     }
 
     #[tokio::test]
+    async fn diagnostics_route_reports_config_and_redacts_launcher_secrets() {
+        let temp = tempfile::tempdir().unwrap();
+        let state = test_state(&temp).await;
+        let app = build_router(state, None);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/diagnostics")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(body["status"], "healthy");
+        assert_eq!(body["config"]["defaultPermissionMode"], "bypassPermissions");
+        assert_eq!(body["launcher"]["nativeArgsPreview"][0], "--input-format");
+        assert_eq!(body["dataDir"]["exists"], true);
+    }
+
+    #[tokio::test]
+    async fn session_diagnostics_route_returns_recent_sanitized_errors() {
+        let temp = tempfile::tempdir().unwrap();
+        let state = test_state(&temp).await;
+        let session = state
+            .manager
+            .create_session(CreateSessionRequest {
+                cwd: temp.path().to_path_buf(),
+                name: Some("diagnostic".to_string()),
+                permission_mode: None,
+                worktree: None,
+            })
+            .await
+            .unwrap();
+        state
+            .store
+            .append_stderr(session.id, "failed with token=super-secret")
+            .await
+            .unwrap();
+        let app = build_router(state, None);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/sessions/{}/diagnostics", session.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(body["status"], "warning");
+        assert_eq!(body["recentStderr"][0], "failed with token=<redacted>");
+        assert!(!body.to_string().contains("super-secret"));
+    }
+
+    #[tokio::test]
     async fn sessions_query_filters_deleted_sessions() {
         let temp = tempfile::tempdir().unwrap();
         let state = test_state(&temp).await;
@@ -475,6 +577,128 @@ done
                 .as_str()
                 .unwrap()
                 .contains("is archived; unarchive it before continuing")
+        );
+    }
+
+    #[tokio::test]
+    async fn rest_events_reads_active_session_events() {
+        let temp = tempfile::tempdir().unwrap();
+        let state = test_state(&temp).await;
+        let session = state
+            .manager
+            .create_session(CreateSessionRequest {
+                cwd: temp.path().to_path_buf(),
+                name: Some("active-events".to_string()),
+                permission_mode: None,
+                worktree: None,
+            })
+            .await
+            .unwrap();
+        state
+            .store
+            .append_event_with_next_id(&mut crate::UiEvent::new(
+                0,
+                session.id,
+                crate::EventKind::User,
+                json!({ "text": "hello" }),
+            ))
+            .await
+            .unwrap();
+        let app = build_router(state, None);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/sessions/{}/transcript", session.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            body["events"].as_array().unwrap()[0]["sessionId"],
+            session.id.to_string()
+        );
+    }
+
+    #[tokio::test]
+    async fn rest_events_reads_archived_session_events_and_filters_after_id() {
+        let temp = tempfile::tempdir().unwrap();
+        let state = test_state(&temp).await;
+        let session = state
+            .manager
+            .create_session(CreateSessionRequest {
+                cwd: temp.path().to_path_buf(),
+                name: Some("archived-events".to_string()),
+                permission_mode: None,
+                worktree: None,
+            })
+            .await
+            .unwrap();
+        state
+            .manager
+            .send_input(session.id, "hello".to_string())
+            .await
+            .unwrap();
+        state.manager.archive_session(session.id).await.unwrap();
+        let app = build_router(state, None);
+
+        let all_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/sessions/{}/transcript", session.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(all_response.status(), StatusCode::OK);
+        let all_body: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(all_response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        let events = all_body["events"].as_array().unwrap();
+        assert!(events.len() >= 2);
+        let first_id = events[0]["id"].as_u64().unwrap();
+
+        let filtered_response = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/api/sessions/{}/transcript?afterId={first_id}",
+                        session.id
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(filtered_response.status(), StatusCode::OK);
+        let filtered_body: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(filtered_response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        let filtered_events = filtered_body["events"].as_array().unwrap();
+        assert!(!filtered_events.is_empty());
+        assert!(
+            filtered_events
+                .iter()
+                .all(|event| event["id"].as_u64().unwrap() > first_id)
         );
     }
 

@@ -201,6 +201,24 @@ impl EventStore {
         self.append_line(session_id, "stderr.log", line).await
     }
 
+    pub async fn load_stderr_tail(&self, session_id: Uuid, limit: usize) -> AppResult<Vec<String>> {
+        let _guard = self.write_lock.lock().await;
+        let path = self.session_dir(session_id).join("stderr.log");
+        if !fs::try_exists(&path).await? {
+            return Ok(Vec::new());
+        }
+        let content = fs::read_to_string(path).await?;
+        let mut lines = content
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        if lines.len() > limit {
+            lines.drain(0..lines.len() - limit);
+        }
+        Ok(lines)
+    }
+
     async fn load_meta_unlocked(&self, session_id: Uuid) -> AppResult<SessionMeta> {
         let content = fs::read(self.session_dir(session_id).join("meta.json")).await?;
         Ok(serde_json::from_slice(&content)?)

@@ -27,6 +27,7 @@ Key backend modules:
 - `crates/server/src/session.rs` manages session lifecycle and metadata.
 - `crates/server/src/store.rs` persists metadata and event logs.
 - `crates/server/src/api.rs` exposes REST and WebSocket endpoints.
+- `GET /api/sessions/{id}/transcript?afterId=<id>` returns persisted transcript events over plain HTTP for active, stopped, ended, failed, and archived sessions; `GET /api/sessions/{id}/events?afterId=<id>` remains the WebSocket replay-then-live stream for running sessions.
 
 ## Commands
 
