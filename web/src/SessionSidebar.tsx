@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { runtimeStatusLabels, type SessionListMode } from './AppShell';
 import { getContinuityLabel, getRuntimeStatus } from './sessionContinuity';
 import type { SessionInfo } from './types';
@@ -17,34 +17,17 @@ type SessionSection = {
 
 type Props = {
   activeId: string | null;
-  cwd: string;
   isListLoading: boolean;
-  isNewSessionOpen: boolean;
   listError: string | null;
   listMode: SessionListMode;
-  permissionMode: string;
-  recentDirectories: string[];
   sessionSearch: string;
   sessions: SessionInfo[];
-  useWorktree: boolean;
   visibleSessions: SessionInfo[];
-  onCreateSession: (event: FormEvent) => void;
+  onNewChat: () => void;
   onSelectSession: (sessionId: string) => void;
-  onSetCwd: (cwd: string) => void;
-  onSetIsNewSessionOpen: (isOpen: boolean) => void;
   onSetListMode: (mode: SessionListMode) => void;
-  onSetPermissionMode: (mode: string) => void;
   onSetSessionSearch: (search: string) => void;
-  onSetUseWorktree: (useWorktree: boolean) => void;
-  onToggleNewSession: () => void;
   onRetryList: () => void;
-};
-
-const permissionModeDescriptions: Record<string, string> = {
-  bypassPermissions: 'Skip prompts for trusted local repos.',
-  acceptEdits: 'Auto-accept file edits, still ask for riskier actions.',
-  auto: 'Let Claude choose the safest available flow.',
-  default: 'Use the daemon or Claude CLI default.'
 };
 
 function getSidebarRuntimeStatus(session: SessionInfo): RuntimeStatusKey {
@@ -201,26 +184,16 @@ function PinIcon({ filled }: { filled: boolean }) {
 
 export default function SessionSidebar({
   activeId,
-  cwd,
   isListLoading,
-  isNewSessionOpen,
   listError,
   listMode,
-  permissionMode,
-  recentDirectories,
   sessionSearch,
   sessions,
-  useWorktree,
   visibleSessions,
-  onCreateSession,
+  onNewChat,
   onSelectSession,
-  onSetCwd,
-  onSetIsNewSessionOpen,
   onSetListMode,
-  onSetPermissionMode,
   onSetSessionSearch,
-  onSetUseWorktree,
-  onToggleNewSession,
   onRetryList
 }: Props) {
   const [pinnedSessionIds, setPinnedSessionIds] = useState(readPinnedSessionIds);
@@ -253,77 +226,10 @@ export default function SessionSidebar({
           <h1>Claude</h1>
           <p>Recent conversations and resumable work</p>
         </div>
-        <button type="button" className="primary-action" title="Start a new chat" onClick={onToggleNewSession}>
+        <button type="button" className="primary-action" title="Start a new chat" onClick={onNewChat}>
           New chat
         </button>
       </div>
-
-      {isNewSessionOpen && (
-        <form className="new-session-panel" onSubmit={onCreateSession}>
-          <div className="new-session-heading">
-            <div>
-              <h2>Start a session</h2>
-              <p>Pick a repo, isolation style, and permission mode.</p>
-            </div>
-            <button type="button" onClick={() => onSetIsNewSessionOpen(false)}>Close</button>
-          </div>
-          <div className="field-stack">
-            <label htmlFor="new-session-cwd">Working directory</label>
-            <input
-              id="new-session-cwd"
-              value={cwd}
-              onChange={(event) => onSetCwd(event.target.value)}
-              placeholder="/data00/home/user/repos/project"
-              aria-describedby="new-session-cwd-help"
-              required
-            />
-            <span id="new-session-cwd-help">Claude starts on the devbox in this directory.</span>
-          </div>
-          {recentDirectories.length > 0 && (
-            <div className="directory-suggestions" aria-label="Recent working directories">
-              <span>Recent</span>
-              {recentDirectories.map((directory) => (
-                <button key={directory} type="button" onClick={() => onSetCwd(directory)} aria-label={`Use ${directory}`}>
-                  <strong>{pathBasename(directory)}</strong>
-                  <small>{parentPath(directory)}</small>
-                </button>
-              ))}
-            </div>
-          )}
-          <div className="new-session-options">
-            <label className="checkbox-label option-line">
-              <input
-                type="checkbox"
-                checked={useWorktree}
-                onChange={(event) => onSetUseWorktree(event.target.checked)}
-                aria-label="Use git worktree"
-              />
-              <span>
-                <strong>Use git worktree</strong>
-                <small>Start from an isolated checkout when available.</small>
-              </span>
-            </label>
-            <div className="field-stack">
-              <label htmlFor="new-session-permission-mode">Permission mode</label>
-              <select
-                id="new-session-permission-mode"
-                value={permissionMode}
-                onChange={(event) => onSetPermissionMode(event.target.value)}
-                aria-describedby="new-session-permission-help"
-              >
-                <option value="bypassPermissions">bypassPermissions</option>
-                <option value="acceptEdits">acceptEdits</option>
-                <option value="auto">auto</option>
-                <option value="default">default</option>
-              </select>
-              <span id="new-session-permission-help">{permissionModeDescriptions[permissionMode] ?? 'Use the selected Claude permission policy.'}</span>
-            </div>
-          </div>
-          <div className="new-session-actions">
-            <button className="primary-action" type="submit">Create session</button>
-          </div>
-        </form>
-      )}
 
       <div className="session-modes" role="group" aria-label="Session list mode">
         <button

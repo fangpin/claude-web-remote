@@ -37,6 +37,7 @@ type Props = {
   isComposerSession: boolean;
   isSending: boolean;
   isSessionListLoading: boolean;
+  isStartSurfaceOpen: boolean;
   listMode: SessionListMode;
   message: string;
   messageInputRef: RefObject<HTMLTextAreaElement | null>;
@@ -44,6 +45,7 @@ type Props = {
   suggestions: ClaudeCommand[];
   view: AppView;
   actions: ReactNode;
+  startSurface: ReactNode;
   onAddPathContextAttachment: (path: string) => void;
   onAddTextContextAttachment: (name: string, content: string) => void;
   onCompleteSuggestion: (suggestion: ClaudeCommand) => void;
@@ -187,6 +189,7 @@ export default function ConversationWorkspace({
   isComposerSession,
   isSending,
   isSessionListLoading,
+  isStartSurfaceOpen,
   listMode,
   message,
   messageInputRef,
@@ -194,6 +197,7 @@ export default function ConversationWorkspace({
   suggestions,
   view,
   actions,
+  startSurface,
   onAddPathContextAttachment,
   onAddTextContextAttachment,
   onCompleteSuggestion,
@@ -219,7 +223,9 @@ export default function ConversationWorkspace({
   return (
     <main className={listMode === 'archived' ? 'workspace conversation-workspace with-deleted-note' : 'workspace conversation-workspace'} aria-label="Conversation workspace">
       {error && <ApiErrorBanner error={error} onDismiss={onDismissError} />}
-      {activeSession ? (
+      {(!activeSession || isStartSurfaceOpen) && !isSessionListLoading && listMode === 'active' ? (
+        startSurface
+      ) : activeSession ? (
         <>
           <header className="conversation-header">
             <div>
