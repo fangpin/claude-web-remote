@@ -3,11 +3,43 @@ import { sendInput } from './api';
 import type { SessionListMode } from './AppShell';
 import { getComposerDisabledReason } from './sessionContinuity';
 import { applyCommandCompletion, findSlashCommandToken, getCommandSuggestions, type ClaudeCommand, type SlashCommandToken } from './autocomplete';
-import type { SessionInfo } from './types';
+import type { ComposerContextAttachment, SessionInfo } from './types';
 
 const MESSAGE_INPUT_MAX_HEIGHT = 220;
 const PROMPT_HISTORY_KEY = 'claude-remote-web:prompt-history';
 const PROMPT_HISTORY_LIMIT = 50;
+
+function createAttachmentId(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID();
+  }
+  return `context-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+export function buildPromptWithContextAttachments(message: string, attachments: ComposerContextAttachment[]): string {
+  if (attachments.length === 0) return message;
+
+  const contextLines = attachments.map((attachment, index) => {
+    if (attachment.type === 'path') {
+      return `- Path ${index + 1}: @${attachment.path}`;
+    }
+
+    return [
+      `- Text ${index + 1}: ${attachment.name}`,
+      '```text',
+      attachment.content,
+      '```'
+    ].join('\n');
+  });
+
+  const trimmedMessage = message.trim();
+  const contextBlock = [
+    'Context references attached in Claude Remote Web:',
+    ...contextLines
+  ].join('\n');
+
+  return trimmedMessage ? `${trimmedMessage}\n\n${contextBlock}` : contextBlock;
+}
 
 type UseComposerStateOptions = {
   activeId: string | null;
@@ -78,9 +110,10 @@ export function useComposerState({
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(0);
   const [promptHistory, setPromptHistory] = useState<string[]>(() => readPromptHistory());
   const [historyIndex, setHistoryIndex] = useState<number | null>(null);
+  const [contextAttachments, setContextAttachments] = useState<ComposerContextAttachment[]>([]);
   const draftBeforeHistoryRef = useRef<string | null>(null);
 
-  const hasDraft = message.trim().length > 0;
+  const hasDraft = message.trim().length > 0 || contextAttachments.length > 0;
   const canSend = isComposerSession && hasDraft && !isSending;
   const composerDisabledReason = getComposerDisabledReason(activeSession, listMode);
   const runtimeStatus = activeSession?.runtimeStatus ?? activeSession?.status;
@@ -170,12 +203,15 @@ export function useComposerState({
     event.preventDefault();
     if (!activeId || !canSend) return;
     const sessionId = activeId;
-    const text = message;
+    const text = buildPromptWithContextAttachments(message, contextAttachments);
+    const draftMessage = message;
+    const draftAttachments = contextAttachments;
     const pendingEventId = addPendingMessage(sessionId, text);
     setError(null);
     setIsSending(true);
     markAwaitingClaude(sessionId, true);
     setMessage('');
+    setContextAttachments([]);
     closeAutocomplete();
     try {
       const updatedSession = await sendInput(sessionId, text);
@@ -189,8 +225,9 @@ export function useComposerState({
       setError(err instanceof Error ? err.message : String(err));
       removePendingMessage(sessionId, pendingEventId);
       markAwaitingClaude(sessionId, false);
-      setMessage(text);
-      refreshAutocomplete(text, text.length);
+      setMessage(draftMessage);
+      setContextAttachments(draftAttachments);
+      refreshAutocomplete(draftMessage, draftMessage.length);
     } finally {
       setIsSending(false);
     }
@@ -222,6 +259,38 @@ export function useComposerState({
       messageInputRef.current?.focus();
       messageInputRef.current?.setSelectionRange(prompt.length, prompt.length);
     });
+  }
+
+  function addPathContextAttachment(path: string) {
+    const normalizedPath = path.trim().replace(/^@+/, '').replace(/^\/+/, '');
+    if (!normalizedPath || normalizedPath.includes('\0')) return;
+    setContextAttachments((current) => [
+      ...current,
+      {
+        id: createAttachmentId(),
+        type: 'path',
+        path: normalizedPath
+      }
+    ]);
+  }
+
+  function addTextContextAttachment(name: string, content: string) {
+    const trimmedContent = content.trim();
+    if (!trimmedContent) return;
+    const trimmedName = name.trim();
+    setContextAttachments((current) => [
+      ...current,
+      {
+        id: createAttachmentId(),
+        type: 'text',
+        name: trimmedName || `Pasted context ${current.length + 1}`,
+        content: trimmedContent
+      }
+    ]);
+  }
+
+  function removeContextAttachment(id: string) {
+    setContextAttachments((current) => current.filter((attachment) => attachment.id !== id));
   }
 
   function onMessageChange(value: string, element: HTMLTextAreaElement) {
@@ -319,17 +388,21 @@ export function useComposerState({
     canSend,
     composerDisabledReason,
     composerRef,
+    contextAttachments,
     hasAutocomplete,
     isSending,
     message,
     messageInputRef,
     sendStatusText,
     suggestions,
+    addPathContextAttachment,
+    addTextContextAttachment,
     completeSuggestion,
     onMessageChange,
     onMessageKeyDown,
     onMessageSelect: refreshAutocomplete,
     onSend,
+    removeContextAttachment,
     setActiveSuggestionIndex,
     useEmptyStatePrompt
   };

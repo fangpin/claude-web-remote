@@ -40,6 +40,19 @@ export type CreateSessionInput = {
   };
 };
 
+export type ComposerContextAttachment =
+  | {
+      id: string;
+      type: 'path';
+      path: string;
+    }
+  | {
+      id: string;
+      type: 'text';
+      name: string;
+      content: string;
+    };
+
 export type TaskStatus = 'background' | 'completed' | 'failed' | 'interrupted';
 
 export type TaskInfo = {

@@ -1606,6 +1606,57 @@ button.danger:hover {
   white-space: nowrap;
 }
 
+.context-attachment-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.context-attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-soft);
+  background: var(--surface-2);
+  padding: 4px 5px 4px 8px;
+  font-size: 12px;
+}
+
+.context-attachment-kind {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.context-attachment-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-attachment-chip button {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 999px;
+  color: var(--muted);
+  background: transparent;
+  padding: 0;
+  line-height: 1;
+}
+
+.context-attachment-chip button:hover {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
 .composer-input {
   position: relative;
 }
@@ -1651,6 +1702,11 @@ button.danger:hover {
   min-width: 0;
 }
 
+.composer-attachment-menu {
+  position: relative;
+  flex: 0 0 auto;
+}
+
 .composer-attach-button {
   display: grid;
   place-items: center;
@@ -1665,6 +1721,64 @@ button.danger:hover {
 .composer-attach-button span {
   font-size: 20px;
   line-height: 1;
+}
+
+.context-attachment-popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 10px);
+  z-index: 12;
+  display: grid;
+  gap: 12px;
+  width: min(420px, calc(100vw - 32px));
+  max-height: min(560px, 72vh);
+  overflow: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  background: var(--surface);
+  padding: 13px;
+  box-shadow: var(--shadow-popover);
+}
+
+.context-attachment-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.context-attachment-copy strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.context-attachment-copy span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.context-attachment-section {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  border-top: 1px solid var(--border);
+  padding-top: 11px;
+}
+
+.context-attachment-section input,
+.context-attachment-section textarea {
+  background: var(--surface-2);
+}
+
+.context-attachment-section textarea {
+  min-height: 94px;
+  resize: vertical;
+}
+
+.context-attachment-section button {
+  justify-self: start;
+  padding: 7px 10px;
+  font-size: 12px;
 }
 
 .composer-stop-button {
@@ -2944,6 +3058,16 @@ button.danger:hover {
 
   .composer-actions > div {
     justify-content: flex-end;
+  }
+
+  .context-attachment-popover {
+    right: auto;
+    left: 0;
+    width: min(420px, calc(100vw - 36px));
+  }
+
+  .context-attachment-chip {
+    max-width: 100%;
   }
 
   .autocomplete {

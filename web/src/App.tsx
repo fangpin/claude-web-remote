@@ -267,6 +267,7 @@ export default function App() {
           canSend={composerState.canSend}
           composerDisabledReason={composerState.composerDisabledReason}
           composerRef={composerState.composerRef}
+          contextAttachments={composerState.contextAttachments}
           emptyStatePrompts={EMPTY_STATE_PROMPTS}
           error={apiError}
           eventConnectionError={eventState.activeConnection.error}
@@ -285,10 +286,13 @@ export default function App() {
           suggestions={composerState.suggestions}
           view={view}
           actions={renderActions()}
+          onAddPathContextAttachment={composerState.addPathContextAttachment}
+          onAddTextContextAttachment={composerState.addTextContextAttachment}
           onCompleteSuggestion={composerState.completeSuggestion}
           onMessageChange={composerState.onMessageChange}
           onMessageKeyDown={composerState.onMessageKeyDown}
           onMessageSelect={composerState.onMessageSelect}
+          onRemoveContextAttachment={composerState.removeContextAttachment}
           onSend={composerState.onSend}
           onSetActiveSuggestionIndex={composerState.setActiveSuggestionIndex}
           onStopSession={() => sessionState.onStop(false)}

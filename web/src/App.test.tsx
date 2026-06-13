@@ -771,6 +771,66 @@ describe('App', () => {
     expect(messageInput.style.overflowY).toBe('auto');
   });
 
+  it('adds path and pasted text context, removes chips, and sends formatted prompt context', async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Add context reference' }));
+    fireEvent.change(screen.getByLabelText('Repo path'), { target: { value: 'web/src/Composer.tsx' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add path' }));
+
+    expect(await screen.findByLabelText('Context attachments')).toHaveTextContent('@web/src/Composer.tsx');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add context reference' }));
+    fireEvent.change(screen.getByLabelText('Repo path'), { target: { value: 'README.md' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add path' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove @README.md' }));
+
+    expect(screen.queryByText('@README.md')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add context reference' }));
+    fireEvent.change(screen.getByLabelText('Text context name'), { target: { value: 'Stack trace' } });
+    fireEvent.change(screen.getByLabelText('Pasted text'), { target: { value: 'TypeError: failed' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add pasted text' }));
+
+    expect(screen.getByLabelText('Context attachments')).toHaveTextContent('Stack trace');
+
+    fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Please investigate' } });
+    fireEvent.click(screen.getByRole('button', { name: /Send/ }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/input', expect.objectContaining({ method: 'POST' })));
+    const sentBody = JSON.parse(String(fetchMock.mock.calls.find(([url]) => String(url) === '/api/sessions/s1/input')?.[1]?.body));
+    expect(sentBody.text).toContain('Please investigate');
+    expect(sentBody.text).toContain('Path 1: @web/src/Composer.tsx');
+    expect(sentBody.text).toContain('Text 2: Stack trace');
+    expect(sentBody.text).toContain('TypeError: failed');
+    expect(screen.queryByLabelText('Context attachments')).not.toBeInTheDocument();
+  });
+
+  it('sends attachment-only prompts and restores context on send failure', async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const eventResponse = init?.method === undefined ? eventsResponse(url) : null;
+      if (eventResponse) return eventResponse;
+      if (url === '/api/sessions' && !init) return jsonResponse({ sessions: defaultSessions });
+      if (url === '/api/tasks' || url.endsWith('/tasks')) return jsonResponse(emptyTaskGroups);
+      if (url === '/api/sessions/s1/input' && init?.method === 'POST') return jsonResponse({ error: 'input failed' }, 500);
+      return jsonResponse({ ok: true });
+    });
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Add context reference' }));
+    fireEvent.change(screen.getByLabelText('Repo path'), { target: { value: '@web/src/App.tsx' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add path' }));
+
+    const sendButton = screen.getByRole('button', { name: /Send/ });
+    expect(sendButton).not.toBeDisabled();
+    fireEvent.click(sendButton);
+
+    expect(await screen.findByText('input failed')).toBeInTheDocument();
+    expect(screen.getByLabelText('Context attachments')).toHaveTextContent('@web/src/App.tsx');
+  });
+
   it('sends user input to the active session and preserves text on send failure', async () => {
     render(<App />);
 
