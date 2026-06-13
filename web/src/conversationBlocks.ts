@@ -75,6 +75,12 @@ type PendingTool = {
   blockIndex: number;
 };
 
+type PendingToolResult = {
+  event: UiEvent;
+  payload: ObjectPayload;
+  blockIndex?: number;
+};
+
 type NormalizedItem =
   | { type: 'message'; event: UiEvent; role: MessageBlock['role']; text: string }
   | { type: 'tool_use'; event: UiEvent; payload: ObjectPayload }
@@ -100,6 +106,15 @@ function stringField(payload: ObjectPayload, keys: string[]): string | null {
 
 function payloadType(event: UiEvent, payload: ObjectPayload): string {
   return typeof payload.type === 'string' ? payload.type : event.kind;
+}
+
+function humanizeIdentifier(value: string): string {
+  return value
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^./, (char) => char.toUpperCase());
 }
 
 function textFromContent(value: unknown): string | null {
@@ -562,6 +577,10 @@ function makeToolBlock(toolUse: UiEvent, usePayload: ObjectPayload, resultEvent?
   };
 }
 
+function shouldShowStandaloneToolResult(block: ToolBlock): boolean {
+  return toolPresentation(block.name, block.status, block.resultSummary).visibility === 'visible';
+}
+
 function makeStandaloneToolResult(event: UiEvent, payload: ObjectPayload): ToolBlock {
   const name = toolName(payload);
   const result = resultSummary(payload);
@@ -611,16 +630,53 @@ function isIgnorableErrorPayload(payload: ObjectPayload): boolean {
   return /NODE_TLS_REJECT_UNAUTHORIZED|node --trace-warnings/i.test(line);
 }
 
+function isErrorLikePayload(event: UiEvent, payload: ObjectPayload): boolean {
+  if (event.kind === 'error') return true;
+
+  const type = payloadType(event, payload).toLowerCase();
+  if (type === 'tool_use' || type === 'tool_result') return false;
+  if (hasStructuredFailure(payload)) return true;
+  if (/error|failed|failure|exception|stderr/.test(type)) return true;
+
+  const level = stringField(payload, ['level', 'severity']);
+  if (level && /error|fatal|critical/.test(level.toLowerCase())) return true;
+
+  return false;
+}
+
+function rawLabel(event: UiEvent): string {
+  const payload = isObject(event.payload) ? event.payload : { value: event.payload };
+  const type = payloadType(event, payload);
+  const subtype = stringField(payload, ['subtype', 'reason', 'event', 'phase']);
+  const source = stringField(payload, ['source', 'stream']);
+  const base = type !== event.kind ? `${humanizeIdentifier(event.kind)} · ${humanizeIdentifier(type)}` : humanizeIdentifier(event.kind);
+  const detail = subtype ?? source;
+  return detail ? `${base} · ${humanizeIdentifier(detail)}` : base;
+}
+
+function errorMessage(event: UiEvent, payload: ObjectPayload): string {
+  const direct = stringField(payload, ['line', 'stderr', 'stdout']) ?? textContent(payload);
+  if (direct) return direct;
+
+  const error = payload.error;
+  if (isObject(error)) {
+    const nested = stringField(error, ['line', 'message', 'error']) ?? textContent(error);
+    if (nested) return nested;
+  }
+
+  return summarize(event.payload) || rawLabel(event);
+}
+
 function normalizedItems(event: UiEvent): NormalizedItem[] | null {
   const payload = isObject(event.payload) ? event.payload : { value: event.payload };
   const type = payloadType(event, payload);
   const isClaudeUserPayload = payload.type === 'user';
   const isClaudeSystemPayload = payload.type === 'system';
 
-  if (event.kind === 'error' || type === 'error') {
+  if (isErrorLikePayload(event, payload)) {
     return isIgnorableErrorPayload(payload) ? [] : [{ type: 'error', event, payload }];
   }
-  if (event.kind === 'raw' || event.kind === 'system') return [];
+  if (event.kind === 'system') return [];
 
   const role = roleFromEvent(event, payload);
   const items: NormalizedItem[] = [];
@@ -653,6 +709,7 @@ function normalizedItems(event: UiEvent): NormalizedItem[] | null {
 export function buildConversationBlocks(events: UiEvent[]): ConversationBlock[] {
   const blocks: ConversationBlock[] = [];
   const pendingTools = new Map<string, PendingTool>();
+  const pendingToolResults = new Map<string, PendingToolResult>();
 
   for (const event of events) {
     const items = normalizedItems(event);
@@ -661,7 +718,7 @@ export function buildConversationBlocks(events: UiEvent[]): ConversationBlock[] 
       blocks.push({
         id: `raw-${event.id}`,
         type: 'raw',
-        label: event.kind,
+        label: rawLabel(event),
         eventIds: [event.id],
         rawEvents: [rawEvent(event)]
       });
@@ -673,7 +730,7 @@ export function buildConversationBlocks(events: UiEvent[]): ConversationBlock[] 
         blocks.push({
           id: `error-${item.event.id}`,
           type: 'error',
-          message: textContent(item.payload) ?? summarize(item.event.payload),
+          message: errorMessage(item.event, item.payload),
           eventIds: [item.event.id],
           rawEvents: [rawEvent(item.event)]
         });
@@ -684,7 +741,7 @@ export function buildConversationBlocks(events: UiEvent[]): ConversationBlock[] 
         blocks.push({
           id: `raw-${item.event.id}`,
           type: 'raw',
-          label: item.event.kind,
+          label: rawLabel(item.event),
           eventIds: [item.event.id],
           rawEvents: [rawEvent(item.event)]
         });
@@ -703,9 +760,22 @@ export function buildConversationBlocks(events: UiEvent[]): ConversationBlock[] 
 
       if (item.type === 'tool_use') {
         const id = toolUseId(item.payload) ?? String(item.event.id);
-        const blockIndex = blocks.length;
-        pendingTools.set(id, { event: item.event, payload: item.payload, blockIndex });
-        blocks.push(makeToolBlock(item.event, item.payload));
+        const pendingResult = pendingToolResults.get(id);
+        if (pendingResult) {
+          const block = makeToolBlock(item.event, item.payload, pendingResult.event, pendingResult.payload);
+          if (block.type === 'tool' && toolPresentation(block.name, block.status, block.resultSummary).visibility === 'hidden') {
+            blocks.push(makeAnchorBlock(id, [item.event, pendingResult.event]));
+          } else if (pendingResult.blockIndex !== undefined) {
+            blocks[pendingResult.blockIndex] = block;
+          } else {
+            blocks.push(block);
+          }
+          pendingToolResults.delete(id);
+        } else {
+          const blockIndex = blocks.length;
+          pendingTools.set(id, { event: item.event, payload: item.payload, blockIndex });
+          blocks.push(makeToolBlock(item.event, item.payload));
+        }
         continue;
       }
 
@@ -722,11 +792,16 @@ export function buildConversationBlocks(events: UiEvent[]): ConversationBlock[] 
           pendingTools.delete(id);
         } else {
           const block = makeStandaloneToolResult(item.event, item.payload);
-          if (toolPresentation(block.name, block.status, block.resultSummary).visibility === 'visible') blocks.push(block);
+          if (shouldShowStandaloneToolResult(block)) {
+            pendingToolResults.set(id, { event: item.event, payload: item.payload, blockIndex: blocks.length });
+            blocks.push(block);
+          } else {
+            pendingToolResults.set(id, { event: item.event, payload: item.payload });
+          }
         }
       } else {
         const block = makeStandaloneToolResult(item.event, item.payload);
-        if (toolPresentation(block.name, block.status, block.resultSummary).visibility === 'visible') blocks.push(block);
+        if (shouldShowStandaloneToolResult(block)) blocks.push(block);
       }
     }
   }
