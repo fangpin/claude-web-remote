@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildActivityTimeline, waitingCopy } from './activityTimeline';
+import { buildActivityTimeline, latestReviewActivity, reviewSurface, waitingCopy } from './activityTimeline';
 import type { EventKind, SessionInfo, UiEvent } from './types';
 
 function event(id: number, kind: EventKind, payload: unknown, time = `2026-06-13T00:00:0${id}Z`): UiEvent {
@@ -80,8 +80,40 @@ describe('buildActivityTimeline', () => {
 
     expect(activities[0]).toMatchObject({
       status: 'waiting',
-      isPermissionLike: true
+      isPermissionLike: true,
+      reviewKind: 'permission',
+      riskHint: 'Claude emitted a permission or confirmation-style event.'
     });
     expect(waitingCopy(session, activities[0])).toContain('approval controls are not wired yet');
+    expect(reviewSurface(session, latestReviewActivity(activities))).toMatchObject({
+      title: 'Claude needs your review',
+      actionName: 'PermissionReview',
+      canAct: false,
+      limitation: expect.stringContaining('does not expose Claude CLI permission approval or denial controls')
+    });
+  });
+
+  it('marks destructive-looking shell commands for review without marking ordinary commands', () => {
+    const activities = buildActivityTimeline([
+      event(1, 'tool', { type: 'tool_use', id: 'toolu_safe', name: 'Bash', input: { command: 'npm test' } }),
+      event(2, 'tool', { type: 'tool_use', id: 'toolu_danger', name: 'Bash', input: { command: 'rm -rf dist' } })
+    ], [1, 2]);
+
+    expect(activities.find((activity) => activity.id === 'activity-toolu_safe')).toMatchObject({
+      status: 'running',
+      isPermissionLike: false
+    });
+    expect(activities.find((activity) => activity.id === 'activity-toolu_safe')?.reviewKind).toBeUndefined();
+    expect(activities.find((activity) => activity.id === 'activity-toolu_safe')?.riskHint).toBeUndefined();
+    expect(reviewSurface(session, latestReviewActivity(activities))).toMatchObject({
+      actionSummary: '$ rm -rf dist',
+      riskHint: 'Deletes files recursively or forcefully.'
+    });
+    expect(reviewSurface({ ...session, runtimeStatus: 'running' }, latestReviewActivity(activities.filter((activity) => activity.id === 'activity-toolu_safe')))).toBeNull();
+    expect(activities.find((activity) => activity.id === 'activity-toolu_danger')).toMatchObject({
+      status: 'running',
+      reviewKind: 'risky-command',
+      riskHint: 'Deletes files recursively or forcefully.'
+    });
   });
 });

@@ -1,6 +1,7 @@
 import type { KeyboardEvent } from 'react';
 import ActivityPanel from './ActivityPanel';
-import type { ActivityItem } from './activityTimeline';
+import type { ActivityItem, ReviewSurface } from './activityTimeline';
+import { ReviewCard } from './ConversationWorkspace';
 import type { SessionPlan } from './sessionPlan';
 import TasksPanel from './TasksPanel';
 import type {
@@ -31,6 +32,7 @@ type Props = {
   taskError: string | null;
   tasks: TaskGroups;
   waitingMessage: string | null;
+  reviewSurface: ReviewSurface | null;
   onInspectorTabKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
   onRefreshDiagnostics: () => void;
   onSelectActivity: (activity: ActivityItem) => void;
@@ -56,6 +58,7 @@ export default function InspectorPanel({
   taskError,
   tasks,
   waitingMessage,
+  reviewSurface,
   onInspectorTabKeyDown,
   onRefreshDiagnostics,
   onSelectActivity,
@@ -86,6 +89,14 @@ export default function InspectorPanel({
       </header>
       {isInspectorOpen && (
         <>
+          {reviewSurface && (
+            <div className="inspector-review-card">
+              <ReviewCard
+                review={reviewSurface}
+                onOpenActivity={reviewSurface.activity ? () => onSelectActivity(reviewSurface.activity!) : undefined}
+              />
+            </div>
+          )}
           <div className="inspector-tabs" role="tablist" aria-label="Inspector sections">
             <button type="button" id="inspector-tab-activity" role="tab" aria-selected={inspectorTab === 'activity'} aria-controls="inspector-panel-activity" tabIndex={inspectorTab === 'activity' ? 0 : -1} onClick={() => onSetInspectorTab('activity')} onKeyDown={onInspectorTabKeyDown}>Activity</button>
             <button type="button" id="inspector-tab-session" role="tab" aria-selected={inspectorTab === 'session'} aria-controls="inspector-panel-session" tabIndex={inspectorTab === 'session' ? 0 : -1} onClick={() => onSetInspectorTab('session')} onKeyDown={onInspectorTabKeyDown}>Session tasks</button>

@@ -12,6 +12,7 @@ The code, files, git repositories, Claude CLI, and model gateway all stay on the
 - Streaming event display from `claude --output-format stream-json`
 - User input forwarding to the remote Claude process
 - Claude-like composer with slash commands, context hints, and inline stop/send controls
+- Read-only action review cards for waiting sessions, permission-like events, risky commands, and failed actions
 - Stop and restart session controls
 - Event, stderr, raw stdout, and session metadata persistence
 - Automatic Claude session id extraction and restart resume
@@ -238,3 +239,4 @@ Expected current coverage:
 - Prefer SSH local port forwarding for access.
 - `launcher` is argv-based and is not executed through a shell.
 - The first version does not include multi-user authentication or interactive allow/deny permission prompts.
+- The Web UI may highlight risky or permission-like actions, but approval/denial still has to happen in the terminal until the daemon exposes a real permission decision API.

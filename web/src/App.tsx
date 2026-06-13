@@ -1,6 +1,6 @@
 import { KeyboardEvent, useCallback, useRef, useState } from 'react';
 import AppShell, { type AppView } from './AppShell';
-import { buildActivityTimeline, waitingCopy, type ActivityItem } from './activityTimeline';
+import { buildActivityTimeline, latestReviewActivity, reviewSurface, waitingCopy, type ActivityItem } from './activityTimeline';
 import ConversationWorkspace from './ConversationWorkspace';
 import InspectorPanel, { type InspectorTab } from './InspectorPanel';
 import SessionSidebar from './SessionSidebar';
@@ -120,6 +120,7 @@ export default function App() {
     : null;
   const activities = buildActivityTimeline(eventState.activeEvents, eventState.activeBlockEventIds);
   const latestPermissionActivity = activities.find((activity) => activity.isPermissionLike && ['running', 'waiting'].includes(activity.status));
+  const currentReviewSurface = reviewSurface(sessionState.activeSession, latestReviewActivity(activities));
   const waitingMessage = waitingCopy(sessionState.activeSession, latestPermissionActivity ?? null);
 
   function onSelectTask(task: TaskInfo) {
@@ -273,6 +274,7 @@ export default function App() {
           eventRenderLimit={EVENT_RENDER_LIMIT}
           eventsRef={eventState.eventsRef}
           hiddenEventCount={eventState.hiddenEventCount}
+          reviewSurface={currentReviewSurface}
           isAwaitingClaude={eventState.isAwaitingClaude}
           isComposerSession={isComposerSession}
           isSending={composerState.isSending}
@@ -313,6 +315,7 @@ export default function App() {
           taskError={taskState.taskError}
           tasks={taskState.tasks}
           waitingMessage={waitingMessage}
+          reviewSurface={currentReviewSurface}
           onInspectorTabKeyDown={onInspectorTabKeyDown}
           onRefreshDiagnostics={diagnosticsState.refreshDiagnostics}
           onSelectActivity={onSelectActivity}

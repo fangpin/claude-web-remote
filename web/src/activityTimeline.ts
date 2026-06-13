@@ -4,6 +4,8 @@ type ObjectPayload = Record<string, unknown>;
 
 export type ActivityStatus = 'running' | 'waiting' | 'failed' | 'done';
 
+export type ActivityReviewKind = 'permission' | 'risky-command' | 'failed-action';
+
 export type ActivityItem = {
   id: string;
   name: string;
@@ -18,6 +20,8 @@ export type ActivityItem = {
   anchorEventId: number;
   rawEventKinds: EventKind[];
   isPermissionLike: boolean;
+  reviewKind?: ActivityReviewKind;
+  riskHint?: string;
   transcriptHidden: boolean;
 };
 
@@ -222,6 +226,52 @@ function isPermissionLikeTool(name: string, payload: ObjectPayload, resultPayloa
   return /\b(permission|permissions|approval|approve|deny|review|risky|risk|confirm|confirmation)\b/.test(haystack);
 }
 
+function bashCommand(payload: ObjectPayload): string | null {
+  if (!isObject(payload.input)) return null;
+  return stringField(payload.input, ['command']);
+}
+
+function riskyCommandHint(command: string): string | null {
+  const normalized = command.toLowerCase();
+  if (/\brm\s+-(?:[^\s]*[rf]|[^\s]*r[^\s]*f|[^\s]*f[^\s]*r)/.test(normalized)) return 'Deletes files recursively or forcefully.';
+  if (/\b(git\s+push(?:\s+[^\n;|&]*)?|gh\s+pr\s+create|gh\s+issue\s+create|gh\s+pr\s+comment|gh\s+issue\s+comment)\b/.test(normalized)) return 'Changes shared remote state.';
+  if (/\b(git\s+reset\s+--hard|git\s+clean\s+-[a-z]*f|git\s+checkout\s+--|git\s+restore\s+(?:[^\n;|&]*\s)?\.)\b/.test(normalized)) return 'Can discard local work.';
+  if (/\b(drop\s+table|truncate\s+table|delete\s+from)\b/.test(normalized)) return 'Can delete database data.';
+  if (/\b(curl|wget)\b[^\n;|&]*(?:\|\s*(?:sh|bash)|>\s*\/dev\/|--upload-file|-t\s*)/.test(normalized)) return 'Performs network or shell action that may affect external systems.';
+  return null;
+}
+
+function activityReview(name: string, payload: ObjectPayload, resultPayload: ObjectPayload | undefined, status: ActivityStatus): Pick<ActivityItem, 'isPermissionLike' | 'reviewKind' | 'riskHint'> {
+  const permissionLike = isPermissionLikeTool(name, payload, resultPayload);
+  if (permissionLike) {
+    return {
+      isPermissionLike: true,
+      reviewKind: 'permission',
+      riskHint: 'Claude emitted a permission or confirmation-style event.'
+    };
+  }
+
+  const command = name === 'Bash' ? bashCommand(payload) : null;
+  const commandRisk = command ? riskyCommandHint(command) : null;
+  if (commandRisk) {
+    return {
+      isPermissionLike: false,
+      reviewKind: 'risky-command',
+      riskHint: commandRisk
+    };
+  }
+
+  if (status === 'failed') {
+    return {
+      isPermissionLike: false,
+      reviewKind: 'failed-action',
+      riskHint: 'The tool or action failed; review the result before continuing.'
+    };
+  }
+
+  return { isPermissionLike: false };
+}
+
 function completedStatus(resultPayload: ObjectPayload, result: string): ActivityStatus {
   return hasStructuredFailure(resultPayload) || hasClearFailureText(result) ? 'failed' : 'done';
 }
@@ -236,14 +286,15 @@ function makeActivity(
   const name = toolName(usePayload);
   const id = toolUseId(usePayload) ?? String(toolUse.id);
   const result = resultPayload ? resultSummary(resultPayload) : '';
-  const isPermissionLike = isPermissionLikeTool(name, usePayload, resultPayload);
+  const permissionLike = isPermissionLikeTool(name, usePayload, resultPayload);
   const status: ActivityStatus = resultPayload
     ? completedStatus(resultPayload, result)
-    : isPermissionLike
+    : permissionLike
       ? 'waiting'
       : 'running';
   const finishedAt = resultEvent?.time;
   const eventIds = resultEvent ? [toolUse.id, resultEvent.id] : [toolUse.id];
+  const review = activityReview(name, usePayload, resultPayload, status);
 
   return {
     id: `activity-${id}`,
@@ -258,7 +309,7 @@ function makeActivity(
     ...(resultEvent ? { finishEventId: resultEvent.id } : {}),
     anchorEventId: toolUse.id,
     rawEventKinds: resultEvent ? [toolUse.kind, resultEvent.kind] : [toolUse.kind],
-    isPermissionLike,
+    ...review,
     transcriptHidden: !eventIds.some((eventId) => visibleEventIds.has(eventId)) || (READ_ONLY_INSPECTION_TOOLS.has(name) && status === 'done')
   };
 }
@@ -302,7 +353,7 @@ export function buildActivityTimeline(events: UiEvent[], visibleBlockEventIds: n
         finishEventId: item.event.id,
         anchorEventId: item.event.id,
         rawEventKinds: [item.event.kind],
-        isPermissionLike: isPermissionLikeTool(name, item.payload),
+        ...activityReview(name, item.payload, undefined, status),
         transcriptHidden: !visibleEventIds.has(item.event.id)
       });
     }
@@ -313,6 +364,61 @@ export function buildActivityTimeline(events: UiEvent[], visibleBlockEventIds: n
   }
 
   return activities.sort((a, b) => b.startEventId - a.startEventId);
+}
+
+export type ReviewSurface = {
+  title: string;
+  message: string;
+  actionName?: string;
+  actionSummary?: string;
+  riskHint?: string;
+  cwd: string;
+  permissionMode: string;
+  canAct: false;
+  limitation: string;
+  activity?: ActivityItem;
+};
+
+export function latestReviewActivity(activities: ActivityItem[]): ActivityItem | null {
+  return activities.find((activity) => activity.status !== 'done' && activity.reviewKind !== undefined)
+    ?? activities.find((activity) => activity.reviewKind === 'failed-action')
+    ?? null;
+}
+
+export function reviewSurface(session: SessionInfo | null, activity: ActivityItem | null): ReviewSurface | null {
+  if (!session || session.deletedAt || session.status !== 'running') return null;
+
+  if (activity?.reviewKind) {
+    return {
+      title: activity.reviewKind === 'failed-action' ? 'Claude action needs attention' : 'Claude needs your review',
+      message: activity.reviewKind === 'permission'
+        ? 'Claude emitted a permission or confirmation-style event. Review the payload before continuing.'
+        : activity.reviewKind === 'risky-command'
+          ? 'Claude requested an action that may be destructive or affect shared state.'
+          : 'A tool or action failed. Review the result before deciding how to continue.',
+      actionName: activity.name,
+      actionSummary: activity.summary,
+      riskHint: activity.riskHint,
+      cwd: session.cwd,
+      permissionMode: session.permissionMode,
+      canAct: false,
+      limitation: 'This server does not expose Claude CLI permission approval or denial controls yet. Continue in the terminal if Claude is waiting on an interactive prompt.',
+      activity
+    };
+  }
+
+  if (session.runtimeStatus === 'waiting') {
+    return {
+      title: 'Claude is waiting',
+      message: 'No tool is currently running. Send a message when you are ready to continue, or check the terminal if Claude is waiting on an interactive prompt.',
+      cwd: session.cwd,
+      permissionMode: session.permissionMode,
+      canAct: false,
+      limitation: 'Web approval controls are not available in this build.'
+    };
+  }
+
+  return null;
 }
 
 export function waitingCopy(session: SessionInfo | null, latestPermissionActivity: ActivityItem | null): string | null {

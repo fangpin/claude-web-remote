@@ -4,6 +4,7 @@ import ConversationBlockList from './ConversationBlockList';
 import Composer from './Composer';
 import type { AppView, SessionListMode } from './AppShell';
 import type { ClaudeCommand, SlashCommandToken } from './autocomplete';
+import type { ReviewSurface } from './activityTimeline';
 import type { ConversationBlock } from './conversationBlocks';
 import type { EventConnectionState } from './useSessionEvents';
 import type { SessionInfo } from './types';
@@ -29,6 +30,7 @@ type Props = {
   eventRenderLimit: number;
   eventsRef: RefObject<HTMLDivElement | null>;
   hiddenEventCount: number;
+  reviewSurface: ReviewSurface | null;
   isAwaitingClaude: boolean;
   isComposerSession: boolean;
   isSending: boolean;
@@ -93,6 +95,54 @@ function ApiErrorBanner({
   );
 }
 
+function ReviewCard({ review, onOpenActivity }: { review: ReviewSurface; onOpenActivity?: () => void }) {
+  return (
+    <section className={`review-card ${review.activity?.reviewKind ?? 'waiting'}`} aria-label="Claude needs your review">
+      <div className="review-card-heading">
+        <div>
+          <span className="state-kicker">Action review</span>
+          <h3>{review.title}</h3>
+        </div>
+        {review.activity && onOpenActivity && (
+          <button type="button" onClick={onOpenActivity}>Open activity</button>
+        )}
+      </div>
+      <p>{review.message}</p>
+      <dl className="review-facts">
+        {review.actionName && (
+          <div>
+            <dt>Action</dt>
+            <dd>{review.actionName}</dd>
+          </div>
+        )}
+        {review.actionSummary && (
+          <div>
+            <dt>Input</dt>
+            <dd>{review.actionSummary}</dd>
+          </div>
+        )}
+        <div>
+          <dt>Working directory</dt>
+          <dd>{review.cwd}</dd>
+        </div>
+        <div>
+          <dt>Permission mode</dt>
+          <dd>{review.permissionMode}</dd>
+        </div>
+        {review.riskHint && (
+          <div>
+            <dt>Risk hint</dt>
+            <dd>{review.riskHint}</dd>
+          </div>
+        )}
+      </dl>
+      <p className="review-limitation">{review.limitation}</p>
+    </section>
+  );
+}
+
+export { ReviewCard };
+
 export default function ConversationWorkspace({
   activeBlocks,
   activeSession,
@@ -109,6 +159,7 @@ export default function ConversationWorkspace({
   eventRenderLimit,
   eventsRef,
   hiddenEventCount,
+  reviewSurface,
   isAwaitingClaude,
   isComposerSession,
   isSending,
@@ -183,6 +234,7 @@ export default function ConversationWorkspace({
               {(eventConnectionState === 'connecting' || eventConnectionState === 'reconnecting') && activeBlocks.length === 0 && hiddenEventCount === 0 && (
                 <LoadingConversation />
               )}
+              {reviewSurface && <ReviewCard review={reviewSurface} />}
               {hiddenEventCount > 0 && (
                 <div className="event-limit-note">
                   Showing latest {eventRenderLimit} events. {hiddenEventCount} older events hidden.
