@@ -212,7 +212,8 @@ mod tests {
 
         let meta = manager.create(&repo).await.unwrap();
 
-        assert_eq!(meta.source_cwd, repo);
+        let expected_repo = repo.canonicalize().unwrap();
+        assert_eq!(meta.source_cwd, expected_repo);
         assert!(meta.worktree_cwd.exists());
         assert!(
             meta.worktree_cwd
@@ -369,10 +370,11 @@ mod tests {
 
         let meta = manager.create(relative_repo).await.unwrap();
 
-        assert_eq!(meta.source_cwd, repo);
+        let expected_repo = repo.canonicalize().unwrap();
+        assert_eq!(meta.source_cwd, expected_repo);
         assert!(
             meta.worktree_cwd
-                .starts_with(repo.join(".claude/worktrees"))
+                .starts_with(expected_repo.join(".claude/worktrees"))
         );
         assert!(meta.worktree_cwd.exists());
     }
