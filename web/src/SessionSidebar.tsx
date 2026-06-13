@@ -253,7 +253,7 @@ export default function SessionSidebar({
           <h1>Claude</h1>
           <p>Recent conversations and resumable work</p>
         </div>
-        <button type="button" className="primary-action" onClick={onToggleNewSession}>
+        <button type="button" className="primary-action" title="Start a new chat" onClick={onToggleNewSession}>
           New chat
         </button>
       </div>
@@ -426,6 +426,8 @@ export default function SessionSidebar({
                         <button
                           className={session.id === activeId ? 'session active' : 'session'}
                           aria-current={session.id === activeId ? 'page' : undefined}
+                          data-session-id={session.id}
+                          title="Select session (⌥ Up/Down switches sessions)"
                           onClick={() => onSelectSession(session.id)}
                         >
                           <span className="session-title-row">

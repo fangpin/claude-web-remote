@@ -397,6 +397,7 @@ export function useComposerState({
     suggestions,
     addPathContextAttachment,
     addTextContextAttachment,
+    closeAutocomplete,
     completeSuggestion,
     onMessageChange,
     onMessageKeyDown,

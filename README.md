@@ -198,6 +198,21 @@ Use the composer `+` button to attach context references before sending:
 
 Attachment chips can be removed before sending. Attachments are cleared after a successful send.
 
+## Keyboard shortcuts
+
+The Web UI supports app-level shortcuts for keyboard-first navigation:
+
+| Shortcut | Action |
+| --- | --- |
+| `Cmd/Ctrl+K` | Focus the composer and open slash commands when the draft is empty |
+| `/` | Focus the composer from outside text fields |
+| `Esc` | Close shortcut help, slash autocomplete, new-session setup, or the inspector |
+| `Cmd/Ctrl+B` | Toggle the session sidebar |
+| `Cmd/Ctrl+I` | Toggle the inspector |
+| `Alt/Option+Up` / `Alt/Option+Down` | Switch between visible sessions |
+
+`Cmd/Ctrl+L` is intentionally left to the browser address bar; use `Cmd/Ctrl+K` or `/` to return to Claude input.
+
 ## Session History API
 
 Session transcripts can be read without attaching to a running Claude process:

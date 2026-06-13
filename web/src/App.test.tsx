@@ -760,6 +760,85 @@ describe('App', () => {
     expect(inputCallCount()).toBe(sentBeforeKeyboardChecks);
   });
 
+  it('handles app-level composer shortcuts without stealing editable input', async () => {
+    render(<App />);
+
+    const messageInput = await screen.findByLabelText('Message') as HTMLTextAreaElement;
+
+    fireEvent.keyDown(window, { key: '/' });
+    await waitFor(() => expect(messageInput).toHaveFocus());
+    expect(messageInput).toHaveValue('/');
+    expect(screen.getByRole('listbox', { name: 'Claude command suggestions' })).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('listbox', { name: 'Claude command suggestions' })).not.toBeInTheDocument();
+
+    fireEvent.change(messageInput, { target: { value: 'keep draft' } });
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+    await waitFor(() => expect(messageInput).toHaveFocus());
+    expect(messageInput).toHaveValue('keep draft');
+
+    const search = screen.getByRole('searchbox', { name: 'Search sessions' });
+    fireEvent.change(search, { target: { value: '/' } });
+    fireEvent.keyDown(search, { key: '/' });
+    expect(search).toHaveValue('/');
+    expect(messageInput).toHaveValue('keep draft');
+  });
+
+  it('toggles panels and cycles sessions with app-level shortcuts', async () => {
+    render(<App />);
+
+    expect(await screen.findByRole('complementary', { name: 'Session navigation' })).toBeVisible();
+    expect(screen.getByRole('complementary', { name: 'Session inspector' })).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: 'b', ctrlKey: true });
+    expect(screen.getByRole('button', { name: 'Show sidebar' })).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.keyDown(window, { key: 'b', ctrlKey: true });
+    expect(screen.getByRole('button', { name: 'Hide sidebar' })).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.keyDown(window, { key: 'i', ctrlKey: true });
+    expect(screen.getByRole('button', { name: 'Show inspector' })).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: 'i', ctrlKey: true });
+    expect(screen.getByRole('button', { name: 'Hide inspector' })).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: 'ArrowDown', altKey: true });
+    expect(await screen.findByRole('heading', { name: 'Stopped Repo' })).toBeInTheDocument();
+    await waitFor(() => expect(sessionButton('Stopped Repo')).toHaveFocus());
+
+    const messageInput = screen.getByLabelText('Message');
+    fireEvent.keyDown(messageInput, { key: 'ArrowDown', altKey: true });
+    expect(screen.getByRole('heading', { name: 'Stopped Repo' })).toBeInTheDocument();
+  });
+
+  it('closes app popovers with Escape and focuses composer after creating a session', async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Keys' }));
+    expect(screen.getByLabelText('Keyboard shortcuts')).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByLabelText('Keyboard shortcuts')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
+    expect(await screen.findByRole('heading', { name: 'Start a session' })).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('heading', { name: 'Start a session' })).not.toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: 'i', ctrlKey: true });
+    expect(screen.getByRole('button', { name: 'Show inspector' })).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: 'i', ctrlKey: true });
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.getByRole('button', { name: 'Show inspector' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
+    fireEvent.change(await screen.findByLabelText('Working directory'), { target: { value: '/repo/two' } });
+    fireEvent.click(screen.getByText('Create session'));
+
+    const messageInput = await screen.findByLabelText('Message');
+    await waitFor(() => expect(messageInput).toHaveFocus());
+  });
+
   it('stores successful prompts and recalls them with Up and Down without stealing multiline editing', async () => {
     render(<App />);
 
