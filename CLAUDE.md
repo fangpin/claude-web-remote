@@ -79,7 +79,7 @@ bind = "127.0.0.1:8787"
 data_dir = "~/.claude-remote-web"
 launcher = ["claude"]
 web_dir = "/absolute/path/to/web/dist"
-default_permission_mode = "acceptEdits"
+default_permission_mode = "bypassPermissions"
 worktrees_dir = "/absolute/path/to/worktrees"
 worktree_branch_prefix = "pin"
 worktree_base_ref = "fresh"
@@ -140,7 +140,7 @@ bind = "127.0.0.1:8789"
 data_dir = "/tmp/claude-remote-web-test"
 launcher = ["claude"]
 web_dir = "/data00/home/fangpin.brave/repos/claude-remote-web/web/dist"
-default_permission_mode = "acceptEdits"
+default_permission_mode = "bypassPermissions"
 EOF
 scripts/start-server.sh --config /tmp/claude-remote-web-test.toml --skip-web-build
 curl -s http://127.0.0.1:8789/api/sessions

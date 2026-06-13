@@ -38,7 +38,7 @@ export default function App() {
   const [events, setEvents] = useState<Record<string, UiEvent[]>>({});
   const [cwd, setCwd] = useState('');
   const [name, setName] = useState('');
-  const [permissionMode, setPermissionMode] = useState('acceptEdits');
+  const [permissionMode, setPermissionMode] = useState('bypassPermissions');
   const [useWorktree, setUseWorktree] = useState(false);
   const [message, setMessage] = useState('');
   const messageInputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -600,6 +600,7 @@ export default function App() {
               <label>
                 Permission mode
                 <select value={permissionMode} onChange={(event) => setPermissionMode(event.target.value)}>
+                  <option value="bypassPermissions">bypassPermissions</option>
                   <option value="acceptEdits">acceptEdits</option>
                   <option value="auto">auto</option>
                   <option value="default">default</option>

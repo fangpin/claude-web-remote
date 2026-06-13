@@ -12,7 +12,7 @@ const configResponse = {
     dataDir: '/home/user/.claude-remote-web',
     launcher: ['claude'],
     webDir: null,
-    defaultPermissionMode: 'acceptEdits',
+    defaultPermissionMode: 'bypassPermissions',
     worktreesDir: null,
     worktreeBranchPrefix: 'pin',
     worktreeBaseRef: 'fresh'
@@ -22,7 +22,7 @@ const configResponse = {
     dataDir: '/home/user/.claude-remote-web',
     launcher: ['claude'],
     webDir: null,
-    defaultPermissionMode: 'acceptEdits',
+    defaultPermissionMode: 'bypassPermissions',
     worktreesDir: null,
     worktreeBranchPrefix: 'pin',
     worktreeBaseRef: 'fresh'

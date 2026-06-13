@@ -97,7 +97,7 @@ Native Claude example:
 bind = "127.0.0.1:8787"
 data_dir = "~/.claude-remote-web"
 launcher = ["claude"]
-default_permission_mode = "acceptEdits"
+default_permission_mode = "bypassPermissions"
 ```
 
 `web_dir` is optional for release binaries because the Web UI is embedded. Set `web_dir` when running from source or when you want to serve a custom frontend build.
@@ -114,7 +114,7 @@ web_dir = "/absolute/path/to/web/dist"
 bind = "127.0.0.1:8787"
 data_dir = "~/.claude-remote-web"
 launcher = ["ttadk", "claude", "-m", "gpt-5.5", "--skip-check", "-a"]
-default_permission_mode = "acceptEdits"
+default_permission_mode = "bypassPermissions"
 ```
 
 The daemon appends native Claude arguments after the launcher prefix:
@@ -182,7 +182,7 @@ In the Web UI:
 ```text
 Working directory: /path/to/remote/repo
 Name: optional display name
-Permission mode: acceptEdits
+Permission mode: bypassPermissions
 ```
 
 The daemon starts the configured launcher in that working directory and streams events back to the browser.

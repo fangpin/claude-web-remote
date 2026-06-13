@@ -139,7 +139,7 @@ impl Config {
                 .default_permission_mode
                 .clone()
                 .or(file_config.default_permission_mode)
-                .unwrap_or_else(|| "acceptEdits".to_string()),
+                .unwrap_or_else(|| "bypassPermissions".to_string()),
             worktree: WorktreeConfig {
                 worktrees_dir: self
                     .worktrees_dir
@@ -262,7 +262,7 @@ fn values_from_file_config(file_config: FileConfig) -> ConfigValues {
             .map(|path| path.to_string_lossy().to_string()),
         default_permission_mode: file_config
             .default_permission_mode
-            .unwrap_or_else(|| "acceptEdits".to_string()),
+            .unwrap_or_else(|| "bypassPermissions".to_string()),
         worktrees_dir: file_config
             .worktrees_dir
             .map(expand_home)
@@ -460,7 +460,7 @@ mod tests {
 
         assert_eq!(resolved.bind, "127.0.0.1:0".parse::<SocketAddr>().unwrap());
         assert_eq!(resolved.launcher, vec!["claude".to_string()]);
-        assert_eq!(resolved.default_permission_mode, "acceptEdits");
+        assert_eq!(resolved.default_permission_mode, "bypassPermissions");
         assert!(resolved.data_dir.ends_with(".claude-remote-web"));
         assert_eq!(resolved.web_dir, None);
     }
@@ -779,7 +779,7 @@ launcher = ["from-file"]
             data_dir: temp.path().join("data"),
             launcher: vec!["claude".to_string()],
             web_dir: None,
-            default_permission_mode: "acceptEdits".to_string(),
+            default_permission_mode: "bypassPermissions".to_string(),
             worktree: WorktreeConfig {
                 worktrees_dir: None,
                 branch_prefix: "pin".to_string(),
@@ -795,7 +795,7 @@ launcher = ["from-file"]
         assert!(!response.restart_required);
         assert_eq!(response.file.bind, "127.0.0.1:8787");
         assert_eq!(response.file.launcher, vec!["claude".to_string()]);
-        assert_eq!(response.file.default_permission_mode, "acceptEdits");
+        assert_eq!(response.file.default_permission_mode, "bypassPermissions");
     }
 
     #[tokio::test]
@@ -815,7 +815,7 @@ launcher = []
             data_dir: temp.path().join("data"),
             launcher: vec!["claude".to_string()],
             web_dir: None,
-            default_permission_mode: "acceptEdits".to_string(),
+            default_permission_mode: "bypassPermissions".to_string(),
             worktree: WorktreeConfig {
                 worktrees_dir: None,
                 branch_prefix: "pin".to_string(),
@@ -843,7 +843,7 @@ launcher = []
             data_dir: default_data_dir(),
             launcher: vec!["ttadk".to_string(), "claude".to_string()],
             web_dir: None,
-            default_permission_mode: "acceptEdits".to_string(),
+            default_permission_mode: "bypassPermissions".to_string(),
             worktree: WorktreeConfig {
                 worktrees_dir: None,
                 branch_prefix: "pin".to_string(),
@@ -871,7 +871,7 @@ launcher = []
             data_dir: temp.path().join("data"),
             launcher: vec!["claude".to_string()],
             web_dir: None,
-            default_permission_mode: "acceptEdits".to_string(),
+            default_permission_mode: "bypassPermissions".to_string(),
             worktree: WorktreeConfig {
                 worktrees_dir: None,
                 branch_prefix: "pin".to_string(),
@@ -898,7 +898,7 @@ launcher = []
             data_dir: temp.path().join("data"),
             launcher: vec!["claude".to_string()],
             web_dir: None,
-            default_permission_mode: "acceptEdits".to_string(),
+            default_permission_mode: "bypassPermissions".to_string(),
             worktree: WorktreeConfig {
                 worktrees_dir: None,
                 branch_prefix: "pin".to_string(),
@@ -913,7 +913,7 @@ launcher = []
                 data_dir: temp.path().join("data").to_string_lossy().to_string(),
                 launcher: vec!["claude".to_string()],
                 web_dir: None,
-                default_permission_mode: "acceptEdits".to_string(),
+                default_permission_mode: "bypassPermissions".to_string(),
                 worktrees_dir: None,
                 worktree_branch_prefix: "pin".to_string(),
                 worktree_base_ref: WorktreeBaseRef::Fresh,
@@ -935,7 +935,7 @@ launcher = []
             data_dir: temp.path().join("data"),
             launcher: vec!["claude".to_string()],
             web_dir: None,
-            default_permission_mode: "acceptEdits".to_string(),
+            default_permission_mode: "bypassPermissions".to_string(),
             worktree: WorktreeConfig {
                 worktrees_dir: None,
                 branch_prefix: "pin".to_string(),
@@ -976,7 +976,7 @@ launcher = []
             data_dir: temp.path().join("data"),
             launcher: vec!["claude".to_string()],
             web_dir: None,
-            default_permission_mode: "acceptEdits".to_string(),
+            default_permission_mode: "bypassPermissions".to_string(),
             worktree: WorktreeConfig {
                 worktrees_dir: None,
                 branch_prefix: "pin".to_string(),
@@ -991,7 +991,7 @@ launcher = []
                 data_dir: "/tmp/crw-data".to_string(),
                 launcher: vec!["claude".to_string()],
                 web_dir: None,
-                default_permission_mode: "acceptEdits".to_string(),
+                default_permission_mode: "bypassPermissions".to_string(),
                 worktrees_dir: None,
                 worktree_branch_prefix: "pin".to_string(),
                 worktree_base_ref: WorktreeBaseRef::Fresh,
@@ -1010,7 +1010,7 @@ launcher = []
             data_dir: temp.path().join("data"),
             launcher: vec!["claude".to_string()],
             web_dir: None,
-            default_permission_mode: "acceptEdits".to_string(),
+            default_permission_mode: "bypassPermissions".to_string(),
             worktree: WorktreeConfig {
                 worktrees_dir: None,
                 branch_prefix: "pin".to_string(),
@@ -1025,7 +1025,7 @@ launcher = []
                 data_dir: "/tmp/crw-data".to_string(),
                 launcher: Vec::new(),
                 web_dir: None,
-                default_permission_mode: "acceptEdits".to_string(),
+                default_permission_mode: "bypassPermissions".to_string(),
                 worktrees_dir: None,
                 worktree_branch_prefix: "pin".to_string(),
                 worktree_base_ref: WorktreeBaseRef::Fresh,

@@ -316,7 +316,7 @@ done
         let manager = SessionManager::new(
             store.clone(),
             vec![bin.to_string_lossy().to_string()],
-            "acceptEdits".to_string(),
+            "bypassPermissions".to_string(),
             crate::WorktreeConfig {
                 worktrees_dir: None,
                 branch_prefix: "pin".to_string(),
@@ -330,7 +330,7 @@ done
                 data_dir: temp.path().join("data"),
                 launcher: vec![bin.to_string_lossy().to_string()],
                 web_dir: None,
-                default_permission_mode: "acceptEdits".to_string(),
+                default_permission_mode: "bypassPermissions".to_string(),
                 worktree: crate::WorktreeConfig {
                     worktrees_dir: None,
                     branch_prefix: "pin".to_string(),

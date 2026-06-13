@@ -121,7 +121,7 @@ async fn spawn_app_with_config_and_web_dir(
     let manager = SessionManager::new(
         store.clone(),
         launcher.clone(),
-        "acceptEdits".to_string(),
+        "bypassPermissions".to_string(),
         worktree.clone(),
     );
     let config = ConfigStore::new(
@@ -131,7 +131,7 @@ async fn spawn_app_with_config_and_web_dir(
             data_dir,
             launcher,
             web_dir: web_dir.clone(),
-            default_permission_mode: "acceptEdits".to_string(),
+            default_permission_mode: "bypassPermissions".to_string(),
             worktree,
         },
     );
@@ -153,7 +153,7 @@ async fn spawn_app_with_store(store: EventStore) -> SocketAddr {
     let manager = SessionManager::new(
         store.clone(),
         vec!["claude".to_string()],
-        "acceptEdits".to_string(),
+        "bypassPermissions".to_string(),
         claude_remote_web_server::WorktreeConfig {
             worktrees_dir: None,
             branch_prefix: "pin".to_string(),
@@ -167,7 +167,7 @@ async fn spawn_app_with_store(store: EventStore) -> SocketAddr {
             data_dir: PathBuf::from("data"),
             launcher: vec!["claude".to_string()],
             web_dir: None,
-            default_permission_mode: "acceptEdits".to_string(),
+            default_permission_mode: "bypassPermissions".to_string(),
             worktree: WorktreeConfig {
                 worktrees_dir: None,
                 branch_prefix: "pin".to_string(),

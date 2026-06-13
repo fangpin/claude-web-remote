@@ -124,6 +124,7 @@ export default function ConfigView() {
           <label>
             Default permission mode
             <select value={form.defaultPermissionMode} onChange={(event) => updateField('defaultPermissionMode', event.target.value)}>
+              <option value="bypassPermissions">bypassPermissions</option>
               <option value="acceptEdits">acceptEdits</option>
               <option value="auto">auto</option>
               <option value="default">default</option>

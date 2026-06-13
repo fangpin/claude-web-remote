@@ -243,7 +243,7 @@ beforeEach(() => {
           dataDir: '/home/user/.claude-remote-web',
           launcher: ['claude'],
           webDir: null,
-          defaultPermissionMode: 'acceptEdits',
+          defaultPermissionMode: 'bypassPermissions',
           worktreesDir: null,
           worktreeBranchPrefix: 'pin',
           worktreeBaseRef: 'fresh'
@@ -253,7 +253,7 @@ beforeEach(() => {
           dataDir: '/home/user/.claude-remote-web',
           launcher: ['claude'],
           webDir: null,
-          defaultPermissionMode: 'acceptEdits',
+          defaultPermissionMode: 'bypassPermissions',
           worktreesDir: null,
           worktreeBranchPrefix: 'pin',
           worktreeBaseRef: 'fresh'
@@ -373,6 +373,7 @@ describe('App', () => {
     expect(JSON.parse(String(createCall?.[1]?.body))).toMatchObject({
       cwd: '/repo/two',
       name: 'New Repo',
+      permissionMode: 'bypassPermissions',
       worktree: { enabled: true }
     });
   });
