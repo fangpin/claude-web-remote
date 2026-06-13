@@ -330,6 +330,10 @@ beforeEach(() => {
     if (url === '/api/sessions/s2/resume' && init?.method === 'POST') {
       return jsonResponse({ ...sessions[1], status: 'running', runtimeStatus: 'waiting', updatedAt: '2026-06-12T00:00:00Z' });
     }
+    if (url.endsWith('/resume') && init?.method === 'POST') {
+      const session = sessions.find((item) => url.includes(item.id)) ?? sessions[0];
+      return jsonResponse({ ...session, status: 'running', runtimeStatus: 'waiting', updatedAt: '2026-06-12T00:00:00Z' });
+    }
     if (url === '/api/sessions/s3/unarchive' && init?.method === 'POST') {
       return jsonResponse({ ...deletedSessions[0], deletedAt: null, updatedAt: '2026-06-12T01:00:00Z' });
     }
@@ -433,7 +437,7 @@ describe('App', () => {
     expect(screen.getByText('Fresh context from this week')).toBeInTheDocument();
     expect(screen.getAllByText('Ready for your reply').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Claude is working').length).toBeGreaterThan(0);
-    expect(screen.getByText('Resume this chat')).toBeInTheDocument();
+    expect(screen.getByText('Can resume')).toBeInTheDocument();
     expectSessionStatus('Repo One', 'Waiting for you');
     expectSessionStatus('Worktree Repo', 'Running');
     expectSessionStatus('Stopped Repo', 'Ended');
@@ -895,25 +899,55 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { name: 'Name this chat from the...' })).toBeInTheDocument();
   });
 
-  it('renders actions by active session status and resumes stopped sessions', async () => {
+  it('renders continuity-aware actions and resumes stopped sessions', async () => {
     render(<App />);
 
     expect(await screen.findByRole('heading', { name: 'Repo One' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Restart' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Archive' })).toBeInTheDocument();
+    expect(within(screen.getByLabelText('Session continuity')).getByText('Waiting for you')).toBeInTheDocument();
 
     fireEvent.click(sessionButton('Stopped Repo'));
     expect(await screen.findByRole('heading', { name: 'Stopped Repo' })).toBeInTheDocument();
+    expect(within(screen.getByLabelText('Session continuity')).getByText('Ended')).toBeInTheDocument();
+    expect(within(screen.getByLabelText('Session continuity')).getByText('Can resume')).toBeInTheDocument();
+    expect(screen.getByText('This session is stopped. Resume the conversation to continue.')).toBeInTheDocument();
     expect(screen.getByLabelText('Message')).toBeDisabled();
 
     const socketsBeforeResume = FakeWebSocket.instances.length;
-    fireEvent.click(screen.getByRole('button', { name: 'Resume' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Resume conversation' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s2/resume', expect.objectContaining({ method: 'POST' })));
     await waitFor(() => expect(FakeWebSocket.instances.length).toBe(socketsBeforeResume + 1));
     expect(FakeWebSocket.instances.at(-1)?.url).toContain('/api/sessions/s2/events?afterId=0');
     expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
+  });
+
+  it.each<SessionStatus>(['stopped', 'exited', 'failed'])('explains fresh-start continuation for %s sessions without Claude context', async (status) => {
+    const name = `${status[0].toUpperCase()}${status.slice(1)} Fresh Repo`;
+    sessions = [
+      {
+        ...baseSession,
+        id: 's1',
+        name,
+        cwd: `/repo/${status}-fresh`,
+        status,
+        runtimeStatus: status === 'exited' ? 'ended' : status
+      }
+    ];
+
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name })).toBeInTheDocument();
+    expect(within(screen.getByLabelText('Session continuity')).getByText('Will start fresh')).toBeInTheDocument();
+    expect(screen.getByText('This session cannot resume its Claude context. Start fresh from this workspace to continue.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start fresh from this workspace' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Archive' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start fresh from this workspace' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/resume', expect.objectContaining({ method: 'POST' })));
   });
 
   it('renders Stop and Archive actions for starting sessions', async () => {
@@ -939,7 +973,7 @@ describe('App', () => {
     expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
   });
 
-  it.each<SessionStatus>(['exited', 'failed'])('renders Resume and Archive actions for %s sessions', async (status) => {
+  it.each<SessionStatus>(['exited', 'failed'])('renders resumable continue actions for %s sessions with Claude context', async (status) => {
     const name = `${status[0].toUpperCase()}${status.slice(1)} Repo`;
     sessions = [
       {
@@ -948,14 +982,16 @@ describe('App', () => {
         name,
         cwd: `/repo/${status}`,
         status,
-        runtimeStatus: status === 'exited' ? 'ended' : status
+        runtimeStatus: status === 'exited' ? 'ended' : status,
+        claudeSessionId: `claude-${status}`
       }
     ];
 
     render(<App />);
 
     expect(await screen.findByRole('heading', { name })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Resume' })).toBeInTheDocument();
+    expect(within(screen.getByLabelText('Session continuity')).getByText('Can resume')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Resume conversation' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Archive' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Restart' })).not.toBeInTheDocument();
@@ -993,7 +1029,12 @@ describe('App', () => {
 
     expect(await screen.findByRole('heading', { name: 'Archived Repo' })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith('/api/sessions?deletedOnly=true', undefined);
+    expect(within(screen.getByLabelText('Session continuity')).getByText('Archived')).toBeInTheDocument();
+    expect(within(screen.getByLabelText('Session continuity')).getByText('Cannot resume')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Resume conversation' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Start fresh from this workspace' })).not.toBeInTheDocument();
     expect(await screen.findByText('archived session history')).toBeInTheDocument();
+    expect(screen.getByText('This session is archived and read-only. Unarchive it before resuming work or sending messages.')).toBeInTheDocument();
     expect(screen.getByLabelText('Message')).toBeDisabled();
     const inspector = screen.getByRole('complementary', { name: 'Session inspector' });
     fireEvent.click(within(inspector).getByRole('tab', { name: 'Session tasks' }));
@@ -1030,7 +1071,7 @@ describe('App', () => {
     expect(await screen.findByText('stopped session history')).toBeInTheDocument();
     expect(FakeWebSocket.instances).toHaveLength(0);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Resume' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Resume conversation' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s2/resume', expect.objectContaining({ method: 'POST' })));
     await waitFor(() => expect(FakeWebSocket.instances.length).toBe(1));

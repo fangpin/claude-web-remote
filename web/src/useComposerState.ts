@@ -1,6 +1,7 @@
 import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { sendInput } from './api';
 import type { SessionListMode } from './AppShell';
+import { getComposerDisabledReason } from './sessionContinuity';
 import { applyCommandCompletion, findSlashCommandToken, getCommandSuggestions, type ClaudeCommand, type SlashCommandToken } from './autocomplete';
 import type { SessionInfo } from './types';
 
@@ -81,15 +82,7 @@ export function useComposerState({
 
   const hasDraft = message.trim().length > 0;
   const canSend = isComposerSession && hasDraft && !isSending;
-  const composerDisabledReason = !activeSession
-    ? 'Select a session to send a message.'
-    : listMode === 'archived' || activeSession.deletedAt
-      ? 'Archived sessions are read-only. Unarchive to continue.'
-      : activeSession.status === 'starting'
-        ? 'Claude is starting. You can send once the session is ready.'
-        : activeSession.status !== 'running'
-          ? 'This session is stopped. Resume it to continue.'
-          : '';
+  const composerDisabledReason = getComposerDisabledReason(activeSession, listMode);
   const runtimeStatus = activeSession?.runtimeStatus ?? activeSession?.status;
   const sendStatusText = !isComposerSession
     ? composerDisabledReason

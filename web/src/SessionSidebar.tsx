@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { runtimeStatusLabels, type SessionListMode } from './AppShell';
+import { getContinuityLabel, getRuntimeStatus } from './sessionContinuity';
 import type { SessionInfo } from './types';
 
 type RuntimeStatusKey = keyof typeof runtimeStatusLabels;
@@ -46,8 +47,8 @@ const permissionModeDescriptions: Record<string, string> = {
   default: 'Use the daemon or Claude CLI default.'
 };
 
-function getRuntimeStatus(session: SessionInfo): RuntimeStatusKey {
-  return (session.runtimeStatus ?? session.status) as RuntimeStatusKey;
+function getSidebarRuntimeStatus(session: SessionInfo): RuntimeStatusKey {
+  return getRuntimeStatus(session) as RuntimeStatusKey;
 }
 
 function projectPathForSession(session: SessionInfo): string {
@@ -409,9 +410,10 @@ export default function SessionSidebar({
                 </div>
                 <div className="session-section-list">
                   {section.sessions.map((session) => {
-                    const runtimeStatus = getRuntimeStatus(session);
+                    const runtimeStatus = getSidebarRuntimeStatus(session);
                     const statusClass = listMode === 'archived' ? 'archived' : runtimeStatus;
                     const statusLabel = runtimeStatusLabels[runtimeStatus];
+                    const continuityLabel = getContinuityLabel(session, listMode);
                     const sessionTitle = session.name || pathBasename(projectPathForSession(session));
                     const projectPath = projectPathForSession(session);
                     const projectName = pathBasename(projectPath);
@@ -430,7 +432,7 @@ export default function SessionSidebar({
                             <strong>{sessionTitle}</strong>
                             <em className={`status status-${statusClass}`}>{statusLabel}</em>
                           </span>
-                          <span className="session-resume-cue">{resumeCueForSession(session, listMode)}</span>
+                          <span className="session-resume-cue">{continuityLabel ?? resumeCueForSession(session, listMode)}</span>
                           <span className="session-path-row">
                             <span className="session-project" title={projectPath}>{projectName}</span>
                             <span className="session-parent" title={projectPath}>{projectParent}</span>
