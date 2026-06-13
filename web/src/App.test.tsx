@@ -442,6 +442,11 @@ describe('App', () => {
     expectSessionStatus('Worktree Repo', 'Running');
     expectSessionStatus('Stopped Repo', 'Ended');
     expect(screen.getByText('Remote Claude session')).toBeInTheDocument();
+    expect(screen.getAllByLabelText('Claude needs your review')).toHaveLength(2);
+    expect(screen.getAllByRole('heading', { name: 'Claude is waiting' })).toHaveLength(2);
+    expect(screen.getAllByText('Web approval controls are not available in this build.')).toHaveLength(2);
+    expect(screen.queryByRole('button', { name: 'Allow' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Deny' })).not.toBeInTheDocument();
     const inspector = screen.getByRole('complementary', { name: 'Session inspector' });
     expect(within(inspector).getByRole('tab', { name: 'Session tasks' })).toBeInTheDocument();
     fireEvent.click(within(inspector).getByRole('tab', { name: 'Session tasks' }));
@@ -500,6 +505,44 @@ describe('App', () => {
 
     expect(await screen.findByRole('heading', { name: 'Pinned' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Unpin Stopped Repo' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('surfaces destructive command review without flagging ordinary tool activity', async () => {
+    eventsBySession = {
+      s1: [
+        {
+          id: 1,
+          sessionId: 's1',
+          time: '2026-06-11T00:00:00Z',
+          kind: 'tool',
+          payload: { type: 'tool_use', id: 'toolu_safe', name: 'Bash', input: { command: 'npm test', description: 'Run tests' } }
+        },
+        {
+          id: 2,
+          sessionId: 's1',
+          time: '2026-06-11T00:00:01Z',
+          kind: 'tool',
+          payload: { type: 'tool_result', tool_use_id: 'toolu_safe', content: 'passed' }
+        },
+        {
+          id: 3,
+          sessionId: 's1',
+          time: '2026-06-11T00:00:02Z',
+          kind: 'tool',
+          payload: { type: 'tool_use', id: 'toolu_risky', name: 'Bash', input: { command: 'rm -rf dist', description: 'Remove dist' } }
+        }
+      ]
+    };
+
+    render(<App />);
+
+    expect(await screen.findAllByText('Claude requested an action that may be destructive or affect shared state.')).toHaveLength(2);
+    expect(screen.getAllByText('Bash').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Deletes files recursively or forcefully.').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Remove dist · $ rm -rf dist').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Run tests · $ npm test').length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'Allow' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Deny' })).not.toBeInTheDocument();
   });
 
   it('hides raw and system events without rendering conversation cards', async () => {
