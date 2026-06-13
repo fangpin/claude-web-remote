@@ -426,10 +426,11 @@ describe('App', () => {
 
     expect((await screen.findAllByText('Repo One')).length).toBeGreaterThan(0);
     expect(screen.getAllByText('/repo/one').length).toBeGreaterThan(0);
-    expect(screen.getByRole('heading', { name: 'Waiting' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Running' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Recent stopped' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Previous 7 days' })).toBeInTheDocument();
+    expect(screen.getByText('Fresh context from this week')).toBeInTheDocument();
     expect(screen.getAllByText('Ready for your reply').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Claude is working').length).toBeGreaterThan(0);
+    expect(screen.getByText('Resume this chat')).toBeInTheDocument();
     expectSessionStatus('Repo One', 'Waiting for you');
     expectSessionStatus('Worktree Repo', 'Running');
     expectSessionStatus('Stopped Repo', 'Ended');
@@ -475,6 +476,23 @@ describe('App', () => {
 
     expect(screen.getByRole('searchbox', { name: 'Search sessions' })).toHaveValue('');
     expect(querySessionButton('Repo One')).toBeInTheDocument();
+  });
+
+  it('pins sessions locally and keeps the favorite section after remounting', async () => {
+    const { unmount } = render(<App />);
+
+    await screen.findAllByText('Repo One');
+    fireEvent.click(screen.getByRole('button', { name: 'Pin Stopped Repo' }));
+
+    expect(screen.getByRole('heading', { name: 'Pinned' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Unpin Stopped Repo' })).toHaveAttribute('aria-pressed', 'true');
+
+    unmount();
+    cleanup();
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'Pinned' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Unpin Stopped Repo' })).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('hides raw and system events without rendering conversation cards', async () => {
@@ -1047,8 +1065,10 @@ describe('App', () => {
 
     fireEvent.click(await screen.findByText('Worktree Repo'));
 
-    expect(screen.getByText('Source: /repo/one')).toBeInTheDocument();
-    expect(screen.getByText('Branch: pin/abc123')).toBeInTheDocument();
+    const activeHeaderBeforeStop = screen.getByRole('heading', { name: 'Worktree Repo' }).closest('header');
+    expect(activeHeaderBeforeStop).not.toBeNull();
+    expect(within(activeHeaderBeforeStop as HTMLElement).getByText('Source: /repo/one')).toBeInTheDocument();
+    expect(within(activeHeaderBeforeStop as HTMLElement).getByText('Branch: pin/abc123')).toBeInTheDocument();
     fireEvent.click(screen.getByText('Stop and remove worktree'));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s4/stop-and-remove-worktree', expect.objectContaining({ method: 'POST' })));

@@ -447,6 +447,10 @@ async function expectNoHorizontalElementOverflow(locator: Locator, name: string)
   expect(overflow, `${name} should not create horizontal element overflow`).toBeLessThanOrEqual(1);
 }
 
+function sessionRow(page: Page, name: string): Locator {
+  return page.locator('button.session', { hasText: name });
+}
+
 async function expectComposerPinnedBelowEvents(page: Page) {
   const eventsBox = await boxFor(page.locator('.events'), 'conversation event stream');
   const composerBox = await boxFor(page.getByRole('form', { name: 'Message composer' }), 'composer');
@@ -462,6 +466,15 @@ async function showInspectorIfNeeded(page: Page) {
     await showInspector.click();
   }
   await expect(inspector.getByRole('button', { name: 'Hide', exact: true })).toBeVisible();
+  return inspector;
+}
+
+async function expectCompactInspector(page: Page, name: string) {
+  const inspector = page.getByRole('complementary', { name: 'Session inspector' });
+  await boxFor(inspector, name);
+  await expectViewportContains(inspector, name);
+  await expect(inspector.getByRole('button', { name: 'Hide inspector' })).toBeVisible();
+  await expect(inspector.getByRole('button', { name: 'Hide', exact: true })).toHaveCount(0);
   return inspector;
 }
 
@@ -493,7 +506,7 @@ test('Claude-like UI stays readable across key viewports', async ({ page }) => {
   await expect(page.locator('.tool-block.completed')).toContainText('git status --short');
   await expect(page.locator('.task-block.running')).toContainText('Run browser visual layout verification');
   await expect(page.locator('.task-block.completed')).toContainText('Inspect responsive UI affordances');
-  await expect(page.getByRole('button', { name: /Stopped Session/ })).toContainText('Stopped');
+  await expect(sessionRow(page, 'Stopped Session')).toContainText('Stopped');
 
   await expectNoHorizontalPageOverflow(page);
   await expectViewportContains(composer, 'composer');
@@ -511,18 +524,12 @@ test('Claude-like UI stays readable across key viewports', async ({ page }) => {
     await expectNoMeaningfulOverlap(sidebar, workspace, 'sidebar and workspace');
 
     const beforeOpenWorkspace = await boxFor(workspace, 'workspace before inspector opens');
-    const showInspector = inspector.getByRole('button', { name: 'Show inspector' });
-    if (await showInspector.isVisible()) {
-      await showInspector.click();
-    }
-    await expect(inspector.getByRole('button', { name: 'Hide', exact: true })).toBeVisible();
-    await expect(page.getByRole('tabpanel', { name: 'Session tasks' })).toContainText('visual smoke checks');
+    await expectCompactInspector(page, 'compact inspector');
     const afterOpenWorkspace = await boxFor(workspace, 'workspace after inspector opens');
     expect(
       Math.abs(afterOpenWorkspace.width - beforeOpenWorkspace.width),
       'opening inspector on constrained viewports should not shrink the chat workspace'
     ).toBeLessThanOrEqual(1);
-    await expectViewportContains(inspector, 'inspector drawer');
   }
 });
 
@@ -568,7 +575,7 @@ test('autocomplete remains within the composer and viewport', async ({ page }) =
 });
 
 test('empty conversation starter stays visible without colliding with composer', async ({ page }) => {
-  await page.getByRole('button', { name: /Empty Conversation Starter/ }).evaluate((element) => {
+  await sessionRow(page, 'Empty Conversation Starter').evaluate((element) => {
     (element as HTMLButtonElement).click();
   });
 
@@ -587,7 +594,7 @@ test('archived session view stays readable and read-only', async ({ page }) => {
 
   const sidebar = page.getByRole('complementary', { name: 'Session navigation' });
   const workspace = page.getByRole('main', { name: 'Conversation workspace' });
-  const archivedSession = page.getByRole('button', { name: /Archived Visual Session/ });
+  const archivedSession = sessionRow(page, 'Archived Visual Session');
   const composer = page.getByRole('form', { name: 'Message composer' });
 
   await expect(archivedSession).toBeVisible();
@@ -596,8 +603,8 @@ test('archived session view stays readable and read-only', async ({ page }) => {
   await expect(workspace).toContainText('This session is archived. Unarchive it before resuming work or sending messages.');
   await expect(composer.getByRole('textbox', { name: 'Message' })).toBeDisabled();
   await expect(composer).toContainText('Archived sessions are read-only. Unarchive to continue.');
-  await expect(page.getByRole('button', { name: 'Unarchive' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Delete' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Unarchive', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Delete', exact: true })).toBeVisible();
 
   await boxFor(sidebar, 'archived session sidebar');
   await boxFor(workspace, 'archived conversation workspace');
@@ -633,21 +640,27 @@ test('config view fits without chat composer or inspector collisions', async ({ 
 });
 
 test('failed tool output stays diagnosable without widening layout', async ({ page }) => {
-  await page.getByRole('button', { name: /Failed Tool Session/ }).evaluate((element) => {
+  await sessionRow(page, 'Failed Tool Session').evaluate((element) => {
     (element as HTMLButtonElement).click();
   });
 
   const failedTool = page.locator('.tool-block.failed');
   const events = page.locator('.events');
-  const inspector = await showInspectorIfNeeded(page);
 
   await expect(failedTool).toContainText('Bash');
   await expect(failedTool).toContainText('failed');
   await expect(failedTool).toContainText('exit code 1');
   await expect(failedTool.locator('.visible-result')).toContainText('missing file');
-  const sessionTasks = page.getByRole('tabpanel', { name: 'Session tasks' });
-  await expect(sessionTasks.locator('.task-card.failed')).toContainText('Command failed with exit code 1');
-  await expect(sessionTasks).toContainText('failed');
+
+  const viewport = test.info().project.use.viewport!;
+  const inspector = viewport.width > 760
+    ? await showInspectorIfNeeded(page)
+    : await expectCompactInspector(page, 'failed compact inspector');
+  if (viewport.width > 760) {
+    const sessionTasks = page.getByRole('tabpanel', { name: 'Session tasks' });
+    await expect(sessionTasks.locator('.task-card.failed')).toContainText('Command failed with exit code 1');
+    await expect(sessionTasks).toContainText('failed');
+  }
 
   await boxFor(failedTool, 'failed tool block');
   await expectNoHorizontalPageOverflow(page);
@@ -692,18 +705,23 @@ test('empty search results and no-task inspector states stay stable', async ({ p
   await page.getByRole('button', { name: 'Clear' }).evaluate((element) => {
     (element as HTMLButtonElement).click();
   });
-  await page.getByRole('button', { name: /No Tasks Session/ }).evaluate((element) => {
+  await sessionRow(page, 'No Tasks Session').evaluate((element) => {
     (element as HTMLButtonElement).click();
   });
 
-  const inspector = await showInspectorIfNeeded(page);
-  const sessionTasks = page.getByRole('tabpanel', { name: 'Session tasks' });
-  await expect(sessionTasks).toContainText('No agent activity yet');
-  await expect(sessionTasks).toContainText('This session is quiet.');
-  await boxFor(sessionTasks, 'empty session tasks panel');
+  const viewport = test.info().project.use.viewport!;
+  const inspector = viewport.width > 760
+    ? await showInspectorIfNeeded(page)
+    : await expectCompactInspector(page, 'no-task compact inspector');
+  if (viewport.width > 760) {
+    const sessionTasks = page.getByRole('tabpanel', { name: 'Session tasks' });
+    await expect(sessionTasks).toContainText('No agent activity yet');
+    await expect(sessionTasks).toContainText('This session is quiet.');
+    await boxFor(sessionTasks, 'empty session tasks panel');
 
-  await page.getByRole('tab', { name: 'All tasks' }).click();
-  await expect(page.getByRole('tabpanel', { name: 'All tasks' })).toContainText('Running visual smoke checks');
+    await page.getByRole('tab', { name: 'All tasks' }).click();
+    await expect(page.getByRole('tabpanel', { name: 'All tasks' })).toContainText('Running visual smoke checks');
+  }
 
   await expectViewportContains(inspector, 'no-task inspector');
   await expectNoHorizontalPageOverflow(page);

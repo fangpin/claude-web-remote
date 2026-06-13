@@ -457,8 +457,7 @@ button.danger:hover {
   min-width: 0;
 }
 
-.session-section-heading,
-.session-project-heading {
+.session-section-heading {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -493,34 +492,29 @@ button.danger:hover {
   padding-top: 1px;
 }
 
-.session-project-group {
+.session-section-list {
   display: grid;
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
 }
 
-.session-project-heading {
-  align-items: baseline;
-  padding-top: 3px;
+.session-row {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
 }
 
-.session-project-heading strong {
-  min-width: 0;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 760;
-  line-height: 1.25;
-  text-transform: uppercase;
-  overflow-wrap: anywhere;
+.session-row:hover {
+  border-color: transparent;
+  background: var(--surface-hover);
 }
 
-.session-project-heading span {
-  min-width: 0;
-  color: var(--muted-soft);
-  font-size: 11px;
-  line-height: 1.25;
-  text-align: right;
-  overflow-wrap: anywhere;
+.session-row.active {
+  border-color: var(--border);
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgb(45 42 38 / 0.04);
 }
 
 .session {
@@ -531,24 +525,25 @@ button.danger:hover {
   text-align: left;
   color: var(--text);
   background: transparent;
-  padding: 10px;
+  padding: 10px 34px 10px 10px;
 }
 
 .session:hover {
   border-color: transparent;
-  background: var(--surface-hover);
+  background: transparent;
 }
 
 .session.active {
-  border-color: #d8c7b8;
-  background: #fffaf4;
-  box-shadow: inset 3px 0 0 var(--accent), 0 1px 2px rgb(45 42 38 / 0.04);
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
 }
 
-.session-main-row,
-.session-worktree-row {
+.session-title-row,
+.session-path-row,
+.session-detail-row {
   display: flex;
-  align-items: start;
+  align-items: center;
   justify-content: space-between;
   gap: 8px;
   min-width: 0;
@@ -556,27 +551,96 @@ button.danger:hover {
 
 .session strong {
   min-width: 0;
+  color: var(--text);
   overflow-wrap: anywhere;
-  font-size: 13px;
+  font-size: 13.5px;
   line-height: 1.35;
 }
 
-.session-path,
-.session em,
-.session-worktree-row span {
+.session-resume-cue,
+.session-path-row,
+.session-detail-row,
+.session em {
   color: var(--muted);
   font-size: 12px;
 }
 
-.session-path,
-.session-branch {
+.session-resume-cue {
+  min-width: 0;
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
 
+.session-path-row,
+.session-detail-row {
+  line-height: 1.35;
+}
+
+.session-project,
+.session-parent,
 .session-branch {
   min-width: 0;
+  line-height: 1.35;
+}
+
+.session-project,
+.session-parent,
+.session-branch {
+  overflow-wrap: anywhere;
+}
+
+.session-project {
+  color: var(--text-soft);
+  font-weight: 650;
+}
+
+.session-parent {
+  flex: 1 1 auto;
+  color: var(--muted-soft);
   text-align: right;
+}
+
+.session-detail-row {
+  color: var(--muted-soft);
+}
+
+.session-branch {
+  flex: 1 1 auto;
+  color: var(--muted);
+}
+
+.session-pin-button {
+  position: absolute;
+  top: 8px;
+  right: 7px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-color: transparent;
+  border-radius: 7px;
+  color: var(--muted-soft);
+  background: transparent;
+  padding: 0;
+  opacity: 0;
+}
+
+.session-row:hover .session-pin-button,
+.session-pin-button:focus-visible,
+.session-pin-button.pinned {
+  opacity: 1;
+}
+
+.session-pin-button:hover,
+.session-pin-button.pinned {
+  border-color: var(--border);
+  color: var(--accent-strong);
+  background: rgb(255 253 250 / 0.74);
+}
+
+.session-pin-button svg {
+  width: 15px;
+  height: 15px;
 }
 
 .status {
@@ -2722,7 +2786,7 @@ button.danger:hover {
   .app-shell,
   .app-shell.inspector-closed {
     grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(180px, 30vh) minmax(0, 1fr) auto;
+    grid-template-rows: auto minmax(150px, 24vh) minmax(0, 1fr) auto;
   }
 
   .app-shell.view-config,
@@ -2767,7 +2831,13 @@ button.danger:hover {
   }
 
   .sidebar-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
     padding: 10px 12px;
+  }
+
+  .sidebar-header p {
+    display: none;
   }
 
   .new-session-panel {
@@ -2790,8 +2860,20 @@ button.danger:hover {
     background: transparent;
   }
 
+  .session-modes {
+    padding: 8px 12px;
+  }
+
+  .session-section-heading p,
+  .session-detail-row,
+  .session-parent {
+    display: none;
+  }
+
   .session {
     min-height: 0;
+    padding-top: 8px;
+    padding-bottom: 8px;
   }
 
   .conversation-header {
@@ -2868,8 +2950,43 @@ button.danger:hover {
 
   .inspector,
   .app-shell.inspector-closed .inspector {
-    top: 50px;
-    width: min(340px, calc(100vw - 20px));
+    position: relative;
+    top: auto;
+    right: auto;
+    bottom: auto;
+    width: auto;
+    min-height: 0;
+    max-height: 96px;
+    overflow: hidden;
+    border-top: 1px solid var(--border);
+    border-left: 0;
+    box-shadow: none;
+  }
+
+  .inspector-edge-toggle,
+  .app-shell.inspector-closed .inspector-edge-toggle {
+    top: 8px;
+    right: 10px;
+    left: auto;
+    width: 34px;
+    height: 34px;
+    transform: none;
+  }
+
+  .inspector-header {
+    padding: 10px 56px 10px 12px;
+  }
+
+  .inspector-header button,
+  .inspector-tabs,
+  .inspector [role='tabpanel'] {
+    display: none !important;
+  }
+
+  .app-shell.inspector-closed .inspector {
+    width: auto;
+    background: var(--panel-bg);
+    pointer-events: auto;
   }
 
   .conversation-empty {

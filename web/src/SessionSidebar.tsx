@@ -1,20 +1,16 @@
-import type { FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { runtimeStatusLabels, type SessionListMode } from './AppShell';
 import type { SessionInfo } from './types';
 
 type RuntimeStatusKey = keyof typeof runtimeStatusLabels;
 
+const PINNED_SESSION_STORAGE_KEY = 'claude-remote-web:pinned-session-ids';
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 type SessionSection = {
   key: string;
   title: string;
   description: string;
-  sessions: SessionInfo[];
-};
-
-type ProjectGroup = {
-  key: string;
-  title: string;
-  path: string;
   sessions: SessionInfo[];
 };
 
@@ -73,59 +69,133 @@ function parentPath(path: string): string {
 }
 
 function countLabel(count: number): string {
-  return `${count} ${count === 1 ? 'session' : 'sessions'}`;
+  return `${count} ${count === 1 ? 'chat' : 'chats'}`;
 }
 
-function buildSessionSections(sessions: SessionInfo[], listMode: SessionListMode): SessionSection[] {
-  if (listMode === 'archived') {
-    return sessions.length
-      ? [{ key: 'archived', title: 'Archived', description: 'Read-only history', sessions }]
-      : [];
+function startOfLocalDay(date: Date): number {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+}
+
+function compareSessionsByUpdatedAt(a: SessionInfo, b: SessionInfo): number {
+  return Date.parse(b.updatedAt) - Date.parse(a.updatedAt);
+}
+
+function bucketForSession(session: SessionInfo, now: Date): Pick<SessionSection, 'key' | 'title' | 'description'> {
+  const updatedAt = new Date(session.updatedAt);
+  const dayDelta = Math.floor((startOfLocalDay(now) - startOfLocalDay(updatedAt)) / DAY_MS);
+
+  if (dayDelta <= 0) {
+    return { key: 'today', title: 'Today', description: 'Picked up today' };
+  }
+  if (dayDelta === 1) {
+    return { key: 'yesterday', title: 'Yesterday', description: 'Recent enough to resume quickly' };
+  }
+  if (dayDelta <= 7) {
+    return { key: 'previous-7-days', title: 'Previous 7 days', description: 'Fresh context from this week' };
+  }
+  return { key: 'older', title: 'Older', description: 'Longer-lived project history' };
+}
+
+function buildSessionSections(sessions: SessionInfo[], listMode: SessionListMode, pinnedSessionIds: Set<string>): SessionSection[] {
+  const now = new Date();
+  const sortedSessions = [...sessions].sort(compareSessionsByUpdatedAt);
+  const sections: SessionSection[] = [];
+  const pinnedSessions = sortedSessions.filter((session) => pinnedSessionIds.has(session.id));
+  const unpinnedSessions = sortedSessions.filter((session) => !pinnedSessionIds.has(session.id));
+
+  if (pinnedSessions.length > 0) {
+    sections.push({
+      key: 'pinned',
+      title: 'Pinned',
+      description: listMode === 'archived' ? 'Saved archived conversations' : 'Favorites and active work',
+      sessions: pinnedSessions
+    });
   }
 
-  const waiting = sessions.filter((session) => getRuntimeStatus(session) === 'waiting');
-  const running = sessions.filter((session) => ['starting', 'running'].includes(getRuntimeStatus(session)));
-  const recent = sessions.filter((session) => {
-    const runtimeStatus = getRuntimeStatus(session);
-    return !['waiting', 'starting', 'running'].includes(runtimeStatus);
-  });
-
-  return [
-    { key: 'waiting', title: 'Waiting', description: 'Ready for your reply', sessions: waiting },
-    { key: 'running', title: 'Running', description: 'Claude is working', sessions: running },
-    { key: 'recent', title: 'Recent stopped', description: 'Ended, stopped, or failed', sessions: recent }
-  ].filter((section) => section.sessions.length > 0);
-}
-
-function groupSessionsByProject(sessions: SessionInfo[]): ProjectGroup[] {
-  const groups: ProjectGroup[] = [];
-  const byPath = new Map<string, ProjectGroup>();
-
-  sessions.forEach((session) => {
-    const path = projectPathForSession(session);
-    const existing = byPath.get(path);
+  const buckets = new Map<string, SessionSection>();
+  unpinnedSessions.forEach((session) => {
+    const bucket = bucketForSession(session, now);
+    const existing = buckets.get(bucket.key);
     if (existing) {
       existing.sessions.push(session);
       return;
     }
-
-    const group = {
-      key: path,
-      title: pathBasename(path),
-      path,
-      sessions: [session]
-    };
-    byPath.set(path, group);
-    groups.push(group);
+    buckets.set(bucket.key, { ...bucket, sessions: [session] });
   });
 
-  return groups;
+  return [...sections, ...buckets.values()];
 }
 
 function toolbarSummary(sessionSearch: string, sessions: SessionInfo[], visibleSessions: SessionInfo[]): string {
   const query = sessionSearch.trim();
   if (!query) return countLabel(sessions.length);
   return `${visibleSessions.length} of ${sessions.length} matches for "${query}"`;
+}
+
+function readPinnedSessionIds(): Set<string> {
+  try {
+    const raw = window.localStorage.getItem(PINNED_SESSION_STORAGE_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((id): id is string => typeof id === 'string'));
+  } catch {
+    return new Set();
+  }
+}
+
+function writePinnedSessionIds(ids: Set<string>) {
+  try {
+    window.localStorage.setItem(PINNED_SESSION_STORAGE_KEY, JSON.stringify([...ids]));
+  } catch {
+    // Pinning is an affordance, not a critical control path.
+  }
+}
+
+function formatRelativeUpdatedAt(value: string): string {
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) return 'Recently updated';
+
+  const diffMs = timestamp - Date.now();
+  const absDiffMs = Math.abs(diffMs);
+  const formatter = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
+
+  if (absDiffMs < 60 * 1000) return 'Updated just now';
+  if (absDiffMs < 60 * 60 * 1000) return `Updated ${formatter.format(Math.round(diffMs / (60 * 1000)), 'minute')}`;
+  if (absDiffMs < DAY_MS) return `Updated ${formatter.format(Math.round(diffMs / (60 * 60 * 1000)), 'hour')}`;
+  if (absDiffMs < 30 * DAY_MS) return `Updated ${formatter.format(Math.round(diffMs / DAY_MS), 'day')}`;
+
+  return `Updated ${new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric' }).format(new Date(timestamp))}`;
+}
+
+function resumeCueForSession(session: SessionInfo, listMode: SessionListMode): string {
+  if (listMode === 'archived' || session.deletedAt) return 'Archived. Unarchive to continue.';
+
+  const runtimeStatus = getRuntimeStatus(session);
+  if (runtimeStatus === 'waiting') return 'Ready for your reply';
+  if (runtimeStatus === 'starting') return 'Starting Claude';
+  if (runtimeStatus === 'running') return 'Claude is working';
+  if (runtimeStatus === 'failed') return session.claudeSessionId ? 'Resume or restart from saved context' : 'Review the failed run';
+  if (session.claudeSessionId) return 'Resume this chat';
+  return 'Continue from this project';
+}
+
+function branchLabel(session: SessionInfo): string | null {
+  if (!session.worktree?.branch) return null;
+  return `Branch: ${session.worktree.branch}`;
+}
+
+function PinIcon({ filled }: { filled: boolean }) {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 16 16" focusable="false">
+      <path
+        d="M5.6 1.5h4.8l-.7 4.1 2.3 2.1v1H8.7l-.5 5.8h-.4l-.5-5.8H4v-1l2.3-2.1-.7-4.1Z"
+        fill={filled ? 'currentColor' : 'none'}
+        stroke="currentColor"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
 }
 
 export default function SessionSidebar({
@@ -152,15 +222,35 @@ export default function SessionSidebar({
   onToggleNewSession,
   onRetryList
 }: Props) {
+  const [pinnedSessionIds, setPinnedSessionIds] = useState(readPinnedSessionIds);
   const searchQuery = sessionSearch.trim();
-  const sections = buildSessionSections(visibleSessions, listMode);
+  const sections = useMemo(
+    () => buildSessionSections(visibleSessions, listMode, pinnedSessionIds),
+    [visibleSessions, listMode, pinnedSessionIds]
+  );
+
+  useEffect(() => {
+    writePinnedSessionIds(pinnedSessionIds);
+  }, [pinnedSessionIds]);
+
+  function onTogglePinned(sessionId: string) {
+    setPinnedSessionIds((current) => {
+      const next = new Set(current);
+      if (next.has(sessionId)) {
+        next.delete(sessionId);
+      } else {
+        next.add(sessionId);
+      }
+      return next;
+    });
+  }
 
   return (
     <aside className="session-sidebar" aria-label="Session navigation">
       <div className="sidebar-header">
         <div>
-          <h1>Claude Remote Web</h1>
-          <p>Remote Claude sessions</p>
+          <h1>Claude</h1>
+          <p>Recent conversations and resumable work</p>
         </div>
         <button type="button" className="primary-action" onClick={onToggleNewSession}>
           New chat
@@ -256,7 +346,7 @@ export default function SessionSidebar({
       <section className="sessions" aria-label={listMode === 'archived' ? 'Archived sessions' : 'Active sessions'}>
         <div className="session-list-toolbar">
           <div>
-            <h2>{searchQuery ? 'Search results' : listMode === 'archived' ? 'Archived sessions' : 'Active sessions'}</h2>
+            <h2>{searchQuery ? 'Search results' : listMode === 'archived' ? 'Archived chats' : 'Recent chats'}</h2>
             <p>{toolbarSummary(sessionSearch, sessions, visibleSessions)}</p>
           </div>
           {sessionSearch && (
@@ -296,7 +386,7 @@ export default function SessionSidebar({
           <div className="session-empty">
             <span className="state-kicker">{listMode === 'archived' ? 'Archive' : 'Start here'}</span>
             <h3>{listMode === 'archived' ? 'No archived sessions.' : 'No chats yet.'}</h3>
-            <p>{listMode === 'archived' ? 'Archived chats will land here when you clean up active work.' : 'Create a chat from a repository path when you are ready.'}</p>
+            <p>{listMode === 'archived' ? 'Archived chats will land here with their project context intact.' : 'Create a chat from a repository path when you are ready.'}</p>
           </div>
         )}
         {!isListLoading && !listError && sessions.length > 0 && visibleSessions.length === 0 && (
@@ -317,39 +407,53 @@ export default function SessionSidebar({
                   </div>
                   <span>{countLabel(section.sessions.length)}</span>
                 </div>
-                {groupSessionsByProject(section.sessions).map((group) => (
-                  <div className="session-project-group" key={group.key} aria-label={`Project ${group.title}`}>
-                    <div className="session-project-heading">
-                      <strong>{group.title}</strong>
-                      <span title={group.path}>{group.path}</span>
-                    </div>
-                    {group.sessions.map((session) => {
-                      const runtimeStatus = getRuntimeStatus(session);
-                      const statusClass = listMode === 'archived' ? 'archived' : runtimeStatus;
-                      const statusLabel = runtimeStatusLabels[runtimeStatus];
-                      return (
+                <div className="session-section-list">
+                  {section.sessions.map((session) => {
+                    const runtimeStatus = getRuntimeStatus(session);
+                    const statusClass = listMode === 'archived' ? 'archived' : runtimeStatus;
+                    const statusLabel = runtimeStatusLabels[runtimeStatus];
+                    const sessionTitle = session.name || pathBasename(projectPathForSession(session));
+                    const projectPath = projectPathForSession(session);
+                    const projectName = pathBasename(projectPath);
+                    const projectParent = parentPath(projectPath);
+                    const isPinned = pinnedSessionIds.has(session.id);
+                    const branch = branchLabel(session);
+
+                    return (
+                      <div className={session.id === activeId ? 'session-row active' : 'session-row'} key={session.id}>
                         <button
-                          key={session.id}
                           className={session.id === activeId ? 'session active' : 'session'}
                           aria-current={session.id === activeId ? 'page' : undefined}
                           onClick={() => onSelectSession(session.id)}
                         >
-                          <span className="session-main-row">
-                            <strong>{session.name || session.cwd}</strong>
+                          <span className="session-title-row">
+                            <strong>{sessionTitle}</strong>
                             <em className={`status status-${statusClass}`}>{statusLabel}</em>
                           </span>
-                          <span className="session-path" title={session.cwd}>{session.cwd}</span>
-                          {session.worktree && (
-                            <span className="session-worktree-row">
-                              <span>Worktree</span>
-                              <span className="session-branch" title={session.worktree.branch}>{session.worktree.branch}</span>
-                            </span>
-                          )}
+                          <span className="session-resume-cue">{resumeCueForSession(session, listMode)}</span>
+                          <span className="session-path-row">
+                            <span className="session-project" title={projectPath}>{projectName}</span>
+                            <span className="session-parent" title={projectPath}>{projectParent}</span>
+                          </span>
+                          <span className="session-detail-row">
+                            {branch && <span className="session-branch" title={branch}>{branch}</span>}
+                            <span>{formatRelativeUpdatedAt(session.updatedAt)}</span>
+                          </span>
                         </button>
-                      );
-                    })}
-                  </div>
-                ))}
+                        <button
+                          type="button"
+                          className={isPinned ? 'session-pin-button pinned' : 'session-pin-button'}
+                          aria-label={`${isPinned ? 'Unpin' : 'Pin'} ${sessionTitle}`}
+                          aria-pressed={isPinned}
+                          title={isPinned ? 'Unpin conversation' : 'Pin conversation'}
+                          onClick={() => onTogglePinned(session.id)}
+                        >
+                          <PinIcon filled={isPinned} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             ))}
           </div>
