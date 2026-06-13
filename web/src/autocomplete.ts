@@ -73,9 +73,11 @@ export function getCommandSuggestions(query: string): ClaudeCommand[] {
 
   const search = normalizedQuery.slice(1).trim();
   if (!search) return CLAUDE_COMMANDS;
+  const compactSearch = search.replace(/[-_\s]/g, '');
   return CLAUDE_COMMANDS.filter((command) => {
     const searchable = `${command.category} ${command.name} ${command.description}`.toLocaleLowerCase();
-    return searchable.includes(search);
+    const compactSearchable = searchable.replace(/[-_\s]/g, '');
+    return searchable.includes(search) || compactSearchable.includes(compactSearch);
   });
 }
 

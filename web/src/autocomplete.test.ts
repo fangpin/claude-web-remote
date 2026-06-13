@@ -27,6 +27,8 @@ describe('autocomplete helpers', () => {
   it('keeps command palette metadata available for empty slash and fuzzy command search', () => {
     expect(getCommandSuggestions('/')).toHaveLength(CLAUDE_COMMANDS.length);
     expect(getCommandSuggestions('/pull request').map((command) => command.name)).toEqual(['/pr-comments']);
+    expect(getCommandSuggestions('/pullrequest').map((command) => command.name)).toEqual(['/pr-comments']);
+    expect(getCommandSuggestions('/github').map((command) => command.name)).toEqual(['/install-github-app']);
     expect(CLAUDE_COMMANDS.every((command) => command.category.length > 0)).toBe(true);
   });
 
