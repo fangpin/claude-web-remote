@@ -42,6 +42,7 @@ const defaultSessions: SessionInfo[] = [
       sourceCwd: '/repo/one',
       worktreeCwd: '/repo/one/.claude/worktrees/abc123',
       branch: 'pin/abc123',
+      baseRef: 'HEAD',
       createdByClaudeRemoteWeb: true
     },
     updatedAt: '2026-06-11T03:00:00Z'
@@ -119,6 +120,7 @@ const defaultEventsBySession: Record<string, UiEvent[]> = {};
 let sessions: SessionInfo[] = defaultSessions;
 let deletedSessions: SessionInfo[] = defaultDeletedSessions;
 let eventsBySession: Record<string, UiEvent[]> = defaultEventsBySession;
+let dirtyWorktreeStatus = false;
 let fetchMock: ReturnType<typeof vi.fn>;
 let scrollIntoViewMock: ReturnType<typeof vi.fn>;
 
@@ -209,6 +211,24 @@ function diagnosticsResponse() {
   });
 }
 
+function worktreeStatusResponse(sessionId: string) {
+  const session = sessions.find((item) => item.id === sessionId);
+  if (!session?.worktree) return jsonResponse({ error: 'session has no worktree' }, 400);
+  const files = dirtyWorktreeStatus
+    ? [{ path: 'web/src/App.tsx', indexStatus: ' ', worktreeStatus: 'M', originalPath: null }]
+    : [];
+  return jsonResponse({
+    sourceCwd: session.worktree.sourceCwd,
+    worktreeCwd: session.worktree.worktreeCwd,
+    branch: session.worktree.branch,
+    baseRef: session.worktree.baseRef ?? null,
+    dirty: dirtyWorktreeStatus,
+    changedFileCount: files.length,
+    files,
+    shortStatus: dirtyWorktreeStatus ? [' M web/src/App.tsx'] : []
+  });
+}
+
 function sessionDiagnosticsResponse(sessionId: string) {
   const session = [...sessions, ...deletedSessions].find((item) => item.id === sessionId) ?? sessions[0];
   return jsonResponse({
@@ -265,6 +285,7 @@ beforeEach(() => {
   sessions = defaultSessions;
   deletedSessions = defaultDeletedSessions;
   eventsBySession = defaultEventsBySession;
+  dirtyWorktreeStatus = false;
   FakeWebSocket.instances = [];
   scrollIntoViewMock = vi.fn();
   Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
@@ -281,6 +302,10 @@ beforeEach(() => {
     const sessionDiagnosticsMatch = url.match(/^\/api\/sessions\/([^/?]+)\/diagnostics$/);
     if (sessionDiagnosticsMatch && !init) {
       return sessionDiagnosticsResponse(sessionDiagnosticsMatch[1]);
+    }
+    const worktreeStatusMatch = url.match(/^\/api\/sessions\/([^/?]+)\/worktree-status$/);
+    if (worktreeStatusMatch && !init) {
+      return worktreeStatusResponse(worktreeStatusMatch[1]);
     }
     if (url === '/api/sessions' && !init) {
       return jsonResponse({ sessions });
@@ -303,6 +328,7 @@ beforeEach(() => {
               sourceCwd: body.cwd,
               worktreeCwd: `${body.cwd}/.claude/worktrees/def456`,
               branch: 'pin/def456',
+              baseRef: 'HEAD',
               createdByClaudeRemoteWeb: true
             }
           : null,
@@ -1365,15 +1391,18 @@ describe('App', () => {
     expect(screen.getByRole('heading', { name: 'Newest Repo' })).toBeInTheDocument();
   });
 
-  it('renders worktree metadata and stop/remove actions', async () => {
+  it('renders worktree metadata, clean status, and stop/remove actions', async () => {
     render(<App />);
 
     fireEvent.click(await screen.findByText('Worktree Repo'));
 
     const activeHeaderBeforeStop = screen.getByRole('heading', { name: 'Worktree Repo' }).closest('header');
     expect(activeHeaderBeforeStop).not.toBeNull();
+    expect(within(activeHeaderBeforeStop as HTMLElement).getByText('Worktree: /repo/one/.claude/worktrees/abc123')).toBeInTheDocument();
     expect(within(activeHeaderBeforeStop as HTMLElement).getByText('Source: /repo/one')).toBeInTheDocument();
     expect(within(activeHeaderBeforeStop as HTMLElement).getByText('Branch: pin/abc123')).toBeInTheDocument();
+    expect(await screen.findByText('Clean')).toBeInTheDocument();
+    expect(screen.getByText('Base: HEAD')).toBeInTheDocument();
     fireEvent.click(screen.getByText('Stop and remove worktree'));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s4/stop-and-remove-worktree', expect.objectContaining({ method: 'POST' })));
@@ -1381,6 +1410,29 @@ describe('App', () => {
     const activeHeader = screen.getByRole('heading', { name: 'Worktree Repo' }).closest('header');
     expect(activeHeader).not.toBeNull();
     expect(within(activeHeader as HTMLElement).getByText('/repo/one')).toBeInTheDocument();
+  });
+
+  it('shows dirty worktree files and blocks destructive cleanup by default', async () => {
+    dirtyWorktreeStatus = true;
+    render(<App />);
+
+    fireEvent.click(await screen.findByText('Worktree Repo'));
+
+    expect(await screen.findByText('1 changed file')).toBeInTheDocument();
+    expect(screen.getByText('web/src/App.tsx')).toBeInTheDocument();
+    expect(screen.getByText(/cleanup is blocked until you commit, stash, or clean/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Review dirty worktree first' })).toBeDisabled();
+    expect(screen.getByText('Stop only')).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/sessions/s4/stop-and-remove-worktree')).toBe(false);
+  });
+
+  it('does not fetch worktree status for non-worktree sessions', async () => {
+    render(<App />);
+
+    await screen.findByRole('heading', { name: 'Repo One' });
+
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/worktree-status'))).toBe(false);
+    expect(screen.queryByLabelText('Worktree status')).not.toBeInTheDocument();
   });
 
   it('hides remove action for worktrees not created by this app', async () => {

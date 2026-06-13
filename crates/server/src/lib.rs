@@ -23,4 +23,4 @@ pub use store::{EventStore, SessionListFilter, SessionMeta, SessionStatus};
 pub use task::{
     TaskGroups, TaskInfo, TaskStatus, group_tasks, has_unfinished_tool_use, project_session_tasks,
 };
-pub use worktree::{WorktreeManager, WorktreeMeta};
+pub use worktree::{WorktreeFileStatus, WorktreeManager, WorktreeMeta, WorktreeStatus};

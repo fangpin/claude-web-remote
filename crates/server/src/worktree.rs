@@ -13,7 +13,31 @@ pub struct WorktreeMeta {
     pub source_cwd: PathBuf,
     pub worktree_cwd: PathBuf,
     pub branch: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_ref: Option<String>,
     pub created_by_claude_remote_web: bool,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeStatus {
+    pub source_cwd: PathBuf,
+    pub worktree_cwd: PathBuf,
+    pub branch: String,
+    pub base_ref: Option<String>,
+    pub dirty: bool,
+    pub changed_file_count: usize,
+    pub files: Vec<WorktreeFileStatus>,
+    pub short_status: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeFileStatus {
+    pub path: String,
+    pub index_status: String,
+    pub worktree_status: String,
+    pub original_path: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -52,7 +76,42 @@ impl WorktreeManager {
             source_cwd: source_repo,
             worktree_cwd,
             branch,
+            base_ref: Some(base_ref),
             created_by_claude_remote_web: true,
+        })
+    }
+
+    pub async fn status(&self, meta: &WorktreeMeta) -> AppResult<WorktreeStatus> {
+        let short_status = run_git(
+            &meta.worktree_cwd,
+            ["status", "--short", "--untracked-files=all"],
+        )
+        .await?;
+        let branch = run_git(&meta.worktree_cwd, ["branch", "--show-current"])
+            .await
+            .ok()
+            .filter(|branch| !branch.is_empty())
+            .unwrap_or_else(|| meta.branch.clone());
+        let short_status: Vec<String> = short_status
+            .lines()
+            .map(str::trim_end)
+            .filter(|line| !line.is_empty())
+            .map(ToOwned::to_owned)
+            .collect();
+        let files = short_status
+            .iter()
+            .map(|line| parse_short_status_line(line))
+            .collect();
+
+        Ok(WorktreeStatus {
+            source_cwd: meta.source_cwd.clone(),
+            worktree_cwd: meta.worktree_cwd.clone(),
+            branch,
+            base_ref: meta.base_ref.clone(),
+            dirty: !short_status.is_empty(),
+            changed_file_count: short_status.len(),
+            files,
+            short_status,
         })
     }
 
@@ -134,6 +193,32 @@ async fn has_commit_ref(source_cwd: &Path, remote_ref: &str) -> AppResult<bool> 
         .output()
         .await?;
     Ok(output.status.success())
+}
+
+fn parse_short_status_line(line: &str) -> WorktreeFileStatus {
+    let bytes = line.as_bytes();
+    let index_status = bytes.first().copied().map(char::from).unwrap_or(' ');
+    let (worktree_status, path_start) = if bytes.get(2) == Some(&b' ') {
+        (bytes.get(1).copied().map(char::from).unwrap_or(' '), 3)
+    } else {
+        (' ', 2)
+    };
+    let path = line
+        .get(path_start..)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let (original_path, path) = path
+        .split_once(" -> ")
+        .map(|(original, renamed)| (Some(original.to_string()), renamed.to_string()))
+        .unwrap_or((None, path));
+
+    WorktreeFileStatus {
+        path,
+        index_status: index_status.to_string(),
+        worktree_status: worktree_status.to_string(),
+        original_path,
+    }
 }
 
 fn missing_remote_ref_error(remote_ref: &str) -> AppError {
@@ -280,7 +365,7 @@ mod tests {
 
         let err = manager.create(temp.path()).await.unwrap_err();
 
-        assert!(err.to_string().contains("not a git repository"));
+        assert!(matches!(err, AppError::InvalidRequest(_)));
     }
 
     #[tokio::test]
@@ -377,6 +462,68 @@ mod tests {
                 .starts_with(expected_repo.join(".claude/worktrees"))
         );
         assert!(meta.worktree_cwd.exists());
+    }
+
+    #[tokio::test]
+    async fn reports_clean_worktree_status() {
+        let temp = tempfile::tempdir().unwrap();
+        let repo = temp.path().join("repo");
+        init_repo(&repo).await;
+        let manager = WorktreeManager::new(WorktreeConfig {
+            worktrees_dir: None,
+            branch_prefix: "pin".to_string(),
+            base_ref: WorktreeBaseRef::Head,
+        });
+        let meta = manager.create(&repo).await.unwrap();
+
+        let status = manager.status(&meta).await.unwrap();
+
+        assert_eq!(status.source_cwd, meta.source_cwd);
+        assert_eq!(status.worktree_cwd, meta.worktree_cwd);
+        assert_eq!(status.branch, meta.branch);
+        assert_eq!(status.base_ref, Some("HEAD".to_string()));
+        assert!(!status.dirty);
+        assert_eq!(status.changed_file_count, 0);
+        assert!(status.files.is_empty());
+        assert!(status.short_status.is_empty());
+    }
+
+    #[tokio::test]
+    async fn reports_dirty_worktree_status_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let repo = temp.path().join("repo");
+        init_repo(&repo).await;
+        let manager = WorktreeManager::new(WorktreeConfig {
+            worktrees_dir: None,
+            branch_prefix: "pin".to_string(),
+            base_ref: WorktreeBaseRef::Head,
+        });
+        let meta = manager.create(&repo).await.unwrap();
+        fs::write(meta.worktree_cwd.join("README.md"), "changed\n").unwrap();
+        fs::write(meta.worktree_cwd.join("new.txt"), "new\n").unwrap();
+
+        let status = manager.status(&meta).await.unwrap();
+
+        assert!(status.dirty);
+        assert_eq!(status.changed_file_count, 2);
+        assert!(
+            status
+                .short_status
+                .iter()
+                .any(|line| line.ends_with("README.md"))
+        );
+        assert!(
+            status
+                .short_status
+                .iter()
+                .any(|line| line.ends_with("new.txt"))
+        );
+        assert!(status.files.iter().any(|file| {
+            file.path == "README.md" && (file.index_status == "M" || file.worktree_status == "M")
+        }));
+        assert!(status.files.iter().any(|file| {
+            file.path == "new.txt" && file.index_status == "?" && file.worktree_status == "?"
+        }));
     }
 
     #[tokio::test]

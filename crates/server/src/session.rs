@@ -1,8 +1,8 @@
 use crate::{
     AppError, AppResult, ClaudeProcess, ClaudeProcessConfig, EventKind, EventStore, ProcessEvent,
     SessionMeta, SessionStatus, TaskGroups, UiEvent, WorktreeConfig, WorktreeManager, WorktreeMeta,
-    extract_claude_session_id, group_tasks, has_unfinished_tool_use, project_session_tasks,
-    store::SessionListFilter,
+    WorktreeStatus, extract_claude_session_id, group_tasks, has_unfinished_tool_use,
+    project_session_tasks, store::SessionListFilter,
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -263,8 +263,16 @@ impl SessionManager {
         self.update_status(session_id, SessionStatus::Stopped).await
     }
 
+    pub async fn worktree_status(&self, session_id: Uuid) -> AppResult<WorktreeStatus> {
+        let meta = self.load_active_meta(session_id).await?;
+        let worktree = meta
+            .worktree
+            .as_ref()
+            .ok_or_else(|| AppError::InvalidRequest("session has no worktree".to_string()))?;
+        self.worktree_manager.status(worktree).await
+    }
+
     pub async fn stop_and_remove_worktree(&self, session_id: Uuid) -> AppResult<()> {
-        self.stop_session(session_id).await?;
         let meta = self.load_active_meta(session_id).await?;
         let worktree = meta.worktree.clone().ok_or_else(|| {
             AppError::InvalidRequest("session has no app-created worktree".to_string())
@@ -274,6 +282,21 @@ impl SessionManager {
                 "session has no app-created worktree".to_string(),
             ));
         }
+        let status = self.worktree_manager.status(&worktree).await?;
+        if status.dirty {
+            return Err(AppError::InvalidRequest(format!(
+                "worktree has {} uncommitted {}; stop only or clean/stash changes before removing",
+                status.changed_file_count,
+                if status.changed_file_count == 1 {
+                    "change"
+                } else {
+                    "changes"
+                }
+            )));
+        }
+        self.stop_running_process(session_id).await?;
+        self.update_status(session_id, SessionStatus::Stopped)
+            .await?;
         self.worktree_manager.remove(&worktree).await?;
         self.store
             .update_meta(session_id, |meta| {
@@ -1200,6 +1223,66 @@ done
         assert_eq!(created.cwd, worktree.worktree_cwd);
         assert!(created.cwd.exists());
         assert!(worktree.branch.starts_with("pin/"));
+        assert_eq!(worktree.base_ref, Some("HEAD".to_string()));
+    }
+
+    #[tokio::test]
+    async fn reports_worktree_status_for_worktree_sessions() {
+        let temp = tempfile::tempdir().unwrap();
+        let repo = temp.path().join("repo");
+        init_repo(&repo).await;
+        let bin = fake_claude(temp.path());
+        let store = EventStore::new(temp.path().join("data")).await.unwrap();
+        let manager = SessionManager::new(
+            store,
+            vec![bin.to_string_lossy().to_string()],
+            "acceptEdits".to_string(),
+            worktree_config(),
+        );
+        let created = manager
+            .create_session(CreateSessionRequest {
+                cwd: repo,
+                name: None,
+                permission_mode: None,
+                worktree: Some(WorktreeRequest { enabled: true }),
+            })
+            .await
+            .unwrap();
+        let worktree_path = created.worktree.as_ref().unwrap().worktree_cwd.clone();
+        fs::write(worktree_path.join("notes.txt"), "draft\n").unwrap();
+
+        let status = manager.worktree_status(created.id).await.unwrap();
+
+        assert!(status.dirty);
+        assert_eq!(status.changed_file_count, 1);
+        assert_eq!(status.files[0].path, "notes.txt");
+        assert_eq!(status.branch, created.worktree.unwrap().branch);
+    }
+
+    #[tokio::test]
+    async fn worktree_status_rejects_non_worktree_sessions() {
+        let temp = tempfile::tempdir().unwrap();
+        let bin = fake_claude(temp.path());
+        let store = EventStore::new(temp.path().join("data")).await.unwrap();
+        let manager = SessionManager::new(
+            store,
+            vec![bin.to_string_lossy().to_string()],
+            "acceptEdits".to_string(),
+            worktree_config(),
+        );
+        let created = manager
+            .create_session(CreateSessionRequest {
+                cwd: temp.path().to_path_buf(),
+                name: None,
+                permission_mode: None,
+                worktree: None,
+            })
+            .await
+            .unwrap();
+
+        let err = manager.worktree_status(created.id).await.unwrap_err();
+
+        assert!(err.to_string().contains("session has no worktree"));
     }
 
     #[tokio::test]
@@ -1311,6 +1394,44 @@ done
         assert_eq!(loaded.status, SessionStatus::Stopped);
         assert_eq!(loaded.cwd, repo.canonicalize().unwrap());
         assert_eq!(loaded.worktree, None);
+    }
+
+    #[tokio::test]
+    async fn stop_and_remove_rejects_dirty_worktree_without_stopping() {
+        let temp = tempfile::tempdir().unwrap();
+        let repo = temp.path().join("repo");
+        init_repo(&repo).await;
+        let bin = fake_claude(temp.path());
+        let store = EventStore::new(temp.path().join("data")).await.unwrap();
+        let manager = SessionManager::new(
+            store.clone(),
+            vec![bin.to_string_lossy().to_string()],
+            "acceptEdits".to_string(),
+            worktree_config(),
+        );
+        let session = manager
+            .create_session(CreateSessionRequest {
+                cwd: repo,
+                name: None,
+                permission_mode: None,
+                worktree: Some(WorktreeRequest { enabled: true }),
+            })
+            .await
+            .unwrap();
+        let worktree_path = session.worktree.as_ref().unwrap().worktree_cwd.clone();
+        fs::write(worktree_path.join("notes.txt"), "draft\n").unwrap();
+
+        let err = manager
+            .stop_and_remove_worktree(session.id)
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("uncommitted"));
+        assert!(worktree_path.exists());
+        let loaded = store.load_meta(session.id).await.unwrap();
+        assert_eq!(loaded.status, SessionStatus::Running);
+        assert!(loaded.worktree.is_some());
+        manager.stop_session(session.id).await.unwrap();
     }
 
     #[tokio::test]

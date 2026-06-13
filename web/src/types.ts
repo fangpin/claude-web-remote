@@ -5,7 +5,26 @@ export type WorktreeInfo = {
   sourceCwd: string;
   worktreeCwd: string;
   branch: string;
+  baseRef?: string | null;
   createdByClaudeRemoteWeb: boolean;
+};
+
+export type WorktreeFileStatus = {
+  path: string;
+  indexStatus: string;
+  worktreeStatus: string;
+  originalPath?: string | null;
+};
+
+export type WorktreeStatus = {
+  sourceCwd: string;
+  worktreeCwd: string;
+  branch: string;
+  baseRef?: string | null;
+  dirty: boolean;
+  changedFileCount: number;
+  files: WorktreeFileStatus[];
+  shortStatus: string[];
 };
 
 export type SessionInfo = {
