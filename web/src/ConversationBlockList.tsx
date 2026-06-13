@@ -1,6 +1,7 @@
 import RawEventDetails from './RawEventDetails';
 import type { ConversationBlock, ErrorBlock, MessageBlock, RawBlock, TaskBlock, ToolBlock } from './conversationBlocks';
 import { createElement, type ReactNode } from 'react';
+import './ConversationBlockList.css';
 
 type HeadingLevel = 1 | 2 | 3 | 4 | 5 | 6;
 
@@ -167,9 +168,53 @@ function MessageBlockView({ block }: { block: MessageBlock }) {
   );
 }
 
+function stripCodeFence(text: string): string {
+  const match = /^```[A-Za-z0-9_-]*\s*\n([\s\S]*?)\n```\s*$/.exec(text.trim());
+  return match ? match[1] : text;
+}
+
+function pathLines(text: string): string[] {
+  return text
+    .trim()
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function ToolResultContent({ block }: { block: ToolBlock }) {
+  if (block.resultKind === 'paths') {
+    return (
+      <ul className="tool-path-list">
+        {pathLines(block.resultSummary).map((path, index) => (
+          <li key={`${path}-${index}`}>
+            <code>{path}</code>
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
+  const code = block.resultKind === 'code' ? stripCodeFence(block.resultSummary) : block.resultSummary;
+  const languageClass = block.resultLanguage ? `language-${block.resultLanguage}` : undefined;
+
+  return (
+    <pre className={`tool-result-pre ${block.resultKind}`}>
+      <code className={languageClass}>{code}</code>
+    </pre>
+  );
+}
+
+function toolResultTitle(block: ToolBlock): string {
+  if (block.status === 'failed') return 'Failure';
+  if (block.resultKind === 'diff') return 'Diff';
+  if (block.resultKind === 'code') return block.resultLanguage ? `Code · ${block.resultLanguage}` : 'Code';
+  if (block.resultKind === 'paths') return 'Paths';
+  return 'Result';
+}
+
 function ToolBlockView({ block }: { block: ToolBlock }) {
   return (
-    <article id={blockElementId(block)} className={`conversation-block tool-block ${block.status}`}>
+    <article id={blockElementId(block)} className={`conversation-block tool-block ${block.status} result-${block.resultKind}`}>
       <header className="block-header tool-activity-header">
         <span className="tool-name">{block.name}</span>
         <span className="tool-status">{block.status}</span>
@@ -180,14 +225,14 @@ function ToolBlockView({ block }: { block: ToolBlock }) {
       </div>
       {block.resultSummary.trim() && block.resultDisplay === 'visible' && (
         <section className="block-section tool-result visible-result">
-          <h4>{block.status === 'failed' ? 'Failure' : 'Result'}</h4>
-          <pre>{block.resultSummary}</pre>
+          <h4>{toolResultTitle(block)}</h4>
+          <ToolResultContent block={block} />
         </section>
       )}
       {block.resultSummary.trim() && block.resultDisplay === 'collapsed' && (
         <details className="block-section tool-result collapsed-result">
           <summary>{block.resultLabel}</summary>
-          <pre>{block.resultSummary}</pre>
+          <ToolResultContent block={block} />
         </details>
       )}
       <RawEventDetails rawEvents={block.rawEvents} />

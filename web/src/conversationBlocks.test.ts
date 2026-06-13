@@ -116,6 +116,7 @@ describe('buildConversationBlocks', () => {
         status: 'completed',
         inputSummary: '$ git status',
         resultSummary: 'clean',
+        resultKind: 'text',
         resultDisplay: 'collapsed',
         resultLabel: 'Result collapsed (5 chars)',
         eventIds: [1, 2],
@@ -140,6 +141,7 @@ describe('buildConversationBlocks', () => {
       status: 'completed',
       inputSummary: '$ npm test',
       resultSummary: 'large stdout',
+      resultKind: 'text',
       resultDisplay: 'collapsed',
       resultLabel: 'Result collapsed (12 chars)'
     });
@@ -238,6 +240,7 @@ describe('buildConversationBlocks', () => {
         status: 'running',
         inputSummary: '/tmp/example.txt',
         resultSummary: '',
+        resultKind: 'text',
         resultDisplay: 'visible',
         resultLabel: 'Waiting for result',
         eventIds: [1],
@@ -261,10 +264,39 @@ describe('buildConversationBlocks', () => {
       status: 'failed',
       inputSummary: '/tmp/missing.txt',
       resultSummary: 'Error: file not found',
+      resultKind: 'text',
       resultDisplay: 'visible',
       resultLabel: 'Failed result shown (21 chars)',
       eventIds: [1, 2]
     });
+  });
+
+  it('classifies tool result semantics for diff, code, and path output', () => {
+    const blocks = buildConversationBlocks([
+      event(1, 'tool', { type: 'tool_use', id: 'toolu_diff', name: 'Bash', input: { command: 'git diff' } }),
+      event(2, 'tool', {
+        type: 'tool_result',
+        tool_use_id: 'toolu_diff',
+        content: 'diff --git a/web/src/App.tsx b/web/src/App.tsx\n@@ -1 +1 @@\n-old\n+new'
+      }),
+      event(3, 'tool', { type: 'tool_use', id: 'toolu_read', name: 'Read', input: { file_path: '/repo/web/src/App.tsx' } }),
+      event(4, 'tool', { type: 'tool_result', tool_use_id: 'toolu_read', is_error: true, content: 'const value: string = "ok";' }),
+      event(5, 'tool', { type: 'tool_use', id: 'toolu_list', name: 'Bash', input: { command: 'rg --files web/src' } }),
+      event(6, 'tool', { type: 'tool_result', tool_use_id: 'toolu_list', content: 'web/src/App.tsx\nweb/src/ConversationBlockList.tsx' })
+    ]);
+
+    expect(blocks).toMatchObject([
+      { id: 'tool-toolu_diff', type: 'tool', resultKind: 'diff', resultLanguage: 'diff', resultDisplay: 'collapsed' },
+      {
+        id: 'tool-toolu_read',
+        type: 'tool',
+        status: 'failed',
+        resultKind: 'code',
+        resultLanguage: 'tsx',
+        resultDisplay: 'visible'
+      },
+      { id: 'tool-toolu_list', type: 'tool', resultKind: 'paths', resultDisplay: 'collapsed' }
+    ]);
   });
 
   it('uses structured result fields for failure status without matching successful error text', () => {
