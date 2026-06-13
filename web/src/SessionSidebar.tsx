@@ -373,8 +373,8 @@ export default function SessionSidebar({
         {!isListLoading && listError && (
           <div className="session-empty session-empty-error">
             <span className="state-kicker">Connection issue</span>
-            <h3>Could not load sessions.</h3>
-            <p>The daemon did not return the session list. You can retry without losing anything.</p>
+            <h3>Could not load chats.</h3>
+            <p>The daemon did not return the chat list. You can retry without losing anything.</p>
             <details>
               <summary>Details</summary>
               <pre>{listError}</pre>
@@ -385,7 +385,7 @@ export default function SessionSidebar({
         {!isListLoading && !listError && sessions.length === 0 && (
           <div className="session-empty">
             <span className="state-kicker">{listMode === 'archived' ? 'Archive' : 'Start here'}</span>
-            <h3>{listMode === 'archived' ? 'No archived sessions.' : 'No chats yet.'}</h3>
+            <h3>{listMode === 'archived' ? 'No archived chats.' : 'No chats yet.'}</h3>
             <p>{listMode === 'archived' ? 'Archived chats will land here with their project context intact.' : 'Create a chat from a repository path when you are ready.'}</p>
           </div>
         )}
