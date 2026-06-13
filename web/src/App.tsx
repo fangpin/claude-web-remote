@@ -47,7 +47,6 @@ export default function App() {
   const [inspectorTab, setInspectorTab] = useState<'session' | 'global' | 'details'>('session');
   const [events, setEvents] = useState<Record<string, UiEvent[]>>({});
   const [cwd, setCwd] = useState('');
-  const [name, setName] = useState('');
   const [permissionMode, setPermissionMode] = useState('bypassPermissions');
   const [useWorktree, setUseWorktree] = useState(false);
   const [message, setMessage] = useState('');
@@ -269,7 +268,6 @@ export default function App() {
     try {
       const created = await createSession({
         cwd,
-        name: name.trim() || undefined,
         permissionMode,
         worktree: useWorktree ? { enabled: true } : undefined
       });
@@ -282,7 +280,6 @@ export default function App() {
       }
       setActiveId(created.id);
       setCwd('');
-      setName('');
       setUseWorktree(false);
       setIsNewSessionOpen(false);
       void refreshTasks();
@@ -300,7 +297,10 @@ export default function App() {
     setMessage('');
     closeAutocomplete();
     try {
-      await sendInput(activeId, text);
+      const updatedSession = await sendInput(activeId, text);
+      if (updatedSession) {
+        setSessions((current) => current.map((session) => session.id === updatedSession.id ? updatedSession : session));
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
       setMessage(text);
@@ -616,10 +616,6 @@ export default function App() {
               <label className="checkbox-label">
                 <input type="checkbox" checked={useWorktree} onChange={(event) => setUseWorktree(event.target.checked)} />
                 Use git worktree
-              </label>
-              <label>
-                Name
-                <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Optional" />
               </label>
               <label>
                 Permission mode

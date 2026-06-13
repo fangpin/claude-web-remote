@@ -55,11 +55,12 @@ export async function updateConfig(input: ConfigValues): Promise<ManagedConfig> 
   });
 }
 
-export async function sendInput(sessionId: string, text: string): Promise<void> {
-  await request<{ ok: true }>(`/api/sessions/${sessionId}/input`, {
+export async function sendInput(sessionId: string, text: string): Promise<SessionInfo | null> {
+  const result = await request<{ ok: true; session?: SessionInfo }>(`/api/sessions/${sessionId}/input`, {
     method: 'POST',
     body: JSON.stringify({ text })
   });
+  return result.session ?? null;
 }
 
 export async function stopSession(sessionId: string): Promise<void> {
