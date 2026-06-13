@@ -1,4 +1,4 @@
-import { toolPresentation } from './presentationPolicy';
+import { toolPresentation, toolResultSemantics, type ToolResultKind } from './presentationPolicy';
 import type { EventKind, UiEvent } from './types';
 
 type ObjectPayload = Record<string, unknown>;
@@ -21,6 +21,8 @@ export type ToolBlock = {
   status: 'running' | 'completed' | 'failed';
   inputSummary: string;
   resultSummary: string;
+  resultKind: ToolResultKind;
+  resultLanguage?: string;
   resultDisplay: 'hidden' | 'collapsed' | 'visible';
   resultLabel: string;
   eventIds: number[];
@@ -535,6 +537,7 @@ function makeToolBlock(toolUse: UiEvent, usePayload: ObjectPayload, resultEvent?
 
   const status: ToolBlock['status'] = resultEvent ? (hasFailedResult(resultPayload, result) ? 'failed' : 'completed') : 'running';
   const resultDisplay = toolResultDisplay(name, status, result);
+  const resultSemantics = toolResultSemantics(name, result, inputSummary);
 
   return {
     id: `tool-${id}`,
@@ -543,6 +546,8 @@ function makeToolBlock(toolUse: UiEvent, usePayload: ObjectPayload, resultEvent?
     status,
     inputSummary,
     resultSummary: displayResultSummary(name, status, result, resultDisplay),
+    resultKind: resultSemantics.kind,
+    ...(resultSemantics.language ? { resultLanguage: resultSemantics.language } : {}),
     resultDisplay,
     resultLabel: toolResultLabel(name, status, result, resultDisplay),
     eventIds: events.map((event) => event.id),
@@ -555,6 +560,7 @@ function makeStandaloneToolResult(event: UiEvent, payload: ObjectPayload): ToolB
   const result = resultSummary(payload);
   const status: ToolBlock['status'] = hasFailedResult(payload, result) ? 'failed' : 'completed';
   const resultDisplay = toolResultDisplay(name, status, result);
+  const resultSemantics = toolResultSemantics(name, result);
   return {
     id: `tool-result-${event.id}`,
     type: 'tool',
@@ -562,6 +568,8 @@ function makeStandaloneToolResult(event: UiEvent, payload: ObjectPayload): ToolB
     status,
     inputSummary: '',
     resultSummary: displayResultSummary(name, status, result, resultDisplay),
+    resultKind: resultSemantics.kind,
+    ...(resultSemantics.language ? { resultLanguage: resultSemantics.language } : {}),
     resultDisplay,
     resultLabel: toolResultLabel(name, status, result, resultDisplay),
     eventIds: [event.id],

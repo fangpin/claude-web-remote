@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { shouldProjectTaskTool, toolPresentation } from './presentationPolicy';
+import { shouldProjectTaskTool, toolPresentation, toolResultSemantics } from './presentationPolicy';
 
 describe('presentationPolicy', () => {
   it('hides completed read-only inspection tools', () => {
@@ -49,5 +49,18 @@ describe('presentationPolicy', () => {
     expect(shouldProjectTaskTool('Edit')).toBe(true);
     expect(shouldProjectTaskTool('Agent')).toBe(true);
     expect(shouldProjectTaskTool('UnknownNonInspectionTool')).toBe(true);
+  });
+
+  it('classifies result semantics without changing visibility policy', () => {
+    expect(toolResultSemantics('Bash', 'diff --git a/a.ts b/a.ts\n@@ -1 +1 @@\n-old\n+new')).toEqual({
+      kind: 'diff',
+      language: 'diff'
+    });
+    expect(toolResultSemantics('Read', 'const value: string = "ok";', '/repo/web/src/App.tsx')).toEqual({
+      kind: 'code',
+      language: 'tsx'
+    });
+    expect(toolResultSemantics('Bash', 'web/src/App.tsx\nweb/src/main.tsx')).toEqual({ kind: 'paths' });
+    expect(toolResultSemantics('Read', 'Error: missing file', '/repo/web/src/App.tsx')).toEqual({ kind: 'text' });
   });
 });

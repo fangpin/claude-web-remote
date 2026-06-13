@@ -80,6 +80,7 @@ describe('ConversationBlockList', () => {
         status: 'completed',
         inputSummary: '$ git status',
         resultSummary: 'On branch main',
+        resultKind: 'text',
         resultDisplay: 'visible',
         resultLabel: 'Result shown (14 chars)',
         eventIds: [2, 3],
@@ -108,6 +109,7 @@ describe('ConversationBlockList', () => {
         status: 'completed',
         inputSummary: '/tmp/a.txt',
         resultSummary: 'Read output hidden (20 chars)',
+        resultKind: 'text',
         resultDisplay: 'hidden',
         resultLabel: 'Read output hidden (20 chars)',
         eventIds: [10, 11],
@@ -135,6 +137,7 @@ describe('ConversationBlockList', () => {
         status: 'completed',
         inputSummary: '$ npm test',
         resultSummary: 'long stdout',
+        resultKind: 'text',
         resultDisplay: 'collapsed',
         resultLabel: 'Result collapsed (11 chars)',
         eventIds: [12, 13],
@@ -150,6 +153,88 @@ describe('ConversationBlockList', () => {
     expect(details).not.toBeNull();
     expect(details).not.toHaveAttribute('open');
     expect(details).toHaveTextContent('long stdout');
+  });
+
+  it('renders failed tool output as an expanded failure panel', () => {
+    const blocks: ConversationBlock[] = [
+      {
+        id: 'tool-fail',
+        type: 'tool',
+        name: 'Bash',
+        status: 'failed',
+        inputSummary: '$ npm test',
+        resultSummary: 'Command failed with exit code 1',
+        resultKind: 'text',
+        resultDisplay: 'visible',
+        resultLabel: 'Failed result shown (31 chars)',
+        eventIds: [14, 15],
+        rawEvents: [rawEvent(14, { name: 'Bash' }), rawEvent(15, { content: 'Command failed with exit code 1' })]
+      }
+    ];
+
+    render(<ConversationBlockList blocks={blocks} />);
+
+    const article = screen.getByRole('article');
+    expect(article).toHaveClass('tool-block', 'failed', 'result-text');
+    expect(within(article).getByText('Failure').closest('section')).toHaveClass('visible-result');
+    expect(within(article).getByText('Command failed with exit code 1').closest('pre')).toHaveClass('tool-result-pre', 'text');
+  });
+
+  it('renders diff, code, and path tool results with semantic containers', () => {
+    const blocks: ConversationBlock[] = [
+      {
+        id: 'tool-diff',
+        type: 'tool',
+        name: 'Bash',
+        status: 'completed',
+        inputSummary: '$ git diff',
+        resultSummary: 'diff --git a/a.ts b/a.ts\n@@ -1 +1 @@\n-old\n+new',
+        resultKind: 'diff',
+        resultLanguage: 'diff',
+        resultDisplay: 'visible',
+        resultLabel: 'Result shown (51 chars)',
+        eventIds: [16],
+        rawEvents: [rawEvent(16, { content: 'diff' })]
+      },
+      {
+        id: 'tool-code',
+        type: 'tool',
+        name: 'Read',
+        status: 'failed',
+        inputSummary: '/repo/web/src/App.tsx',
+        resultSummary: '```tsx\nconst answer = 42;\n```',
+        resultKind: 'code',
+        resultLanguage: 'tsx',
+        resultDisplay: 'visible',
+        resultLabel: 'Failed result shown (28 chars)',
+        eventIds: [17],
+        rawEvents: [rawEvent(17, { content: 'code' })]
+      },
+      {
+        id: 'tool-paths',
+        type: 'tool',
+        name: 'Bash',
+        status: 'completed',
+        inputSummary: '$ rg --files',
+        resultSummary: 'web/src/App.tsx\nweb/src/ConversationBlockList.tsx',
+        resultKind: 'paths',
+        resultDisplay: 'visible',
+        resultLabel: 'Result shown (49 chars)',
+        eventIds: [18],
+        rawEvents: [rawEvent(18, { content: 'paths' })]
+      }
+    ];
+
+    render(<ConversationBlockList blocks={blocks} />);
+
+    const articles = screen.getAllByRole('article');
+    expect(within(articles[0]).getByText('Diff')).toBeInTheDocument();
+    expect(within(articles[0]).getByText(/diff --git/).closest('pre')).toHaveClass('tool-result-pre', 'diff');
+    expect(within(articles[1]).getByText('Failure')).toBeInTheDocument();
+    expect(within(articles[1]).getByText('const answer = 42;')).toHaveProperty('tagName', 'CODE');
+    expect(within(articles[1]).getByText('const answer = 42;').closest('pre')).toHaveClass('tool-result-pre', 'code');
+    expect(within(articles[2]).getByText('Paths')).toBeInTheDocument();
+    expect(within(articles[2]).getByText('web/src/App.tsx').closest('ul')).toHaveClass('tool-path-list');
   });
 
   it('renders task activity with output path when present', () => {
@@ -213,6 +298,7 @@ describe('ConversationBlockList', () => {
         status: 'running',
         inputSummary: 'file_path: /tmp/a.txt',
         resultSummary: '',
+        resultKind: 'text',
         resultDisplay: 'visible',
         resultLabel: 'Waiting for result',
         eventIds: [3],
@@ -299,6 +385,7 @@ describe('ConversationBlockList', () => {
         status: 'running',
         inputSummary: 'file_path: /tmp/example.txt',
         resultSummary: '',
+        resultKind: 'text',
         resultDisplay: 'visible',
         resultLabel: 'Waiting for result',
         eventIds: [8],
