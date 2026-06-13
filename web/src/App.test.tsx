@@ -326,6 +326,10 @@ describe('App', () => {
 
     expect((await screen.findAllByText('Repo One')).length).toBeGreaterThan(0);
     expect(screen.getAllByText('/repo/one').length).toBeGreaterThan(0);
+    expect(screen.getByRole('heading', { name: 'Waiting' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Running' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Recent stopped' })).toBeInTheDocument();
+    expect(screen.getByText('Ready for your reply')).toBeInTheDocument();
     expectSessionStatus('Repo One', 'Waiting for you');
     expectSessionStatus('Worktree Repo', 'Running');
     expectSessionStatus('Stopped Repo', 'Ended');
@@ -358,13 +362,13 @@ describe('App', () => {
     expect(sessionButton('Worktree Repo')).toBeInTheDocument();
     expect(querySessionButton('Repo One')).toBeNull();
     expect(querySessionButton('Stopped Repo')).toBeNull();
-    expect(screen.getByText('1 of 4 shown')).toBeInTheDocument();
+    expect(screen.getByText('1 of 4 matches for "pin/abc123"')).toBeInTheDocument();
 
     fireEvent.change(search, { target: { value: 'ended' } });
 
     expect(sessionButton('Stopped Repo')).toBeInTheDocument();
     expect(querySessionButton('Worktree Repo')).toBeNull();
-    expect(screen.getByText('1 of 4 shown')).toBeInTheDocument();
+    expect(screen.getByText('1 of 4 matches for "ended"')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
 
@@ -410,6 +414,9 @@ describe('App', () => {
     render(<App />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'New chat' }));
+    expect(await screen.findByRole('heading', { name: 'Start a session' })).toBeInTheDocument();
+    expect(screen.getByText('Pick a repo, isolation style, and permission mode.')).toBeInTheDocument();
+    expect(screen.getByText('Skip prompts for trusted local repos.')).toBeInTheDocument();
     fireEvent.change(await screen.findByLabelText('Working directory'), { target: { value: '/repo/two' } });
     fireEvent.click(screen.getByLabelText('Use git worktree'));
     fireEvent.click(screen.getByText('Create session'));
@@ -456,12 +463,24 @@ describe('App', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'New chat' }));
     const suggestions = await screen.findByLabelText('Recent working directories');
-    expect(within(suggestions).getByText('/repo/one')).toBeInTheDocument();
-    expect(within(suggestions).getByText('/repo/stopped')).toBeInTheDocument();
+    expect(within(suggestions).getByText('one')).toBeInTheDocument();
+    expect(within(suggestions).getAllByText('/repo').length).toBeGreaterThan(0);
+    expect(within(suggestions).getByText('stopped')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Use /repo/stopped' }));
 
     expect(screen.getByLabelText('Working directory')).toHaveValue('/repo/stopped');
+  });
+
+  it('shows a calmer empty state for search misses', async () => {
+    render(<App />);
+
+    await screen.findAllByText('Repo One');
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search sessions' }), { target: { value: 'missing-branch' } });
+
+    expect(screen.getByRole('heading', { name: 'Search results' })).toBeInTheDocument();
+    expect(screen.getByText('No sessions match "missing-branch".')).toBeInTheDocument();
+    expect(screen.getByText('Try a repo name, branch, path, or status.')).toBeInTheDocument();
   });
 
   it('shows slash command autocomplete and completes without sending input', async () => {
@@ -750,7 +769,7 @@ describe('App', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s3/unarchive', expect.objectContaining({ method: 'POST' })));
     await waitFor(() => expect(screen.queryByRole('button', { name: /Archived Repo/ })).not.toBeInTheDocument());
-    expect(screen.getByText('No archived sessions.')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'No archived sessions.' })).toBeInTheDocument();
   });
 
   it('deletes archived session data from the archived list', async () => {
@@ -763,7 +782,7 @@ describe('App', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s3?permanent=true', expect.objectContaining({ method: 'DELETE' })));
     await waitFor(() => expect(screen.queryByRole('button', { name: /Archived Repo/ })).not.toBeInTheDocument());
-    expect(screen.getByText('No archived sessions.')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'No archived sessions.' })).toBeInTheDocument();
   });
 
   it('ignores stale active list responses after switching to archived mode', async () => {
