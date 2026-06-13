@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import ConfigView from './ConfigView';
 
@@ -62,11 +62,25 @@ describe('ConfigView', () => {
   it('loads and renders config values', async () => {
     render(<ConfigView />);
 
+    expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument();
     expect(await screen.findByDisplayValue('127.0.0.1:8787')).toBeInTheDocument();
     expect(screen.getByText('/home/user/.claude-remote-web/config.toml')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Server' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Launcher' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Web assets' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Defaults' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Worktrees' })).toBeInTheDocument();
+    const status = screen.getByLabelText('Config status');
+    expect(within(status).getByText('file')).toBeInTheDocument();
+    expect(within(status).getByText('Missing')).toBeInTheDocument();
+    expect(within(status).getByText('current')).toBeInTheDocument();
+    expect(within(status).getByText('Runtime')).toBeInTheDocument();
+    expect(within(status).getByText('restartRequired')).toBeInTheDocument();
+    expect(within(status).getByText('false')).toBeInTheDocument();
     expect(screen.getByDisplayValue('claude')).toBeInTheDocument();
     expect(screen.getByDisplayValue('pin')).toBeInTheDocument();
     expect(screen.getByDisplayValue('fresh')).toBeInTheDocument();
+    expect(screen.getAllByText('Current').length).toBeGreaterThan(0);
   });
 
   it('saves edited values and shows restart message', async () => {
@@ -93,6 +107,8 @@ describe('ConfigView', () => {
       worktreeBaseRef: 'head'
     });
     expect(await screen.findByText('Config saved. Restart the daemon for changes to take effect.')).toBeInTheDocument();
+    expect(within(screen.getByLabelText('Config status')).getByText('true')).toBeInTheDocument();
+    expect(screen.getAllByText('Restart required').length).toBeGreaterThan(0);
   });
 
   it('rejects empty launcher before saving', async () => {
