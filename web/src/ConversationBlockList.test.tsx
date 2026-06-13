@@ -40,6 +40,46 @@ describe('ConversationBlockList', () => {
     expect(within(article).getByText('Raw events')).toBeInTheDocument();
   });
 
+  it('uses react-markdown for richer message Markdown without rendering raw HTML', () => {
+    const longPath = '/Users/example/repos/claude-web-remote/web/src/ConversationBlockList.tsx';
+    const blocks: ConversationBlock[] = [
+      {
+        id: 'message-rich-markdown',
+        type: 'message',
+        role: 'assistant',
+        text: [
+          'Before',
+          '',
+          '- parent item',
+          '  - nested item with **strong text**',
+          '',
+          `See [component](${longPath}) and \`${longPath}\`.`,
+          '[unsafe link](javascript:alert(1))',
+          '',
+          '<img src=x onerror=alert(1)>',
+          '<script>alert("xss")</script>'
+        ].join('\n'),
+        eventIds: [2],
+        rawEvents: [rawEvent(2, { message: 'rich markdown' })]
+      }
+    ];
+
+    const { container } = render(<ConversationBlockList blocks={blocks} />);
+
+    const article = screen.getByRole('article');
+    const nestedItem = within(article).getByText(/nested item with/).closest('li');
+    expect(nestedItem).not.toBeNull();
+    expect(nestedItem?.closest('ul')?.closest('li')).toHaveTextContent('parent item');
+    expect(within(article).getByText('strong text')).toHaveProperty('tagName', 'STRONG');
+    expect(within(article).getByRole('link', { name: 'component' })).toHaveAttribute('href', longPath);
+    expect(within(article).getByText('unsafe link')).toHaveAttribute('href', '');
+    expect(within(article).getByText(longPath)).toHaveProperty('tagName', 'CODE');
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.querySelector('script')).toBeNull();
+    expect(article).not.toHaveTextContent('onerror');
+    expect(article).not.toHaveTextContent('alert("xss")');
+  });
+
   it('renders user and system messages with clear hierarchy', () => {
     const blocks: ConversationBlock[] = [
       {

@@ -1,15 +1,7 @@
 import RawEventDetails from './RawEventDetails';
 import type { ConversationBlock, ErrorBlock, MessageBlock, RawBlock, TaskBlock, ToolBlock } from './conversationBlocks';
-import { createElement, type ReactNode } from 'react';
+import ReactMarkdown, { type Components } from 'react-markdown';
 import './ConversationBlockList.css';
-
-type HeadingLevel = 1 | 2 | 3 | 4 | 5 | 6;
-
-type MarkdownBlock =
-  | { type: 'heading'; level: HeadingLevel; text: string }
-  | { type: 'paragraph'; text: string }
-  | { type: 'list'; ordered: boolean; items: string[] }
-  | { type: 'code'; language: string; code: string };
 
 function roleLabel(role: MessageBlock['role']): string {
   if (role === 'assistant') return 'Claude';
@@ -22,136 +14,18 @@ function blockElementId(block: ConversationBlock): string | undefined {
   return firstEventId === undefined ? undefined : `event-${firstEventId}`;
 }
 
-function headingFromLine(line: string): MarkdownBlock | null {
-  const match = /^(#{1,6})\s+(.+?)\s*$/.exec(line);
-  if (!match) return null;
-  return { type: 'heading', level: match[1].length as HeadingLevel, text: match[2] };
-}
-
-function listItemFromLine(line: string): { ordered: boolean; text: string } | null {
-  const unordered = /^\s*[-*+]\s+(.+)$/.exec(line);
-  if (unordered) return { ordered: false, text: unordered[1] };
-
-  const ordered = /^\s*\d+[.)]\s+(.+)$/.exec(line);
-  if (ordered) return { ordered: true, text: ordered[1] };
-
-  return null;
-}
-
-function parseMarkdownBlocks(text: string): MarkdownBlock[] {
-  const lines = text.replace(/\r\n?/g, '\n').split('\n');
-  const blocks: MarkdownBlock[] = [];
-  let paragraph: string[] = [];
-
-  const flushParagraph = () => {
-    const joined = paragraph.join('\n').trim();
-    if (joined) blocks.push({ type: 'paragraph', text: joined });
-    paragraph = [];
-  };
-
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index];
-    const fence = /^```([A-Za-z0-9_-]+)?\s*$/.exec(line);
-    if (fence) {
-      flushParagraph();
-      const codeLines: string[] = [];
-      index += 1;
-      while (index < lines.length && !/^```\s*$/.test(lines[index])) {
-        codeLines.push(lines[index]);
-        index += 1;
-      }
-      blocks.push({ type: 'code', language: fence[1] ?? '', code: codeLines.join('\n') });
-      continue;
-    }
-
-    if (!line.trim()) {
-      flushParagraph();
-      continue;
-    }
-
-    const heading = headingFromLine(line);
-    if (heading) {
-      flushParagraph();
-      blocks.push(heading);
-      continue;
-    }
-
-    const listItem = listItemFromLine(line);
-    if (listItem) {
-      flushParagraph();
-      const items = [listItem.text];
-      const ordered = listItem.ordered;
-      while (index + 1 < lines.length) {
-        const nextItem = listItemFromLine(lines[index + 1]);
-        if (!nextItem || nextItem.ordered !== ordered) break;
-        items.push(nextItem.text);
-        index += 1;
-      }
-      blocks.push({ type: 'list', ordered, items });
-      continue;
-    }
-
-    paragraph.push(line);
+const markdownComponents: Components = {
+  pre({ children }) {
+    return <pre className="message-code">{children}</pre>;
   }
-
-  flushParagraph();
-  return blocks;
-}
-
-function renderInline(text: string): ReactNode[] {
-  const nodes: ReactNode[] = [];
-  const pattern = /`([^`\n]+)`/g;
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = pattern.exec(text)) !== null) {
-    if (match.index > lastIndex) nodes.push(text.slice(lastIndex, match.index));
-    nodes.push(<code key={`code-${match.index}`}>{match[1]}</code>);
-    lastIndex = match.index + match[0].length;
-  }
-
-  if (lastIndex < text.length) nodes.push(text.slice(lastIndex));
-  return nodes;
-}
-
-function renderInlineLines(text: string): ReactNode[] {
-  return text.split('\n').flatMap((line, index) => {
-    const nodes = renderInline(line);
-    return index === 0 ? nodes : [<br key={`br-${index}`} />, ...nodes];
-  });
-}
+};
 
 function MessageMarkdown({ text }: { text: string }) {
-  const blocks = parseMarkdownBlocks(text);
-
   return (
     <div className="message-text">
-      {blocks.map((block, index) => {
-        if (block.type === 'heading') {
-          return createElement(`h${block.level}`, { key: index }, renderInline(block.text));
-        }
-
-        if (block.type === 'list') {
-          const List = block.ordered ? 'ol' : 'ul';
-          return (
-            <List key={index}>
-              {block.items.map((item, itemIndex) => (
-                <li key={itemIndex}>{renderInlineLines(item)}</li>
-              ))}
-            </List>
-          );
-        }
-
-        if (block.type === 'code') {
-          return (
-            <pre key={index} className="message-code">
-              <code className={block.language ? `language-${block.language}` : undefined}>{block.code}</code>
-            </pre>
-          );
-        }
-
-        return <p key={index}>{renderInlineLines(block.text)}</p>;
-      })}
+      <ReactMarkdown components={markdownComponents} skipHtml>
+        {text}
+      </ReactMarkdown>
     </div>
   );
 }
