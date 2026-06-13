@@ -21,6 +21,7 @@ export type ToolBlock = {
   inputSummary: string;
   resultSummary: string;
   resultDisplay: 'hidden' | 'collapsed' | 'visible';
+  resultLabel: string;
   eventIds: number[];
   rawEvents: RawEventRef[];
 };
@@ -32,6 +33,9 @@ export type TaskBlock = {
   source: string;
   status: 'pending' | 'running' | 'completed' | 'failed';
   summary: string;
+  detail?: string;
+  completionSummary?: string;
+  failureSummary?: string;
   outputPath?: string;
   eventIds: number[];
   rawEvents: RawEventRef[];
@@ -129,6 +133,144 @@ function summarize(value: unknown): string {
   return String(value);
 }
 
+function compactText(text: string): string {
+  return text.split(/\s+/).filter(Boolean).join(' ');
+}
+
+function truncateText(text: string, maxLength = 360): string {
+  const compact = compactText(text);
+  if (compact.length <= maxLength) return compact;
+  return `${compact.slice(0, maxLength - 1)}…`;
+}
+
+function shortText(text: string, maxLength = 160): string {
+  const compact = compactText(text);
+  if (compact.length <= maxLength) return compact;
+  return `${compact.slice(0, maxLength - 3).trimEnd()}...`;
+}
+
+function numberField(payload: ObjectPayload, keys: string[]): number | null {
+  for (const key of keys) {
+    const value = payload[key];
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) return Number(value);
+  }
+  return null;
+}
+
+function valueSummary(value: unknown, maxLength = 120): string | null {
+  if (typeof value === 'string' && value.trim()) return shortText(value, maxLength);
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (value === undefined || value === null) return null;
+  if (Array.isArray(value)) return `${value.length} item${value.length === 1 ? '' : 's'}`;
+  if (isObject(value)) return shortText(JSON.stringify(value), maxLength);
+  return shortText(String(value), maxLength);
+}
+
+function countLabel(count: number, singular: string, plural = `${singular}s`): string {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function lineCount(text: string): number {
+  const trimmed = text.trim();
+  return trimmed ? trimmed.split(/\r?\n/).length : 0;
+}
+
+function outputMeasure(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) return 'no output';
+  const lines = lineCount(trimmed);
+  const chars = trimmed.length;
+  return lines > 1 ? `${countLabel(lines, 'line')}, ${countLabel(chars, 'char')}` : countLabel(chars, 'char');
+}
+
+function summarizeToolInput(name: string, input: unknown): string {
+  if (!isObject(input)) return summarize(input);
+
+  if (name === 'Bash') {
+    const command = stringField(input, ['command']);
+    const description = stringField(input, ['description']);
+    const background = input.run_in_background === true ? ' (background)' : '';
+    if (!command) return summarize(input);
+    return `${description ? `${shortText(description, 72)} · ` : ''}$ ${shortText(command, 180)}${background}`;
+  }
+
+  if (name === 'Read') {
+    const path = stringField(input, ['file_path', 'path']);
+    const offset = numberField(input, ['offset']);
+    const limit = numberField(input, ['limit']);
+    const range = [offset !== null ? `offset ${offset}` : null, limit !== null ? `limit ${limit}` : null]
+      .filter(Boolean)
+      .join(', ');
+    return path ? `${path}${range ? ` (${range})` : ''}` : summarize(input);
+  }
+
+  if (name === 'Glob') {
+    const pattern = stringField(input, ['pattern']);
+    const path = stringField(input, ['path', 'base_path']);
+    if (pattern && path) return `${pattern} in ${path}`;
+    return pattern ?? path ?? summarize(input);
+  }
+
+  if (name === 'Grep') {
+    const pattern = stringField(input, ['pattern']);
+    const path = stringField(input, ['path']);
+    const glob = stringField(input, ['glob']);
+    const outputMode = stringField(input, ['output_mode', 'outputMode']);
+    const parts = [
+      pattern ? `"${shortText(pattern, 80)}"` : null,
+      path ? `in ${path}` : null,
+      glob ? `glob ${glob}` : null,
+      outputMode
+    ].filter((part): part is string => Boolean(part));
+    return parts.length > 0 ? parts.join(' · ') : summarize(input);
+  }
+
+  if (name === 'Edit') {
+    const path = stringField(input, ['file_path', 'path']);
+    const oldString = stringField(input, ['old_string', 'oldString']);
+    const newString = stringField(input, ['new_string', 'newString']);
+    const replacement =
+      oldString || newString ? `replace "${shortText(oldString ?? '', 48)}" -> "${shortText(newString ?? '', 48)}"` : null;
+    return [path, replacement, input.replace_all === true ? 'replace all' : null]
+      .filter((part): part is string => Boolean(part))
+      .join(' · ') || summarize(input);
+  }
+
+  if (name === 'MultiEdit') {
+    const path = stringField(input, ['file_path', 'path']);
+    const edits = Array.isArray(input.edits) ? countLabel(input.edits.length, 'edit') : null;
+    return [path, edits].filter((part): part is string => Boolean(part)).join(' · ') || summarize(input);
+  }
+
+  if (name === 'Write') {
+    const path = stringField(input, ['file_path', 'path']);
+    const content = typeof input.content === 'string' ? `write ${outputMeasure(input.content)}` : null;
+    return [path, content].filter((part): part is string => Boolean(part)).join(' · ') || summarize(input);
+  }
+
+  const preferredKeys = ['file_path', 'path', 'url', 'pattern', 'query', 'command', 'name', 'id'];
+  const preferred = preferredKeys
+    .map((key) => {
+      const value = valueSummary(input[key]);
+      return value ? `${key}: ${value}` : null;
+    })
+    .filter((part): part is string => part !== null);
+  if (preferred.length > 0) return preferred.slice(0, 3).join(' · ');
+
+  return (
+    Object.entries(input)
+      .filter(([key]) => !['content', 'prompt', 'message'].includes(key))
+      .map(([key, value]) => {
+        const summary = valueSummary(value);
+        return summary ? `${key}: ${summary}` : null;
+      })
+      .filter((part): part is string => part !== null)
+      .slice(0, 3)
+      .join(' · ') || summarize(input)
+  );
+}
+
 function toolName(payload: ObjectPayload): string {
   return stringField(payload, ['name', 'tool_name', 'toolName']) ?? 'tool';
 }
@@ -142,7 +284,16 @@ function resultToolUseId(payload: ObjectPayload): string | null {
 }
 
 function resultSummary(payload: ObjectPayload): string {
-  return summarize(payload.result ?? payload.content ?? payload.output ?? payload.error ?? payload.message ?? '');
+  const value =
+    payload.result ??
+    payload.content ??
+    payload.output ??
+    payload.stdout ??
+    payload.stderr ??
+    payload.error ??
+    payload.message ??
+    '';
+  return textFromContent(value) ?? summarize(value);
 }
 
 function hasStructuredFailure(payload: ObjectPayload | undefined): boolean {
@@ -174,8 +325,36 @@ function toolResultDisplay(name: string, status: ToolBlock['status'], result: st
   return 'collapsed';
 }
 
+function hiddenResultSummary(name: string, result: string): string {
+  if (name === 'Read') return `Read output hidden (${outputMeasure(result)})`;
+  if (name === 'Glob') return `Matched ${countLabel(lineCount(result), 'path')}`;
+  if (name === 'Grep') return `Matched ${countLabel(lineCount(result), 'line')}`;
+  return `Result hidden (${outputMeasure(result)})`;
+}
+
+function toolResultLabel(
+  name: string,
+  status: ToolBlock['status'],
+  result: string,
+  display: ToolBlock['resultDisplay']
+): string {
+  if (status === 'running') return 'Waiting for result';
+  if (!result.trim()) return status === 'failed' ? 'Failed with no result output' : 'No result output';
+  if (status === 'failed') return `Failed result shown (${outputMeasure(result)})`;
+  if (display === 'hidden') return hiddenResultSummary(name, result);
+  if (display === 'collapsed') return `Result collapsed (${outputMeasure(result)})`;
+  return `Result shown (${outputMeasure(result)})`;
+}
+
+function displayResultSummary(name: string, status: ToolBlock['status'], result: string, display: ToolBlock['resultDisplay']): string {
+  if (!result.trim()) return '';
+  if (status === 'failed') return result;
+  if (display === 'hidden') return hiddenResultSummary(name, result);
+  return result;
+}
+
 function isBackgroundBash(name: string, input: unknown, result: string): boolean {
-  return name === 'Bash' && isObject(input) && (input.run_in_background === true || /Task started in background|Output file:/i.test(result));
+  return name === 'Bash' && ((isObject(input) && input.run_in_background === true) || /Task started in background|Output file:/i.test(result));
 }
 
 function isTaskTool(name: string): boolean {
@@ -183,7 +362,7 @@ function isTaskTool(name: string): boolean {
 }
 
 function outputPath(summary: string): string | undefined {
-  return summary.match(/Output file:\s*(\S+)/i)?.[1];
+  return summary.match(/Output file:\s*(\S+)/i)?.[1]?.replace(/[),.;]+$/, '');
 }
 
 function taskStatus(name: string, input: unknown, result: string, hasResult: boolean, resultPayload?: ObjectPayload): TaskBlock['status'] {
@@ -201,6 +380,16 @@ function taskStatus(name: string, input: unknown, result: string, hasResult: boo
 
 function taskTitle(name: string, input: unknown): string {
   if (!isObject(input)) return name;
+  if (name === 'TaskCreate') {
+    return stringField(input, ['subject', 'description']) ?? name;
+  }
+  if (['TaskUpdate', 'TaskGet'].includes(name)) {
+    const id = stringField(input, ['taskId', 'task_id', 'id']);
+    return id ? `Task #${id}` : name;
+  }
+  if (name === 'TaskList') return 'Task list';
+  if (name === 'TaskOutput') return 'Task output';
+  if (name === 'TaskStop') return 'Stop task';
   if (typeof input.description === 'string' && input.description.trim()) return input.description;
   if (typeof input.subject === 'string' && input.subject.trim()) return input.subject;
   if (typeof input.taskId === 'string' && input.taskId.trim()) return `${name} #${input.taskId}`;
@@ -209,18 +398,95 @@ function taskTitle(name: string, input: unknown): string {
 }
 
 function taskSource(name: string, input: unknown): string {
+  if (name === 'Bash') return 'Background Bash';
   if (name === 'Agent' && isObject(input)) {
     const subagentType = stringField(input, ['subagent_type', 'subagentType']);
-    return subagentType ? `${subagentType} agent` : 'Agent';
+    return subagentType ? `${subagentType} subagent` : 'Agent';
   }
+  if (name === 'TaskCreate') return 'Task create';
+  if (name === 'TaskUpdate') return 'Task update';
+  if (name === 'TaskList') return 'Task list';
+  if (name === 'TaskGet') return 'Task lookup';
+  if (name === 'TaskOutput') return 'Task output';
+  if (name === 'TaskStop') return 'Task control';
   return name;
 }
 
-function taskSummary(name: string, input: unknown, inputSummary: string, result: string): string {
-  if (result) return result;
-  if (isObject(input) && typeof input.status === 'string' && input.status.trim()) return `status: ${input.status}`;
-  if (name === 'Bash' && isObject(input)) return stringField(input, ['description', 'command']) ?? inputSummary;
-  return inputSummary;
+function taskDetail(name: string, input: unknown, inputSummary: string): string | undefined {
+  if (!isObject(input)) return inputSummary || undefined;
+  if (name === 'Bash') return stringField(input, ['command']) ?? inputSummary;
+  if (['TaskOutput', 'TaskStop'].includes(name)) return stringField(input, ['task_id', 'taskId', 'id']) ?? undefined;
+  return undefined;
+}
+
+function cleanedTaskResult(result: string): string {
+  return truncateText(result.replace(/\s*Output file:\s*\S+/i, '').trim());
+}
+
+function backgroundStartSummary(result: string, hasResult: boolean): string {
+  const taskId = result.match(/Task started in background with ID\s+([^\s.]+)/i)?.[1];
+  if (taskId) return `Started in background (ID ${taskId}).`;
+  if (/Task started in background/i.test(result)) return 'Started in background.';
+  return hasResult ? 'Running in background.' : 'Starting in background.';
+}
+
+function statusInputSummary(input: unknown): string | undefined {
+  if (!isObject(input)) return undefined;
+  const status = stringField(input, ['status']);
+  if (!status) return undefined;
+  if (status === 'in_progress') return 'Marked in progress.';
+  return `Marked ${status}.`;
+}
+
+function taskSummaries(
+  name: string,
+  input: unknown,
+  inputSummary: string,
+  result: string,
+  status: TaskBlock['status'],
+  hasResult: boolean
+): Pick<TaskBlock, 'summary' | 'detail' | 'completionSummary' | 'failureSummary' | 'outputPath'> {
+  const path = outputPath(result);
+  const cleanResult = cleanedTaskResult(result);
+  const detail = taskDetail(name, input, inputSummary);
+
+  if (status === 'failed') {
+    return {
+      summary: 'Failed.',
+      ...(detail ? { detail } : {}),
+      failureSummary: cleanResult || 'Task failed.',
+      ...(path ? { outputPath: path } : {})
+    };
+  }
+
+  if (isBackgroundBash(name, input, result)) {
+    return {
+      summary: status === 'completed' ? 'Completed.' : backgroundStartSummary(result, hasResult),
+      ...(detail ? { detail } : {}),
+      ...(status === 'completed' && cleanResult ? { completionSummary: cleanResult } : {}),
+      ...(path ? { outputPath: path } : {})
+    };
+  }
+
+  if (status === 'completed') {
+    return {
+      summary: statusInputSummary(input) ?? 'Completed.',
+      ...(detail ? { detail } : {}),
+      ...(cleanResult ? { completionSummary: cleanResult } : {})
+    };
+  }
+
+  if (status === 'pending') {
+    return {
+      summary: cleanResult || statusInputSummary(input) || 'Pending.',
+      ...(detail ? { detail } : {})
+    };
+  }
+
+  return {
+    summary: cleanResult || statusInputSummary(input) || 'Running.',
+    ...(detail ? { detail } : {})
+  };
 }
 
 function makeMessageBlock(event: UiEvent, role: MessageBlock['role'], text: string): MessageBlock {
@@ -247,28 +513,27 @@ function makeToolBlock(toolUse: UiEvent, usePayload: ObjectPayload, resultEvent?
   const name = toolName(usePayload);
   const id = toolUseId(usePayload) ?? String(toolUse.id);
   const input = usePayload.input;
-  const inputSummary = summarize(input);
+  const inputSummary = summarizeToolInput(name, input);
   const result = resultPayload ? resultSummary(resultPayload) : '';
   const events = resultEvent ? [toolUse, resultEvent] : [toolUse];
   const taskLike = isBackgroundBash(name, input, result) || isTaskTool(name);
 
   if (taskLike) {
-    const summary = taskSummary(name, input, inputSummary, result);
-    const path = outputPath(summary);
+    const status = taskStatus(name, input, result, resultEvent !== undefined, resultPayload);
     return {
       id: `task-${id}`,
       type: 'task',
       title: taskTitle(name, input),
       source: taskSource(name, input),
-      status: taskStatus(name, input, result, resultEvent !== undefined, resultPayload),
-      summary,
-      ...(path ? { outputPath: path } : {}),
+      status,
+      ...taskSummaries(name, input, inputSummary, result, status, resultEvent !== undefined),
       eventIds: events.map((event) => event.id),
       rawEvents: events.map(rawEvent)
     };
   }
 
   const status: ToolBlock['status'] = resultEvent ? (hasFailedResult(resultPayload, result) ? 'failed' : 'completed') : 'running';
+  const resultDisplay = toolResultDisplay(name, status, result);
 
   return {
     id: `tool-${id}`,
@@ -276,8 +541,9 @@ function makeToolBlock(toolUse: UiEvent, usePayload: ObjectPayload, resultEvent?
     name,
     status,
     inputSummary,
-    resultSummary: result,
-    resultDisplay: toolResultDisplay(name, status, result),
+    resultSummary: displayResultSummary(name, status, result, resultDisplay),
+    resultDisplay,
+    resultLabel: toolResultLabel(name, status, result, resultDisplay),
     eventIds: events.map((event) => event.id),
     rawEvents: events.map(rawEvent)
   };
@@ -287,14 +553,16 @@ function makeStandaloneToolResult(event: UiEvent, payload: ObjectPayload): ToolB
   const name = toolName(payload);
   const result = resultSummary(payload);
   const status: ToolBlock['status'] = hasFailedResult(payload, result) ? 'failed' : 'completed';
+  const resultDisplay = toolResultDisplay(name, status, result);
   return {
     id: `tool-result-${event.id}`,
     type: 'tool',
     name,
     status,
     inputSummary: '',
-    resultSummary: result,
-    resultDisplay: toolResultDisplay(name, status, result),
+    resultSummary: displayResultSummary(name, status, result, resultDisplay),
+    resultDisplay,
+    resultLabel: toolResultLabel(name, status, result, resultDisplay),
     eventIds: [event.id],
     rawEvents: [rawEvent(event)]
   };
@@ -322,11 +590,12 @@ function normalizedItems(event: UiEvent): NormalizedItem[] | null {
   const payload = isObject(event.payload) ? event.payload : { value: event.payload };
   const type = payloadType(event, payload);
   const isClaudeUserPayload = payload.type === 'user';
+  const isClaudeSystemPayload = payload.type === 'system';
 
   if (event.kind === 'error' || type === 'error') {
     return isIgnorableErrorPayload(payload) ? [{ type: 'raw', event }] : [{ type: 'error', event, payload }];
   }
-  if (event.kind === 'raw' || event.kind === 'system') return [{ type: 'raw', event }];
+  if (event.kind === 'raw') return [{ type: 'raw', event }];
 
   const role = roleFromEvent(event, payload);
   const items: NormalizedItem[] = [];
@@ -336,7 +605,7 @@ function normalizedItems(event: UiEvent): NormalizedItem[] | null {
       if (!isObject(entry)) continue;
       if (entry.type === 'text') {
         const text = stringField(entry, ['text']);
-        if (text && role && !isClaudeUserPayload) items.push({ type: 'message', event, role, text });
+        if (text && role && !isClaudeUserPayload && !isClaudeSystemPayload) items.push({ type: 'message', event, role, text });
       } else if (entry.type === 'tool_use') {
         items.push({ type: 'tool_use', event, payload: entry });
       } else if (entry.type === 'tool_result') {
@@ -351,9 +620,9 @@ function normalizedItems(event: UiEvent): NormalizedItem[] | null {
   if (type === 'tool_result') return [{ type: 'tool_result', event, payload }];
 
   const text = textContent(payload);
-  if (text && role && !isClaudeUserPayload) return [{ type: 'message', event, role, text }];
+  if (text && role && !isClaudeUserPayload && !isClaudeSystemPayload) return [{ type: 'message', event, role, text }];
 
-  return isClaudeUserPayload ? [{ type: 'raw', event }] : null;
+  return isClaudeUserPayload || isClaudeSystemPayload ? [{ type: 'raw', event }] : null;
 }
 
 export function buildConversationBlocks(events: UiEvent[]): ConversationBlock[] {

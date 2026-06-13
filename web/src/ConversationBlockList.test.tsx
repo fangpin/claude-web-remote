@@ -21,7 +21,7 @@ describe('ConversationBlockList', () => {
         id: 'message-1',
         type: 'message',
         role: 'assistant',
-        text: 'Here is a snippet:\n\n```ts\nconst answer = 42;\n```',
+        text: '# Summary\n\nHere is `inline code` in a paragraph.\n\n- first item\n- second item\n\n```ts\nconst answer = 42;\n```',
         eventIds: [1],
         rawEvents: [rawEvent(1, { message: 'Here is a snippet' })]
       }
@@ -32,8 +32,43 @@ describe('ConversationBlockList', () => {
     const article = screen.getByRole('article');
     expect(article).toHaveClass('conversation-block', 'message-block', 'assistant');
     expect(within(article).getByText('Claude').closest('header')).toHaveClass('block-header');
-    expect(within(article).getByText(/const answer = 42/)).toHaveClass('message-text');
+    expect(within(article).getByRole('heading', { name: 'Summary', level: 1 })).toBeInTheDocument();
+    expect(within(article).getByRole('heading', { name: 'Summary', level: 1 }).closest('.message-text')).toHaveClass('message-text');
+    expect(within(article).getByText('inline code')).toHaveProperty('tagName', 'CODE');
+    expect(within(article).getByText('first item')).toHaveProperty('tagName', 'LI');
+    expect(within(article).getByText(/const answer = 42/).closest('pre')).toHaveClass('message-code');
     expect(within(article).getByText('Raw events')).toBeInTheDocument();
+  });
+
+  it('renders user and system messages with clear hierarchy', () => {
+    const blocks: ConversationBlock[] = [
+      {
+        id: 'message-user-1',
+        type: 'message',
+        role: 'user',
+        text: 'Please run:\n\n1. tests\n2. build',
+        eventIds: [1],
+        rawEvents: [rawEvent(1, { message: 'Please run' })]
+      },
+      {
+        id: 'message-system-2',
+        type: 'message',
+        role: 'system',
+        text: 'Session resumed',
+        eventIds: [2],
+        rawEvents: [rawEvent(2, { message: 'Session resumed' })]
+      }
+    ];
+
+    render(<ConversationBlockList blocks={blocks} />);
+
+    const articles = screen.getAllByRole('article');
+    expect(articles[0]).toHaveClass('message-block', 'user');
+    expect(within(articles[0]).getByText('You')).toBeInTheDocument();
+    expect(within(articles[0]).getByText('tests')).toHaveProperty('tagName', 'LI');
+    expect(articles[1]).toHaveClass('message-block', 'system');
+    expect(within(articles[1]).getByText('System')).toBeInTheDocument();
+    expect(within(articles[1]).getByText('Session resumed')).toHaveProperty('tagName', 'P');
   });
 
   it('renders tool activity with compact input and result sections', () => {
@@ -43,9 +78,10 @@ describe('ConversationBlockList', () => {
         type: 'tool',
         name: 'Bash',
         status: 'completed',
-        inputSummary: 'command: git status',
+        inputSummary: '$ git status',
         resultSummary: 'On branch main',
         resultDisplay: 'visible',
+        resultLabel: 'Result shown (14 chars)',
         eventIds: [2, 3],
         rawEvents: [rawEvent(2, { name: 'Bash' }), rawEvent(3, { result: 'On branch main' })]
       }
@@ -56,9 +92,9 @@ describe('ConversationBlockList', () => {
     const article = screen.getByRole('article');
     expect(article).toHaveClass('conversation-block', 'tool-block', 'completed');
     expect(within(article).getByText('Bash')).toBeInTheDocument();
-    expect(within(article).getByText('completed').closest('header')).toHaveClass('block-header');
-    expect(within(article).getByText('Input').closest('section')).toHaveClass('block-section');
-    expect(within(article).getByText('command: git status')).toBeInTheDocument();
+    expect(within(article).getByText('completed').closest('header')).toHaveClass('tool-activity-header');
+    expect(within(article).getByText('$ git status')).toBeInTheDocument();
+    expect(within(article).getByText('Result shown (14 chars)')).toBeInTheDocument();
     expect(within(article).getByText('Result').closest('section')).toHaveClass('block-section');
     expect(within(article).getByText('On branch main')).toBeInTheDocument();
   });
@@ -70,9 +106,10 @@ describe('ConversationBlockList', () => {
         type: 'tool',
         name: 'Read',
         status: 'completed',
-        inputSummary: 'file_path: /tmp/a.txt',
-        resultSummary: 'secret file contents',
+        inputSummary: '/tmp/a.txt',
+        resultSummary: 'Read output hidden (20 chars)',
         resultDisplay: 'hidden',
+        resultLabel: 'Read output hidden (20 chars)',
         eventIds: [10, 11],
         rawEvents: [rawEvent(10, { name: 'Read' }), rawEvent(11, { content: 'secret file contents' })]
       }
@@ -82,7 +119,8 @@ describe('ConversationBlockList', () => {
 
     const article = screen.getByRole('article');
     expect(within(article).getByText('Read')).toBeInTheDocument();
-    expect(within(article).getByText('file_path: /tmp/a.txt')).toBeInTheDocument();
+    expect(within(article).getByText('/tmp/a.txt')).toBeInTheDocument();
+    expect(within(article).getByText('Read output hidden (20 chars)')).toBeInTheDocument();
     expect(within(article).queryByText('Result')).not.toBeInTheDocument();
     expect(within(article).queryByText('secret file contents')).not.toBeInTheDocument();
     expect(within(article).getByText('Raw events')).toBeInTheDocument();
@@ -95,9 +133,10 @@ describe('ConversationBlockList', () => {
         type: 'tool',
         name: 'Bash',
         status: 'completed',
-        inputSummary: 'command: npm test',
+        inputSummary: '$ npm test',
         resultSummary: 'long stdout',
         resultDisplay: 'collapsed',
+        resultLabel: 'Result collapsed (11 chars)',
         eventIds: [12, 13],
         rawEvents: [rawEvent(12, { name: 'Bash' }), rawEvent(13, { content: 'long stdout' })]
       }
@@ -106,7 +145,8 @@ describe('ConversationBlockList', () => {
     render(<ConversationBlockList blocks={blocks} />);
 
     const article = screen.getByRole('article');
-    const details = within(article).getByText('Result').closest('details');
+    expect(within(article).getAllByText('Result collapsed (11 chars)')).toHaveLength(2);
+    const details = within(article).getByText('long stdout').closest('details');
     expect(details).not.toBeNull();
     expect(details).not.toHaveAttribute('open');
     expect(details).toHaveTextContent('long stdout');
@@ -118,9 +158,10 @@ describe('ConversationBlockList', () => {
         id: 'task-1',
         type: 'task',
         title: 'Run backend checks',
-        source: 'Bash',
+        source: 'Background Bash',
         status: 'running',
-        summary: 'Task started in background',
+        summary: 'Started in background.',
+        detail: 'npm test',
         outputPath: '/tmp/backend-check.log',
         eventIds: [4],
         rawEvents: [rawEvent(4, { outputPath: '/tmp/backend-check.log' })]
@@ -131,14 +172,16 @@ describe('ConversationBlockList', () => {
 
     const article = screen.getByRole('article');
     expect(article).toHaveClass('conversation-block', 'task-block', 'running');
-    expect(within(article).getByText('Run backend checks').closest('header')).toHaveClass(
+    expect(within(article).getByText('Background Bash').closest('header')).toHaveClass(
       'block-header',
       'task-header'
     );
-    expect(within(article).getByText('Bash')).toBeInTheDocument();
-    expect(within(article).getByText('running')).toBeInTheDocument();
-    expect(within(article).getByText('Task started in background')).toBeInTheDocument();
-    expect(within(article).getByText('Output path').closest('section')).toHaveClass(
+    expect(within(article).getByText('Run backend checks').closest('.task-title-row')).not.toBeNull();
+    expect(within(article).getByText('running')).toHaveClass('task-status');
+    expect(within(article).getByText('Started in background.')).toBeInTheDocument();
+    expect(within(article).getByText('Details').closest('details')).toHaveClass('task-detail');
+    expect(within(article).getByText('npm test')).toBeInTheDocument();
+    expect(within(article).getByText('Output').closest('section')).toHaveClass(
       'block-section',
       'output-path'
     );
@@ -171,6 +214,7 @@ describe('ConversationBlockList', () => {
         inputSummary: 'file_path: /tmp/a.txt',
         resultSummary: '',
         resultDisplay: 'visible',
+        resultLabel: 'Waiting for result',
         eventIds: [3],
         rawEvents: [rawEvent(3, { name: 'Read' })]
       },
@@ -200,11 +244,14 @@ describe('ConversationBlockList', () => {
 
     expect(css).toMatch(/\.conversation-workspace\s*{[^}]*grid-template-rows:\s*auto\s+minmax\(0,\s*1fr\)\s+auto/s);
     expect(css).toMatch(/\.message-block\.system\b/);
+    expect(css).toMatch(/\.message-text h1\b/);
+    expect(css).toMatch(/\.message-text ul,/);
+    expect(css).toMatch(/\.message-text \.message-code\b/);
     expect(css).toMatch(/\.task-block\.pending\b/);
     expect(css).not.toMatch(/\.task-header\s+small/);
     expect(css).not.toMatch(/\.task-header\s*>\s*div/);
     expect(css).not.toMatch(/\.block-section\s+strong/);
-    expect(css).not.toMatch(/\.output-path\s+code/);
+    expect(css).toMatch(/\.output-(path|value)\b/);
   });
 
   it('renders error and raw fallback blocks', () => {
@@ -253,6 +300,7 @@ describe('ConversationBlockList', () => {
         inputSummary: 'file_path: /tmp/example.txt',
         resultSummary: '',
         resultDisplay: 'visible',
+        resultLabel: 'Waiting for result',
         eventIds: [8],
         rawEvents: [rawEvent(8, { toolNested: { path: '/tmp/example.txt' } })]
       },

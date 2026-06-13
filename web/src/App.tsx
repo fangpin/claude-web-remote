@@ -25,6 +25,7 @@ import './App.css';
 
 const emptyTaskGroups: TaskGroups = { background: [], finished: [] };
 const EVENT_RENDER_LIMIT = 80;
+const MESSAGE_INPUT_MAX_HEIGHT = 220;
 const EMPTY_STATE_PROMPTS = [
   'Inspect the current project',
   'Explain how this app is structured',
@@ -48,6 +49,7 @@ export default function App() {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [listMode, setListMode] = useState<SessionListMode>('active');
+  const [sessionSearch, setSessionSearch] = useState('');
   const [view, setView] = useState<AppView>('sessions');
   const [isNewSessionOpen, setIsNewSessionOpen] = useState(false);
   const [isInspectorOpen, setIsInspectorOpen] = useState(true);
@@ -103,6 +105,7 @@ export default function App() {
   const isComposerSession = isActiveSessionMode && activeSession?.status === 'running';
   const hasDraft = message.trim().length > 0;
   const canSend = isComposerSession && hasDraft && !isSending;
+  const sendStatusText = isSending ? 'Sending message...' : hasDraft ? 'Ready to send' : 'Write a message to send';
 
   const recentDirectories = useMemo(() => {
     const seen = new Set<string>();
@@ -118,6 +121,29 @@ export default function App() {
       .map((session) => session.cwd);
   }, [sessions]);
 
+  const visibleSessions = useMemo(() => {
+    const query = sessionSearch.trim().toLocaleLowerCase();
+    if (!query) return sessions;
+    return sessions.filter((session) => {
+      const runtimeStatus = session.runtimeStatus ?? session.status;
+      const searchable = [
+        session.name,
+        session.cwd,
+        session.status,
+        runtimeStatus,
+        runtimeStatusLabels[runtimeStatus],
+        session.permissionMode,
+        session.worktree?.branch,
+        session.worktree?.sourceCwd,
+        session.worktree?.worktreeCwd
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLocaleLowerCase();
+      return searchable.includes(query);
+    });
+  }, [sessionSearch, sessions]);
+
   function refreshAutocomplete(value: string, cursor: number | null | undefined) {
     const token = findSlashCommandToken(value, cursor);
     const nextSuggestions = token ? getCommandSuggestions(token.query) : [];
@@ -130,6 +156,18 @@ export default function App() {
     setAutocompleteToken(null);
     setSuggestions([]);
     setActiveSuggestionIndex(0);
+  }
+
+  function resizeMessageInput(element: HTMLTextAreaElement | null) {
+    if (!element) return;
+    element.style.height = 'auto';
+    const contentHeight = element.scrollHeight;
+    if (contentHeight > 0) {
+      element.style.height = `${Math.min(contentHeight, MESSAGE_INPUT_MAX_HEIGHT)}px`;
+    } else {
+      element.style.height = '';
+    }
+    element.style.overflowY = contentHeight > MESSAGE_INPUT_MAX_HEIGHT ? 'auto' : 'hidden';
   }
 
   const refreshTasks = useCallback(async () => {
@@ -260,6 +298,10 @@ export default function App() {
   }, [activeId]);
 
   useEffect(() => {
+    resizeMessageInput(messageInputRef.current);
+  }, [message, isComposerSession]);
+
+  useEffect(() => {
     const eventsElement = eventsRef.current;
     if (!eventsElement) return;
     eventsElement.scrollTop = eventsElement.scrollHeight;
@@ -353,6 +395,19 @@ export default function App() {
   }
 
   function onMessageKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    const nativeEvent = event.nativeEvent as unknown as {
+      isComposing?: boolean;
+      nativeEvent?: { isComposing?: boolean };
+      keyCode?: number;
+      which?: number;
+    };
+    const isComposing =
+      nativeEvent.isComposing === true ||
+      nativeEvent.nativeEvent?.isComposing === true ||
+      (event as unknown as { isComposing?: boolean }).isComposing === true ||
+      nativeEvent.keyCode === 229 ||
+      nativeEvent.which === 229;
+
     if (suggestions.length > 0 && autocompleteToken) {
       if (event.key === 'ArrowDown') {
         event.preventDefault();
@@ -366,7 +421,7 @@ export default function App() {
         return;
       }
 
-      if ((event.key === 'Tab' || event.key === 'Enter') && !event.shiftKey && !event.nativeEvent.isComposing) {
+      if ((event.key === 'Tab' || event.key === 'Enter') && !event.shiftKey && !isComposing) {
         event.preventDefault();
         completeActiveSuggestion();
         return;
@@ -379,7 +434,7 @@ export default function App() {
       }
     }
 
-    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
+    if (event.key !== 'Enter' || event.shiftKey || isComposing) return;
     event.preventDefault();
     event.currentTarget.form?.requestSubmit();
   }
@@ -625,7 +680,13 @@ export default function App() {
 
           {isNewSessionOpen && (
             <form className="new-session-panel" onSubmit={onCreateSession}>
-              <h2>New session</h2>
+              <div className="new-session-heading">
+                <div>
+                  <h2>New session</h2>
+                  <p>Start Claude in a local working directory.</p>
+                </div>
+                <button type="button" onClick={() => setIsNewSessionOpen(false)}>Close</button>
+              </div>
               <label>
                 Working directory
                 <input value={cwd} onChange={(event) => setCwd(event.target.value)} placeholder="/data00/home/user/repos/project" required />
@@ -640,20 +701,24 @@ export default function App() {
                   ))}
                 </div>
               )}
-              <label className="checkbox-label">
-                <input type="checkbox" checked={useWorktree} onChange={(event) => setUseWorktree(event.target.checked)} />
-                Use git worktree
-              </label>
-              <label>
-                Permission mode
-                <select value={permissionMode} onChange={(event) => setPermissionMode(event.target.value)}>
-                  <option value="bypassPermissions">bypassPermissions</option>
-                  <option value="acceptEdits">acceptEdits</option>
-                  <option value="auto">auto</option>
-                  <option value="default">default</option>
-                </select>
-              </label>
-              <button className="primary-action" type="submit">Create session</button>
+              <div className="new-session-options">
+                <label className="checkbox-label">
+                  <input type="checkbox" checked={useWorktree} onChange={(event) => setUseWorktree(event.target.checked)} />
+                  Use git worktree
+                </label>
+                <label>
+                  Permission mode
+                  <select value={permissionMode} onChange={(event) => setPermissionMode(event.target.value)}>
+                    <option value="bypassPermissions">bypassPermissions</option>
+                    <option value="acceptEdits">acceptEdits</option>
+                    <option value="auto">auto</option>
+                    <option value="default">default</option>
+                  </select>
+                </label>
+              </div>
+              <div className="new-session-actions">
+                <button className="primary-action" type="submit">Create session</button>
+              </div>
             </form>
           )}
 
@@ -676,11 +741,36 @@ export default function App() {
             </button>
           </div>
 
-          <section className="sessions">
-            <h2>{listMode === 'archived' ? 'Archived sessions' : 'Sessions'}</h2>
+          <section className="sessions" aria-label={listMode === 'archived' ? 'Archived sessions' : 'Active sessions'}>
+            <div className="session-list-toolbar">
+              <div>
+                <h2>{listMode === 'archived' ? 'Archived sessions' : 'Active sessions'}</h2>
+                <p>
+                  {sessionSearch.trim()
+                    ? `${visibleSessions.length} of ${sessions.length} shown`
+                    : `${sessions.length} ${sessions.length === 1 ? 'session' : 'sessions'}`}
+                </p>
+              </div>
+              {sessionSearch && (
+                <button type="button" onClick={() => setSessionSearch('')}>Clear</button>
+              )}
+            </div>
+            <label className="session-search">
+              <span className="sr-only">Search sessions</span>
+              <input
+                type="search"
+                value={sessionSearch}
+                onChange={(event) => setSessionSearch(event.target.value)}
+                placeholder="Search sessions"
+                aria-label="Search sessions"
+              />
+            </label>
             {isListLoading && <p className="muted">Loading sessions...</p>}
             {!isListLoading && sessions.length === 0 && <p className="muted">{listMode === 'archived' ? 'No archived sessions.' : 'No sessions yet.'}</p>}
-            {sessions.map((session) => {
+            {!isListLoading && sessions.length > 0 && visibleSessions.length === 0 && (
+              <p className="muted">No sessions match "{sessionSearch.trim()}".</p>
+            )}
+            {visibleSessions.map((session) => {
               const runtimeStatus = session.runtimeStatus ?? session.status;
               return (
                 <button
@@ -688,10 +778,17 @@ export default function App() {
                   className={session.id === activeId ? 'session active' : 'session'}
                   onClick={() => setActiveId(session.id)}
                 >
-                  <strong>{session.name || session.cwd}</strong>
+                  <span className="session-main-row">
+                    <strong>{session.name || session.cwd}</strong>
+                    <em className={`status status-${runtimeStatus}`}>{runtimeStatusLabels[runtimeStatus]}</em>
+                  </span>
                   <span className="session-path" title={session.cwd}>{session.cwd}</span>
-                  {session.worktree && <span className="session-path" title={session.worktree.branch}>{session.worktree.branch}</span>}
-                  <em className={`status status-${runtimeStatus}`}>{runtimeStatusLabels[runtimeStatus]}</em>
+                  {session.worktree && (
+                    <span className="session-worktree-row">
+                      <span>Worktree</span>
+                      <span className="session-branch" title={session.worktree.branch}>{session.worktree.branch}</span>
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -770,17 +867,18 @@ export default function App() {
                       placeholder="Ask Claude to inspect code, explain behavior, run tests, or make a change..."
                       onChange={(event) => {
                         setMessage(event.target.value);
+                        resizeMessageInput(event.currentTarget);
                         refreshAutocomplete(event.target.value, event.target.selectionStart);
                       }}
                       onSelect={(event) => refreshAutocomplete(event.currentTarget.value, event.currentTarget.selectionStart)}
                       onKeyDown={onMessageKeyDown}
-                      rows={3}
+                      rows={1}
                     />
                     {suggestions.length > 0 && autocompleteToken && (
                       <div className="autocomplete" role="listbox" aria-label="Claude command suggestions">
                         <div className="autocomplete-header">
                           <strong>Commands</strong>
-                          <span>Use ↑↓ to navigate, Enter to insert, Esc to close</span>
+                          <span>Tab or Enter to insert</span>
                         </div>
                         {suggestions.map((suggestion, index) => (
                           <button
@@ -792,18 +890,30 @@ export default function App() {
                             onMouseDown={(event) => event.preventDefault()}
                             onClick={() => completeSuggestion(suggestion)}
                           >
-                            <strong>{suggestion.name}</strong>
-                            <span>{suggestion.description}</span>
+                            <span className="autocomplete-command">{suggestion.name}</span>
+                            <span className="autocomplete-description">{suggestion.description}</span>
                           </button>
                         ))}
                       </div>
                     )}
                   </div>
                   <div className="composer-actions">
-                    <span>Type / for commands</span>
+                    <span id="composer-send-status" aria-live="polite">{sendStatusText}</span>
                     <div>
                       <button className="composer-stop-button" type="button" onClick={() => onStop(false)}>Stop session</button>
-                      <button className="send-button" type="submit" disabled={!canSend}>{isSending ? 'Sending...' : 'Send'}</button>
+                      <button
+                        className="send-button"
+                        type="submit"
+                        disabled={!canSend}
+                        aria-label={isSending ? 'Sending message' : 'Send'}
+                        aria-describedby="composer-send-status"
+                        title={isSending ? 'Sending message' : 'Send message'}
+                      >
+                        <span className="sr-only">{isSending ? 'Sending message' : 'Send'}</span>
+                        <svg aria-hidden="true" viewBox="0 0 16 16" focusable="false">
+                          <path d="M8 2.25 13.25 7.5l-.9.9L8.63 4.68V14H7.37V4.68L3.65 8.4l-.9-.9L8 2.25Z" />
+                        </svg>
+                      </button>
                     </div>
                   </div>
                 </form>

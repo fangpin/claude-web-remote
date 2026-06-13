@@ -55,7 +55,7 @@ describe('buildConversationBlocks', () => {
     ]);
   });
 
-  it('preserves system text events as raw details only', () => {
+  it('renders direct system text events as readable message blocks', () => {
     const blocks = buildConversationBlocks([
       event(1, 'system', { message: 'daemon notice' }),
       event(2, 'system', { status: 'session resumed' })
@@ -63,18 +63,15 @@ describe('buildConversationBlocks', () => {
 
     expect(blocks).toEqual([
       {
-        id: 'raw-1',
-        type: 'raw',
-        label: 'system',
-        eventIds: [1],
-        rawEvents: [{ id: 1, kind: 'system', payload: { message: 'daemon notice' } }]
-      },
-      {
-        id: 'raw-2',
-        type: 'raw',
-        label: 'system',
-        eventIds: [2],
-        rawEvents: [{ id: 2, kind: 'system', payload: { status: 'session resumed' } }]
+        id: 'message-system-1',
+        type: 'message',
+        role: 'system',
+        text: 'daemon notice\n\nsession resumed',
+        eventIds: [1, 2],
+        rawEvents: [
+          { id: 1, kind: 'system', payload: { message: 'daemon notice' } },
+          { id: 2, kind: 'system', payload: { status: 'session resumed' } }
+        ]
       }
     ]);
   });
@@ -136,9 +133,10 @@ describe('buildConversationBlocks', () => {
         type: 'tool',
         name: 'Bash',
         status: 'completed',
-        inputSummary: 'command: git status',
+        inputSummary: '$ git status',
         resultSummary: 'clean',
         resultDisplay: 'collapsed',
+        resultLabel: 'Result collapsed (5 chars)',
         eventIds: [1, 2],
         rawEvents: [
           { id: 1, kind: 'tool', payload: { type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'git status' } } },
@@ -159,9 +157,10 @@ describe('buildConversationBlocks', () => {
       type: 'tool',
       name: 'Bash',
       status: 'completed',
-      inputSummary: 'command: npm test',
+      inputSummary: '$ npm test',
       resultSummary: 'large stdout',
-      resultDisplay: 'collapsed'
+      resultDisplay: 'collapsed',
+      resultLabel: 'Result collapsed (12 chars)'
     });
   });
 
@@ -176,9 +175,33 @@ describe('buildConversationBlocks', () => {
     ]);
 
     expect(blocks).toMatchObject([
-      { id: 'tool-toolu_read', type: 'tool', name: 'Read', resultDisplay: 'hidden', resultSummary: 'file contents' },
-      { id: 'tool-toolu_glob', type: 'tool', name: 'Glob', resultDisplay: 'hidden', resultSummary: '/tmp/a.ts\n/tmp/b.ts' },
-      { id: 'tool-toolu_grep', type: 'tool', name: 'Grep', resultDisplay: 'hidden', resultSummary: 'line 1\nline 2' }
+      {
+        id: 'tool-toolu_read',
+        type: 'tool',
+        name: 'Read',
+        inputSummary: '/tmp/a.txt',
+        resultDisplay: 'hidden',
+        resultSummary: 'Read output hidden (13 chars)',
+        resultLabel: 'Read output hidden (13 chars)'
+      },
+      {
+        id: 'tool-toolu_glob',
+        type: 'tool',
+        name: 'Glob',
+        inputSummary: '**/*.ts',
+        resultDisplay: 'hidden',
+        resultSummary: 'Matched 2 paths',
+        resultLabel: 'Matched 2 paths'
+      },
+      {
+        id: 'tool-toolu_grep',
+        type: 'tool',
+        name: 'Grep',
+        inputSummary: '"TODO"',
+        resultDisplay: 'hidden',
+        resultSummary: 'Matched 2 lines',
+        resultLabel: 'Matched 2 lines'
+      }
     ]);
   });
 
@@ -199,9 +222,10 @@ describe('buildConversationBlocks', () => {
         type: 'tool',
         name: 'Read',
         status: 'completed',
-        inputSummary: 'file_path: /tmp/a.txt',
-        resultSummary: 'contents',
+        inputSummary: '/tmp/a.txt',
+        resultSummary: 'Read output hidden (8 chars)',
         resultDisplay: 'hidden',
+        resultLabel: 'Read output hidden (8 chars)',
         eventIds: [1, 2],
         rawEvents: [
           { id: 1, kind: 'assistant', payload: assistantPayload },
@@ -222,9 +246,10 @@ describe('buildConversationBlocks', () => {
         type: 'tool',
         name: 'Read',
         status: 'running',
-        inputSummary: 'file_path: /tmp/example.txt',
+        inputSummary: '/tmp/example.txt',
         resultSummary: '',
         resultDisplay: 'visible',
+        resultLabel: 'Waiting for result',
         eventIds: [1],
         rawEvents: [
           { id: 1, kind: 'tool', payload: { type: 'tool_use', id: 'toolu_read', name: 'Read', input: { file_path: '/tmp/example.txt' } } }
@@ -244,9 +269,10 @@ describe('buildConversationBlocks', () => {
       type: 'tool',
       name: 'Read',
       status: 'failed',
-      inputSummary: 'file_path: /tmp/missing.txt',
+      inputSummary: '/tmp/missing.txt',
       resultSummary: 'Error: file not found',
       resultDisplay: 'visible',
+      resultLabel: 'Failed result shown (21 chars)',
       eventIds: [1, 2]
     });
   });
@@ -266,11 +292,51 @@ describe('buildConversationBlocks', () => {
     ]);
 
     expect(blocks).toMatchObject([
-      { id: 'tool-toolu_success_text', type: 'tool', status: 'completed', resultSummary: 'Found 0 errors', resultDisplay: 'collapsed' },
-      { id: 'tool-toolu_no_errors', type: 'tool', status: 'completed', resultSummary: 'No errors detected', resultDisplay: 'hidden' },
-      { id: 'tool-toolu_structured_error', type: 'tool', status: 'failed', resultSummary: 'file missing', resultDisplay: 'visible' },
-      { id: 'tool-toolu_status_error', type: 'tool', status: 'failed', resultSummary: 'missing2', resultDisplay: 'visible' },
-      { id: 'tool-toolu_failed_text', type: 'tool', status: 'failed', resultSummary: 'Command failed with exit code 1', resultDisplay: 'visible' }
+      {
+        id: 'tool-toolu_success_text',
+        type: 'tool',
+        status: 'completed',
+        inputSummary: '$ npm test',
+        resultSummary: 'Found 0 errors',
+        resultDisplay: 'collapsed',
+        resultLabel: 'Result collapsed (14 chars)'
+      },
+      {
+        id: 'tool-toolu_no_errors',
+        type: 'tool',
+        status: 'completed',
+        inputSummary: '/tmp/report.txt',
+        resultSummary: 'Read output hidden (18 chars)',
+        resultDisplay: 'hidden',
+        resultLabel: 'Read output hidden (18 chars)'
+      },
+      {
+        id: 'tool-toolu_structured_error',
+        type: 'tool',
+        status: 'failed',
+        inputSummary: '/tmp/missing.txt',
+        resultSummary: 'file missing',
+        resultDisplay: 'visible',
+        resultLabel: 'Failed result shown (12 chars)'
+      },
+      {
+        id: 'tool-toolu_status_error',
+        type: 'tool',
+        status: 'failed',
+        inputSummary: '/tmp/missing2.txt',
+        resultSummary: 'missing2',
+        resultDisplay: 'visible',
+        resultLabel: 'Failed result shown (8 chars)'
+      },
+      {
+        id: 'tool-toolu_failed_text',
+        type: 'tool',
+        status: 'failed',
+        inputSummary: '$ npm test',
+        resultSummary: 'Command failed with exit code 1',
+        resultDisplay: 'visible',
+        resultLabel: 'Failed result shown (31 chars)'
+      }
     ]);
   });
 
@@ -293,9 +359,10 @@ describe('buildConversationBlocks', () => {
       id: 'task-toolu_bg',
       type: 'task',
       title: 'Run frontend tests',
-      source: 'Bash',
+      source: 'Background Bash',
       status: 'running',
-      summary: 'Task started in background with ID abc123. Output file: /tmp/test.log',
+      summary: 'Started in background (ID abc123).',
+      detail: 'npm --prefix web test',
       outputPath: '/tmp/test.log',
       eventIds: [1, 2]
     });
@@ -320,9 +387,10 @@ describe('buildConversationBlocks', () => {
       id: 'task-toolu_bg_text',
       type: 'task',
       title: 'Run frontend build',
-      source: 'Bash',
+      source: 'Background Bash',
       status: 'running',
-      summary: 'Task started in background with ID build123. Output file: /tmp/build.log',
+      summary: 'Started in background (ID build123).',
+      detail: 'npm --prefix web run build',
       outputPath: '/tmp/build.log',
       eventIds: [1, 2]
     });
@@ -347,9 +415,10 @@ describe('buildConversationBlocks', () => {
       id: 'task-toolu_agent',
       type: 'task',
       title: 'Explore output rendering',
-      source: 'Explore agent',
+      source: 'Explore subagent',
       status: 'completed',
-      summary: 'Found ConversationBlockList.tsx and App.tsx',
+      summary: 'Completed.',
+      completionSummary: 'Found ConversationBlockList.tsx and App.tsx',
       eventIds: [1, 2]
     });
   });
@@ -367,10 +436,10 @@ describe('buildConversationBlocks', () => {
     expect(blocks[0]).toMatchObject({
       id: 'task-toolu_task',
       type: 'task',
-      title: 'TaskUpdate #3',
-      source: 'TaskUpdate',
+      title: 'Task #3',
+      source: 'Task update',
       status: 'completed',
-      summary: 'status: completed',
+      summary: 'Marked completed.',
       eventIds: [1]
     });
   });
@@ -394,10 +463,11 @@ describe('buildConversationBlocks', () => {
     expect(blocks[0]).toMatchObject({
       id: 'task-toolu_task_failed',
       type: 'task',
-      title: 'TaskUpdate #3',
-      source: 'TaskUpdate',
+      title: 'Task #3',
+      source: 'Task update',
       status: 'failed',
-      summary: 'Task update failed',
+      summary: 'Failed.',
+      failureSummary: 'Task update failed',
       eventIds: [1, 2]
     });
   });
@@ -435,14 +505,15 @@ describe('buildConversationBlocks', () => {
         title: 'Coordinate implementation',
         source: 'Workflow',
         status: 'completed',
-        summary: 'Workflow complete',
+        summary: 'Completed.',
+        completionSummary: 'Workflow complete',
         eventIds: [1, 2]
       },
       {
         id: 'task-toolu_create',
         type: 'task',
-        title: 'Add missing coverage',
-        source: 'TaskCreate',
+        title: 'Add tests',
+        source: 'Task create',
         status: 'pending',
         summary: 'Task #7 created successfully',
         eventIds: [3, 4]
@@ -450,37 +521,43 @@ describe('buildConversationBlocks', () => {
       {
         id: 'task-toolu_list',
         type: 'task',
-        title: 'TaskList',
-        source: 'TaskList',
+        title: 'Task list',
+        source: 'Task list',
         status: 'completed',
-        summary: '1 pending task',
+        summary: 'Completed.',
+        completionSummary: '1 pending task',
         eventIds: [5, 6]
       },
       {
         id: 'task-toolu_get',
         type: 'task',
-        title: 'TaskGet #7',
-        source: 'TaskGet',
+        title: 'Task #7',
+        source: 'Task lookup',
         status: 'completed',
-        summary: 'Task #7: Add tests',
+        summary: 'Completed.',
+        completionSummary: 'Task #7: Add tests',
         eventIds: [7, 8]
       },
       {
         id: 'task-toolu_output',
         type: 'task',
-        title: 'TaskOutput',
-        source: 'TaskOutput',
+        title: 'Task output',
+        source: 'Task output',
         status: 'completed',
-        summary: 'Build output ready',
+        summary: 'Completed.',
+        detail: 'bg123',
+        completionSummary: 'Build output ready',
         eventIds: [9, 10]
       },
       {
         id: 'task-toolu_stop',
         type: 'task',
-        title: 'TaskStop',
-        source: 'TaskStop',
+        title: 'Stop task',
+        source: 'Task control',
         status: 'completed',
-        summary: 'Stopped task bg123',
+        summary: 'Completed.',
+        detail: 'bg123',
+        completionSummary: 'Stopped task bg123',
         eventIds: [11, 12]
       }
     ]);

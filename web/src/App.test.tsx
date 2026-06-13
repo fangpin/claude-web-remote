@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import type { SessionInfo, SessionStatus } from './types';
@@ -347,7 +347,32 @@ describe('App', () => {
     expect(await screen.findByText('hello from claude')).toBeInTheDocument();
   });
 
-  it('preserves raw and system events as raw details without rendering them as messages', async () => {
+  it('filters sessions locally by name, cwd, status, and worktree branch', async () => {
+    render(<App />);
+
+    await screen.findAllByText('Repo One');
+    const search = screen.getByRole('searchbox', { name: 'Search sessions' });
+
+    fireEvent.change(search, { target: { value: 'pin/abc123' } });
+
+    expect(sessionButton('Worktree Repo')).toBeInTheDocument();
+    expect(querySessionButton('Repo One')).toBeNull();
+    expect(querySessionButton('Stopped Repo')).toBeNull();
+    expect(screen.getByText('1 of 4 shown')).toBeInTheDocument();
+
+    fireEvent.change(search, { target: { value: 'ended' } });
+
+    expect(sessionButton('Stopped Repo')).toBeInTheDocument();
+    expect(querySessionButton('Worktree Repo')).toBeNull();
+    expect(screen.getByText('1 of 4 shown')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+
+    expect(screen.getByRole('searchbox', { name: 'Search sessions' })).toHaveValue('');
+    expect(querySessionButton('Repo One')).toBeInTheDocument();
+  });
+
+  it('preserves raw events as details and renders system text as readable conversation content', async () => {
     render(<App />);
 
     await screen.findAllByText('Repo One');
@@ -377,7 +402,7 @@ describe('App', () => {
 
     expect(await screen.findByText('visible error event')).toBeInTheDocument();
     expect(screen.queryByText('raw event should stay hidden')).not.toBeInTheDocument();
-    expect(screen.queryByText('system event should stay hidden')).not.toBeInTheDocument();
+    expect(screen.getByText('system event should stay hidden')).toBeInTheDocument();
     expect(screen.getAllByText('Raw events').length).toBeGreaterThanOrEqual(2);
   });
 
@@ -454,6 +479,62 @@ describe('App', () => {
     expect(fetchMock).not.toHaveBeenCalledWith('/api/sessions/s1/input', expect.anything());
   });
 
+  it('keeps composer keyboard behavior for send, newline, IME, and autocomplete selection', async () => {
+    render(<App />);
+
+    const messageInput = await screen.findByLabelText('Message') as HTMLTextAreaElement;
+
+    fireEvent.change(messageInput, { target: { value: 'line one' } });
+    fireEvent.keyDown(messageInput, { key: 'Enter' });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/input', expect.objectContaining({ method: 'POST' })));
+    expect(JSON.parse(String(fetchMock.mock.calls.find(([url]) => String(url) === '/api/sessions/s1/input')?.[1]?.body))).toMatchObject({
+      text: 'line one'
+    });
+    const inputCallCount = () => fetchMock.mock.calls.filter(([url]) => String(url) === '/api/sessions/s1/input').length;
+    const sentBeforeKeyboardChecks = inputCallCount();
+
+    fireEvent.change(messageInput, { target: { value: 'line one' } });
+    fireEvent.keyDown(messageInput, { key: 'Enter', shiftKey: true });
+    expect(inputCallCount()).toBe(sentBeforeKeyboardChecks);
+
+    const composingEnter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    Object.defineProperty(composingEnter, 'isComposing', { configurable: true, value: true });
+    fireEvent(messageInput, composingEnter);
+    expect(inputCallCount()).toBe(sentBeforeKeyboardChecks);
+
+    fireEvent.change(messageInput, { target: { value: '/he', selectionStart: 3 } });
+    fireEvent.keyDown(messageInput, { key: 'Enter' });
+
+    expect(messageInput).toHaveValue('/help ');
+    expect(inputCallCount()).toBe(sentBeforeKeyboardChecks);
+  });
+
+  it('auto-resizes the message textarea for multi-line drafts and caps tall content', async () => {
+    render(<App />);
+
+    const messageInput = await screen.findByLabelText('Message') as HTMLTextAreaElement;
+    Object.defineProperty(messageInput, 'scrollHeight', {
+      configurable: true,
+      value: 96
+    });
+
+    fireEvent.change(messageInput, { target: { value: 'first line\nsecond line\nthird line' } });
+
+    expect(messageInput.style.height).toBe('96px');
+    expect(messageInput.style.overflowY).toBe('hidden');
+
+    Object.defineProperty(messageInput, 'scrollHeight', {
+      configurable: true,
+      value: 360
+    });
+
+    fireEvent.change(messageInput, { target: { value: Array.from({ length: 20 }, (_, index) => `line ${index}`).join('\n') } });
+
+    expect(messageInput.style.height).toBe('220px');
+    expect(messageInput.style.overflowY).toBe('auto');
+  });
+
   it('sends user input to the active session and preserves text on send failure', async () => {
     render(<App />);
 
@@ -501,9 +582,8 @@ describe('App', () => {
     expect(sendButton).not.toBeDisabled();
 
     fireEvent.click(sendButton);
-    fireEvent.click(screen.getByRole('button', { name: 'Sending...' }));
 
-    expect(screen.getByRole('button', { name: 'Sending...' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Sending message' })).toBeDisabled();
     expect(fetchMock.mock.calls.filter(([url]) => String(url) === '/api/sessions/s1/input')).toHaveLength(1);
 
     await act(async () => inputDeferred.resolve());
