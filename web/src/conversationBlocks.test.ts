@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildConversationBlocks } from './conversationBlocks';
+import { streamJsonCorpus } from './__fixtures__/streamJsonCorpus';
 import type { UiEvent } from './types';
 
 function event(id: number, kind: UiEvent['kind'], payload: unknown): UiEvent {
@@ -95,7 +96,7 @@ describe('buildConversationBlocks', () => {
       {
         id: 'raw-1',
         type: 'raw',
-        label: 'user',
+        label: 'User',
         eventIds: [1],
         rawEvents: [{ id: 1, kind: 'user', payload: userPayload }]
       }
@@ -581,12 +582,124 @@ describe('buildConversationBlocks', () => {
     expect(blocks).toEqual([]);
   });
 
-  it('hides standalone raw and system events from conversation blocks', () => {
+  it('renders standalone raw events with descriptive labels while hiding system events', () => {
     const blocks = buildConversationBlocks([
       event(1, 'raw', { message: 'transport detail' }),
       event(2, 'system', { message: 'session detail' })
     ]);
 
-    expect(blocks).toEqual([]);
+    expect(blocks).toEqual([
+      {
+        id: 'raw-1',
+        type: 'raw',
+        label: 'Raw',
+        eventIds: [1],
+        rawEvents: [{ id: 1, kind: 'raw', payload: { message: 'transport detail' } }]
+      }
+    ]);
+  });
+
+  it('covers representative Claude stream-json corpus shapes with stable blocks', () => {
+    expect(buildConversationBlocks(streamJsonCorpus.plainMessages)).toMatchObject([
+      { type: 'message', role: 'assistant', text: 'Hello from Claude.' },
+      { type: 'message', role: 'user', text: 'Thanks.' }
+    ]);
+
+    expect(buildConversationBlocks(streamJsonCorpus.markdownAndCode)).toMatchObject([
+      { type: 'message', role: 'assistant', text: 'Use this:\n\n```ts\nconst ok = true;\n```' }
+    ]);
+
+    expect(buildConversationBlocks(streamJsonCorpus.toolUseAndResult)).toMatchObject([
+      {
+        id: 'tool-toolu_ls',
+        type: 'tool',
+        name: 'Bash',
+        status: 'completed',
+        resultSummary: 'App.tsx\nmain.tsx',
+        resultDisplay: 'collapsed',
+        eventIds: [20, 21]
+      }
+    ]);
+
+    expect(buildConversationBlocks(streamJsonCorpus.failedTool)).toMatchObject([
+      {
+        id: 'tool-toolu_fail',
+        type: 'tool',
+        name: 'Bash',
+        status: 'failed',
+        resultSummary: 'Command failed with exit code 1',
+        resultDisplay: 'visible'
+      }
+    ]);
+
+    expect(buildConversationBlocks(streamJsonCorpus.hiddenReadOnlyTool)).toMatchObject([
+      { id: 'anchor-toolu_read-41', type: 'anchor', eventIds: [40, 41] }
+    ]);
+
+    expect(buildConversationBlocks(streamJsonCorpus.backgroundTaskStartCompleteFail)).toMatchObject([
+      {
+        id: 'task-toolu_bg_start',
+        type: 'task',
+        source: 'Background Bash',
+        status: 'running',
+        outputPath: '/tmp/claude-remote-web-fixture/test.log'
+      },
+      {
+        id: 'task-toolu_bg_done',
+        type: 'task',
+        source: 'Task output',
+        status: 'completed',
+        completionSummary: 'Tests passed'
+      },
+      {
+        id: 'task-toolu_bg_fail',
+        type: 'task',
+        source: 'Task output',
+        status: 'failed',
+        failureSummary: 'Task failed: build error'
+      }
+    ]);
+
+    expect(buildConversationBlocks(streamJsonCorpus.permissionWaitingEvent)).toMatchObject([
+      { id: 'raw-60', type: 'raw', label: 'Raw · Permission request', eventIds: [60] }
+    ]);
+
+    expect(buildConversationBlocks(streamJsonCorpus.stderrSystemError)).toMatchObject([
+      { id: 'error-70', type: 'error', message: 'stderr: failed to launch Claude helper' },
+      { id: 'error-71', type: 'error', message: 'panic: helper crashed' }
+    ]);
+
+    expect(buildConversationBlocks(streamJsonCorpus.malformedUnknownPayload)).toMatchObject([
+      { id: 'raw-80', type: 'raw', label: 'Raw · Future event · Delta chunk', eventIds: [80] }
+    ]);
+
+    expect(buildConversationBlocks(streamJsonCorpus.interleavedEvents)).toMatchObject([
+      { id: 'anchor-toolu_read_interleaved-93', type: 'anchor', eventIds: [90, 93] },
+      { id: 'message-assistant-91', type: 'message', role: 'assistant', text: 'I am checking that file.' },
+      {
+        id: 'tool-toolu_bash_interleaved',
+        type: 'tool',
+        name: 'Bash',
+        status: 'completed',
+        resultSummary: 'Tests passed',
+        eventIds: [92, 94]
+      }
+    ]);
+  });
+
+  it('pairs out-of-order tool results when the matching tool_use arrives later', () => {
+    const blocks = buildConversationBlocks(streamJsonCorpus.outOfOrderToolResult);
+
+    expect(blocks).toMatchObject([
+      {
+        id: 'tool-toolu_late_use',
+        type: 'tool',
+        name: 'Bash',
+        status: 'completed',
+        inputSummary: '$ echo late',
+        resultSummary: 'late output',
+        eventIds: [101, 100]
+      }
+    ]);
   });
 });

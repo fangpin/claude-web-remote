@@ -477,7 +477,7 @@ describe('App', () => {
     expect(querySessionButton('Repo One')).toBeInTheDocument();
   });
 
-  it('hides raw and system events without rendering conversation cards', async () => {
+  it('renders raw fallback cards and hides system events', async () => {
     render(<App />);
 
     await screen.findAllByText('Repo One');
@@ -506,9 +506,10 @@ describe('App', () => {
     });
 
     expect(await screen.findByText('visible error event')).toBeInTheDocument();
+    expect(screen.getByText('Raw')).toBeInTheDocument();
     expect(screen.queryByText('raw event should stay hidden')).not.toBeInTheDocument();
     expect(screen.queryByText('system event should stay hidden')).not.toBeInTheDocument();
-    expect(screen.getAllByText('Raw events')).toHaveLength(1);
+    expect(screen.getAllByText('Raw events')).toHaveLength(2);
   });
 
   it('creates a session from the form and can include worktree request data', async () => {
