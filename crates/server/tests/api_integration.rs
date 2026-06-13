@@ -212,9 +212,9 @@ async fn seed_task_session(store: &EventStore, name: &str) -> Uuid {
             EventKind::Tool,
             json!({
                 "type": "tool_use",
-                "id": format!("toolu-{name}"),
-                "name": "Bash",
-                "input": { "command": format!("echo {name}") }
+                "id": format!("read-{name}"),
+                "name": "Read",
+                "input": { "file_path": format!("/repo/{name}/README.md") }
             }),
         ))
         .await
@@ -222,6 +222,33 @@ async fn seed_task_session(store: &EventStore, name: &str) -> Uuid {
     store
         .append_event(&UiEvent::new(
             2,
+            session_id,
+            EventKind::Tool,
+            json!({
+                "type": "tool_result",
+                "tool_use_id": format!("read-{name}"),
+                "content": format!("ordinary {name}")
+            }),
+        ))
+        .await
+        .unwrap();
+    store
+        .append_event(&UiEvent::new(
+            3,
+            session_id,
+            EventKind::Tool,
+            json!({
+                "type": "tool_use",
+                "id": format!("toolu-{name}"),
+                "name": "Agent",
+                "input": { "description": format!("Review {name}") }
+            }),
+        ))
+        .await
+        .unwrap();
+    store
+        .append_event(&UiEvent::new(
+            4,
             session_id,
             EventKind::Tool,
             json!({
@@ -375,6 +402,7 @@ async fn lists_tasks_across_sessions() {
             .iter()
             .any(|task| task["sessionId"] == second_session.to_string())
     );
+    assert!(finished.iter().all(|task| task["toolKind"] == "Agent"));
 }
 
 #[tokio::test]

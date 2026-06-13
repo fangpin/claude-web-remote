@@ -84,8 +84,8 @@ const taskGroups = {
       sessionId: 's2',
       sessionName: 'Stopped Repo',
       sessionCwd: '/repo/stopped',
-      toolKind: 'Bash',
-      title: 'Bash: sleep 10',
+      toolKind: 'Agent',
+      title: 'Agent: Check stopped repo',
       status: 'background',
       startedAt: '2026-06-12T00:00:00Z',
       finishedAt: null,
@@ -780,15 +780,17 @@ describe('App', () => {
     expect(screen.getByText('Stop only')).toBeInTheDocument();
   });
 
-  it('shows session tasks in the inspector and can switch to all tasks and details', async () => {
+  it('shows session tasks in the inspector and can switch to all tasks and plan', async () => {
     render(<App />);
 
     const inspector = await screen.findByRole('complementary', { name: 'Session inspector' });
     const sessionPanel = within(inspector).getByRole('tabpanel', { name: 'Session tasks' });
     expect(within(sessionPanel).getByRole('heading', { name: 'Session tasks' })).toBeInTheDocument();
     expect(await within(sessionPanel).findByText('Agent: Review branch')).toBeInTheDocument();
+    expect(within(inspector).queryByRole('tab', { name: 'Details' })).not.toBeInTheDocument();
     expect(within(inspector).getByRole('tab', { name: 'Session tasks' })).toHaveAttribute('tabIndex', '0');
     expect(within(inspector).getByRole('tab', { name: 'All tasks' })).toHaveAttribute('tabIndex', '-1');
+    expect(within(inspector).getByRole('tab', { name: 'Plan' })).toHaveAttribute('tabIndex', '-1');
 
     fireEvent.keyDown(within(inspector).getByRole('tab', { name: 'Session tasks' }), { key: 'ArrowRight' });
     expect(within(inspector).getByRole('tab', { name: 'All tasks' })).toHaveAttribute('aria-selected', 'true');
@@ -797,12 +799,27 @@ describe('App', () => {
 
     fireEvent.click(within(inspector).getByRole('tab', { name: 'All tasks' }));
     const allTasksPanel = within(inspector).getByRole('tabpanel', { name: 'All tasks' });
-    expect(await within(allTasksPanel).findByText('Bash: sleep 10')).toBeInTheDocument();
+    expect(await within(allTasksPanel).findByText('Agent: Check stopped repo')).toBeInTheDocument();
 
-    fireEvent.click(within(inspector).getByRole('tab', { name: 'Details' }));
-    const detailsPanel = within(inspector).getByRole('tabpanel', { name: 'Details' });
-    expect(within(detailsPanel).getByText('Permission mode')).toBeInTheDocument();
-    expect(within(detailsPanel).getByText('acceptEdits')).toBeInTheDocument();
+    fireEvent.click(within(inspector).getByRole('tab', { name: 'Plan' }));
+    const planPanel = within(inspector).getByRole('tabpanel', { name: 'Plan' });
+    expect(within(planPanel).getByText('No plan available for this session.')).toBeInTheDocument();
+
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBe(1));
+    FakeWebSocket.instances[0].emit({
+      id: 42,
+      sessionId: 's1',
+      time: '2026-06-11T00:00:00Z',
+      kind: 'tool',
+      payload: {
+        type: 'tool_use',
+        name: 'ExitPlanMode',
+        input: { plan: '# Session plan\n\n- Replace details with plan.' }
+      }
+    });
+
+    expect(await within(planPanel).findByText(/Replace details with plan/)).toBeInTheDocument();
+    expect(within(planPanel).getByText('From ExitPlanMode')).toBeInTheDocument();
   });
 
   it('selects the owning session and refreshes tasks when a task is clicked', async () => {
@@ -811,7 +828,7 @@ describe('App', () => {
     const inspector = await screen.findByRole('complementary', { name: 'Session inspector' });
     fireEvent.click(within(inspector).getByRole('tab', { name: 'All tasks' }));
     const allTasksPanel = within(inspector).getByRole('tabpanel', { name: 'All tasks' });
-    const task = await within(allTasksPanel).findByText('Bash: sleep 10');
+    const task = await within(allTasksPanel).findByText('Agent: Check stopped repo');
     const taskListCallsBeforeSelection = fetchMock.mock.calls.filter(([url]) => url === '/api/tasks').length;
 
     fireEvent.click(task);

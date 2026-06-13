@@ -46,12 +46,19 @@ impl TaskGroups {
 
 pub fn project_session_tasks(meta: &SessionMeta, events: &[UiEvent]) -> TaskGroups {
     let mut tasks: HashMap<String, TaskInfo> = HashMap::new();
+    let mut pending_starts: HashMap<String, TaskStart> = HashMap::new();
 
     for event in events {
         let starts = task_starts(meta, event);
         let has_starts = !starts.is_empty();
         for start in starts {
-            tasks.entry(start.id.clone()).or_insert(start);
+            if start.is_task_like(None) {
+                tasks
+                    .entry(start.id.clone())
+                    .or_insert_with(|| start.clone().into_task());
+            } else {
+                pending_starts.entry(start.id.clone()).or_insert(start);
+            }
         }
         if has_starts {
             continue;
@@ -61,10 +68,13 @@ pub fn project_session_tasks(meta: &SessionMeta, events: &[UiEvent]) -> TaskGrou
         let has_finishes = !finishes.is_empty();
         for finish in finishes {
             if let Some(task) = tasks.get_mut(&finish.task_id) {
-                task.status = finish.status;
-                task.finished_at = Some(event.time);
-                task.finish_event_id = Some(event.id);
-                task.summary = finish.summary;
+                apply_task_finish(task, event, finish);
+            } else if let Some(start) = pending_starts.remove(&finish.task_id) {
+                if start.is_task_like(finish.summary.as_deref()) {
+                    let mut task = start.into_task();
+                    apply_task_finish(&mut task, event, finish);
+                    tasks.entry(task.id.clone()).or_insert(task);
+                }
             }
         }
         if has_finishes {
@@ -96,6 +106,24 @@ pub fn project_session_tasks(meta: &SessionMeta, events: &[UiEvent]) -> TaskGrou
     group_tasks(tasks.into_values().collect())
 }
 
+fn apply_task_finish(task: &mut TaskInfo, event: &UiEvent, finish: TaskFinish) {
+    if task.tool_kind == "Bash"
+        && finish.status == TaskStatus::Completed
+        && finish
+            .summary
+            .as_deref()
+            .is_some_and(is_background_bash_start_summary)
+    {
+        task.summary = finish.summary;
+        return;
+    }
+
+    task.status = finish.status;
+    task.finished_at = Some(event.time);
+    task.finish_event_id = Some(event.id);
+    task.summary = finish.summary;
+}
+
 pub fn group_tasks(mut tasks: Vec<TaskInfo>) -> TaskGroups {
     tasks.sort_by(|a, b| b.started_at.cmp(&a.started_at));
     let mut groups = TaskGroups::default();
@@ -114,13 +142,59 @@ pub fn group_tasks(mut tasks: Vec<TaskInfo>) -> TaskGroups {
     groups
 }
 
+#[derive(Clone)]
+struct TaskStart {
+    id: String,
+    session_id: Uuid,
+    session_name: Option<String>,
+    session_cwd: PathBuf,
+    tool_kind: String,
+    title: String,
+    started_at: DateTime<Utc>,
+    start_event_id: u64,
+    input: Option<Value>,
+}
+
+impl TaskStart {
+    fn is_task_like(&self, result_summary: Option<&str>) -> bool {
+        matches!(self.tool_kind.as_str(), "Agent" | "Workflow")
+            || self.is_background_bash(result_summary)
+    }
+
+    fn is_background_bash(&self, result_summary: Option<&str>) -> bool {
+        self.tool_kind == "Bash"
+            && (self
+                .input
+                .as_ref()
+                .is_some_and(has_background_bash_input_marker)
+                || result_summary.is_some_and(is_background_bash_start_summary))
+    }
+
+    fn into_task(self) -> TaskInfo {
+        TaskInfo {
+            id: self.id,
+            session_id: self.session_id,
+            session_name: self.session_name,
+            session_cwd: self.session_cwd,
+            tool_kind: self.tool_kind,
+            title: self.title,
+            status: TaskStatus::Background,
+            started_at: self.started_at,
+            finished_at: None,
+            start_event_id: self.start_event_id,
+            finish_event_id: None,
+            summary: None,
+        }
+    }
+}
+
 struct TaskFinish {
     task_id: String,
     status: TaskStatus,
     summary: Option<String>,
 }
 
-fn task_starts(meta: &SessionMeta, event: &UiEvent) -> Vec<TaskInfo> {
+fn task_starts(meta: &SessionMeta, event: &UiEvent) -> Vec<TaskStart> {
     tool_blocks(event, "tool_use")
         .filter_map(|tool_block| task_start_from_block(meta, event, tool_block))
         .collect()
@@ -130,7 +204,7 @@ fn task_start_from_block(
     meta: &SessionMeta,
     event: &UiEvent,
     tool_block: &Value,
-) -> Option<TaskInfo> {
+) -> Option<TaskStart> {
     let raw_id = string_field(
         tool_block,
         &[
@@ -144,24 +218,18 @@ fn task_start_from_block(
     let tool_kind = string_field(tool_block, &["name", "tool_name", "toolName"])
         .unwrap_or_else(|| "tool".to_string());
     let input = tool_block.get("input");
-    let detail = input.and_then(summarize_value);
-    let title = detail
-        .map(|detail| format!("{tool_kind}: {detail}"))
-        .unwrap_or_else(|| tool_kind.clone());
+    let title = task_title(&tool_kind, input);
 
-    Some(TaskInfo {
+    Some(TaskStart {
         id: scoped_task_id(meta.id, &raw_id),
         session_id: meta.id,
         session_name: meta.name.clone(),
         session_cwd: meta.cwd.clone(),
         tool_kind,
         title,
-        status: TaskStatus::Background,
         started_at: event.time,
-        finished_at: None,
         start_event_id: event.id,
-        finish_event_id: None,
-        summary: None,
+        input: input.cloned(),
     })
 }
 
@@ -265,6 +333,27 @@ fn interrupt_background_tasks(
 
 fn scoped_task_id(session_id: Uuid, raw_id: &str) -> String {
     format!("{session_id}:{raw_id}")
+}
+
+fn task_title(tool_kind: &str, input: Option<&Value>) -> String {
+    let detail = if matches!(tool_kind, "Agent" | "Workflow") {
+        input.and_then(|value| string_field(value, &["description", "prompt", "command"]))
+    } else {
+        input.and_then(summarize_value)
+    };
+
+    detail
+        .map(|detail| format!("{tool_kind}: {detail}"))
+        .unwrap_or_else(|| tool_kind.to_string())
+}
+
+fn has_background_bash_input_marker(input: &Value) -> bool {
+    input.get("run_in_background").and_then(Value::as_bool) == Some(true)
+        || input.get("runInBackground").and_then(Value::as_bool) == Some(true)
+}
+
+fn is_background_bash_start_summary(summary: &str) -> bool {
+    summary.contains("Task started in background") || summary.contains("Output file:")
 }
 
 fn string_field(payload: &Value, keys: &[&str]) -> Option<String> {
@@ -374,7 +463,29 @@ mod tests {
     }
 
     #[test]
-    fn tool_use_creates_background_task() {
+    fn ordinary_tool_use_does_not_create_tasks() {
+        let session_id = Uuid::new_v4();
+        let meta = meta(session_id, SessionStatus::Running);
+        let events = vec![event(
+            1,
+            session_id,
+            EventKind::Tool,
+            json!({
+                "type": "tool_use",
+                "id": "toolu_1",
+                "name": "Read",
+                "input": { "file_path": "/repo/demo/README.md" }
+            }),
+        )];
+
+        let tasks = project_session_tasks(&meta, &events);
+
+        assert_eq!(tasks.background.len(), 0);
+        assert_eq!(tasks.finished.len(), 0);
+    }
+
+    #[test]
+    fn foreground_bash_does_not_create_tasks() {
         let session_id = Uuid::new_v4();
         let meta = meta(session_id, SessionStatus::Running);
         let events = vec![event(
@@ -385,7 +496,29 @@ mod tests {
                 "type": "tool_use",
                 "id": "toolu_1",
                 "name": "Bash",
-                "input": { "command": "sleep 10" }
+                "input": { "command": "pwd" }
+            }),
+        )];
+
+        let tasks = project_session_tasks(&meta, &events);
+
+        assert_eq!(tasks.background.len(), 0);
+        assert_eq!(tasks.finished.len(), 0);
+    }
+
+    #[test]
+    fn background_bash_input_creates_background_task() {
+        let session_id = Uuid::new_v4();
+        let meta = meta(session_id, SessionStatus::Running);
+        let events = vec![event(
+            1,
+            session_id,
+            EventKind::Tool,
+            json!({
+                "type": "tool_use",
+                "id": "toolu_1",
+                "name": "Bash",
+                "input": { "command": "sleep 10", "run_in_background": true }
             }),
         )];
 
@@ -401,7 +534,7 @@ mod tests {
     }
 
     #[test]
-    fn matching_tool_result_marks_task_completed() {
+    fn background_bash_result_text_creates_task() {
         let session_id = Uuid::new_v4();
         let meta = meta(session_id, SessionStatus::Running);
         let events = vec![
@@ -413,7 +546,7 @@ mod tests {
                     "type": "tool_use",
                     "id": "toolu_1",
                     "name": "Bash",
-                    "input": { "command": "pwd" }
+                    "input": { "command": "npm test" }
                 }),
             ),
             event(
@@ -423,7 +556,49 @@ mod tests {
                 json!({
                     "type": "tool_result",
                     "tool_use_id": "toolu_1",
-                    "content": "/repo/demo"
+                    "content": "Task started in background with ID task_123. Output file: /tmp/task_123.log"
+                }),
+            ),
+        ];
+
+        let tasks = project_session_tasks(&meta, &events);
+
+        assert_eq!(tasks.background.len(), 1);
+        assert_eq!(tasks.finished.len(), 0);
+        assert_eq!(tasks.background[0].tool_kind, "Bash");
+        assert_eq!(
+            tasks.background[0].summary,
+            Some(
+                "Task started in background with ID task_123. Output file: /tmp/task_123.log"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn agent_tool_result_marks_task_completed() {
+        let session_id = Uuid::new_v4();
+        let meta = meta(session_id, SessionStatus::Running);
+        let events = vec![
+            event(
+                1,
+                session_id,
+                EventKind::Tool,
+                json!({
+                    "type": "tool_use",
+                    "id": "toolu_1",
+                    "name": "Agent",
+                    "input": { "description": "Review the branch", "prompt": "Check the diff" }
+                }),
+            ),
+            event(
+                2,
+                session_id,
+                EventKind::Tool,
+                json!({
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_1",
+                    "content": "No issues found"
                 }),
             ),
         ];
@@ -432,13 +607,18 @@ mod tests {
 
         assert_eq!(tasks.background.len(), 0);
         assert_eq!(tasks.finished.len(), 1);
+        assert_eq!(tasks.finished[0].tool_kind, "Agent");
+        assert_eq!(tasks.finished[0].title, "Agent: Review the branch");
         assert_eq!(tasks.finished[0].status, TaskStatus::Completed);
         assert_eq!(tasks.finished[0].finish_event_id, Some(2));
-        assert_eq!(tasks.finished[0].summary, Some("/repo/demo".to_string()));
+        assert_eq!(
+            tasks.finished[0].summary,
+            Some("No issues found".to_string())
+        );
     }
 
     #[test]
-    fn nested_assistant_tool_use_creates_background_task() {
+    fn nested_assistant_agent_tool_use_creates_background_task() {
         let session_id = Uuid::new_v4();
         let meta = meta(session_id, SessionStatus::Running);
         let events = vec![event(
@@ -451,13 +631,13 @@ mod tests {
                     "content": [
                         {
                             "type": "text",
-                            "text": "I will check the directory."
+                            "text": "I will ask another agent to review this."
                         },
                         {
                             "type": "tool_use",
                             "id": "toolu_1",
-                            "name": "Bash",
-                            "input": { "command": "pwd" }
+                            "name": "Agent",
+                            "input": { "description": "Review the branch", "subagent_type": "Explore" }
                         }
                     ]
                 }
@@ -469,65 +649,14 @@ mod tests {
         assert_eq!(tasks.background.len(), 1);
         assert_eq!(tasks.finished.len(), 0);
         assert_eq!(tasks.background[0].id, format!("{session_id}:toolu_1"));
-        assert_eq!(tasks.background[0].tool_kind, "Bash");
-        assert_eq!(tasks.background[0].title, "Bash: pwd");
+        assert_eq!(tasks.background[0].tool_kind, "Agent");
+        assert_eq!(tasks.background[0].title, "Agent: Review the branch");
         assert_eq!(tasks.background[0].status, TaskStatus::Background);
         assert_eq!(tasks.background[0].start_event_id, 1);
     }
 
     #[test]
-    fn nested_user_tool_result_marks_task_completed() {
-        let session_id = Uuid::new_v4();
-        let meta = meta(session_id, SessionStatus::Running);
-        let events = vec![
-            event(
-                1,
-                session_id,
-                EventKind::Assistant,
-                json!({
-                    "type": "assistant",
-                    "message": {
-                        "content": [
-                            {
-                                "type": "tool_use",
-                                "id": "toolu_1",
-                                "name": "Bash",
-                                "input": { "command": "pwd" }
-                            }
-                        ]
-                    }
-                }),
-            ),
-            event(
-                2,
-                session_id,
-                EventKind::User,
-                json!({
-                    "type": "user",
-                    "message": {
-                        "content": [
-                            {
-                                "type": "tool_result",
-                                "tool_use_id": "toolu_1",
-                                "content": "/repo/demo"
-                            }
-                        ]
-                    }
-                }),
-            ),
-        ];
-
-        let tasks = project_session_tasks(&meta, &events);
-
-        assert_eq!(tasks.background.len(), 0);
-        assert_eq!(tasks.finished.len(), 1);
-        assert_eq!(tasks.finished[0].status, TaskStatus::Completed);
-        assert_eq!(tasks.finished[0].finish_event_id, Some(2));
-        assert_eq!(tasks.finished[0].summary, Some("/repo/demo".to_string()));
-    }
-
-    #[test]
-    fn payload_content_tool_blocks_are_projected() {
+    fn payload_content_background_tool_blocks_are_projected() {
         let session_id = Uuid::new_v4();
         let meta = meta(session_id, SessionStatus::Running);
         let events = vec![
@@ -542,7 +671,7 @@ mod tests {
                             "type": "tool_use",
                             "id": "toolu_1",
                             "name": "Bash",
-                            "input": { "command": "git status" }
+                            "input": { "command": "git status", "runInBackground": true }
                         }
                     ]
                 }),
@@ -570,6 +699,91 @@ mod tests {
         assert_eq!(tasks.finished.len(), 1);
         assert_eq!(tasks.finished[0].status, TaskStatus::Completed);
         assert_eq!(tasks.finished[0].summary, Some("clean".to_string()));
+    }
+
+    #[test]
+    fn ordinary_tool_results_do_not_create_tasks() {
+        let session_id = Uuid::new_v4();
+        let meta = meta(session_id, SessionStatus::Running);
+        let events = vec![
+            event(
+                1,
+                session_id,
+                EventKind::Tool,
+                json!({
+                    "type": "tool_use",
+                    "id": "toolu_1",
+                    "name": "Read",
+                    "input": { "file_path": "/repo/demo/README.md" }
+                }),
+            ),
+            event(
+                2,
+                session_id,
+                EventKind::Tool,
+                json!({
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_1",
+                    "content": "contents"
+                }),
+            ),
+        ];
+
+        let tasks = project_session_tasks(&meta, &events);
+
+        assert_eq!(tasks.background.len(), 0);
+        assert_eq!(tasks.finished.len(), 0);
+    }
+
+    #[test]
+    fn nested_user_tool_result_marks_agent_task_completed() {
+        let session_id = Uuid::new_v4();
+        let meta = meta(session_id, SessionStatus::Running);
+        let events = vec![
+            event(
+                1,
+                session_id,
+                EventKind::Assistant,
+                json!({
+                    "type": "assistant",
+                    "message": {
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "toolu_1",
+                                "name": "Agent",
+                                "input": { "description": "Review the branch" }
+                            }
+                        ]
+                    }
+                }),
+            ),
+            event(
+                2,
+                session_id,
+                EventKind::User,
+                json!({
+                    "type": "user",
+                    "message": {
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": "toolu_1",
+                                "content": "Looks good"
+                            }
+                        ]
+                    }
+                }),
+            ),
+        ];
+
+        let tasks = project_session_tasks(&meta, &events);
+
+        assert_eq!(tasks.background.len(), 0);
+        assert_eq!(tasks.finished.len(), 1);
+        assert_eq!(tasks.finished[0].status, TaskStatus::Completed);
+        assert_eq!(tasks.finished[0].finish_event_id, Some(2));
+        assert_eq!(tasks.finished[0].summary, Some("Looks good".to_string()));
     }
 
     #[test]
@@ -606,8 +820,8 @@ mod tests {
                 json!({
                     "type": "tool_use",
                     "id": "toolu_1",
-                    "name": "Bash",
-                    "input": { "command": "pwd" }
+                    "name": "Agent",
+                    "input": { "description": "Review the branch" }
                 }),
             ),
             event(
@@ -642,8 +856,8 @@ mod tests {
                 json!({
                     "type": "tool_use",
                     "id": "toolu_1",
-                    "name": "Bash",
-                    "input": { "command": "pwd" }
+                    "name": "Agent",
+                    "input": { "description": "Review the branch" }
                 }),
             ),
             event(
@@ -677,8 +891,8 @@ mod tests {
                 json!({
                     "type": "tool_use",
                     "id": "toolu_1",
-                    "name": "Bash",
-                    "input": { "command": "pwd" }
+                    "name": "Agent",
+                    "input": { "description": "Review the branch" }
                 }),
             ),
             event(
@@ -712,8 +926,8 @@ mod tests {
                 json!({
                     "type": "tool_use",
                     "id": "toolu_1",
-                    "name": "Bash",
-                    "input": { "command": "false" }
+                    "name": "Agent",
+                    "input": { "description": "Review the branch" }
                 }),
             ),
             event(
