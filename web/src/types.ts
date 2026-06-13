@@ -1,4 +1,5 @@
 export type SessionStatus = 'starting' | 'running' | 'exited' | 'stopped' | 'failed';
+export type SessionRuntimeStatus = 'starting' | 'running' | 'waiting' | 'ended' | 'stopped' | 'failed';
 
 export type WorktreeInfo = {
   sourceCwd: string;
@@ -13,6 +14,7 @@ export type SessionInfo = {
   cwd: string;
   permissionMode: string;
   status: SessionStatus;
+  runtimeStatus?: SessionRuntimeStatus;
   claudeSessionId?: string | null;
   worktree?: WorktreeInfo | null;
   deletedAt?: string | null;

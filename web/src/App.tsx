@@ -27,6 +27,16 @@ const EVENT_RENDER_LIMIT = 80;
 type SessionListMode = 'active' | 'archived';
 type AppView = 'sessions' | 'config';
 
+const runtimeStatusLabels = {
+  starting: 'Starting',
+  running: 'Running',
+  waiting: 'Waiting for you',
+  ended: 'Ended',
+  exited: 'Ended',
+  stopped: 'Stopped',
+  failed: 'Failed'
+};
+
 export default function App() {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -135,6 +145,35 @@ export default function App() {
     }
   }, []);
 
+  const refreshSessions = useCallback(async (mode: SessionListMode, options: { reset?: boolean } = {}) => {
+    const refreshId = ++listRefreshIdRef.current;
+    if (options.reset) {
+      setIsListLoading(true);
+      setSessions([]);
+      setActiveId(null);
+    }
+    try {
+      const loaded = await listSessions({ archivedOnly: mode === 'archived' });
+      if (refreshId !== listRefreshIdRef.current) return;
+      setSessions(loaded);
+      if (options.reset) {
+        setActiveId(loaded[0]?.id ?? null);
+      } else {
+        setActiveId((currentActiveId) => {
+          if (!currentActiveId) return loaded[0]?.id ?? null;
+          return loaded.some((session) => session.id === currentActiveId) ? currentActiveId : loaded[0]?.id ?? null;
+        });
+      }
+      if (mode === 'active') void refreshTasks();
+    } catch (err: unknown) {
+      if (refreshId !== listRefreshIdRef.current) return;
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      if (refreshId !== listRefreshIdRef.current) return;
+      if (options.reset) setIsListLoading(false);
+    }
+  }, [refreshTasks]);
+
   function onSelectTask(task: TaskInfo) {
     if (listMode !== 'active') {
       skipNextListRefresh.current = false;
@@ -149,26 +188,8 @@ export default function App() {
       skipNextListRefresh.current = false;
       return;
     }
-    const refreshId = ++listRefreshIdRef.current;
-    setIsListLoading(true);
-    setSessions([]);
-    setActiveId(null);
-    listSessions({ archivedOnly: listMode === 'archived' })
-      .then((loaded) => {
-        if (refreshId !== listRefreshIdRef.current) return;
-        setSessions(loaded);
-        setActiveId(loaded[0]?.id ?? null);
-        if (listMode === 'active') void refreshTasks();
-      })
-      .catch((err: unknown) => {
-        if (refreshId !== listRefreshIdRef.current) return;
-        setError(err instanceof Error ? err.message : String(err));
-      })
-      .finally(() => {
-        if (refreshId !== listRefreshIdRef.current) return;
-        setIsListLoading(false);
-      });
-  }, [listMode, refreshTasks]);
+    void refreshSessions(listMode, { reset: true });
+  }, [listMode, refreshSessions]);
 
   useEffect(() => {
     activeIdRef.current = activeId;
@@ -186,9 +207,12 @@ export default function App() {
   useEffect(() => {
     const intervalId = window.setInterval(() => {
       void refreshTasks();
+      if (listMode === 'active') {
+        void refreshSessions('active');
+      }
     }, 5000);
     return () => window.clearInterval(intervalId);
-  }, [refreshTasks]);
+  }, [listMode, refreshSessions, refreshTasks]);
 
   useEffect(() => {
     if (!activeSession || !isActiveSessionMode) return;
@@ -346,14 +370,14 @@ export default function App() {
       setSessions((current) => current.map((session) => {
         if (session.id !== sessionId) return session;
         if (removeWorktree && session.worktree) {
-          return { ...session, cwd: session.worktree.sourceCwd, status: 'stopped', worktree: null };
+          return { ...session, cwd: session.worktree.sourceCwd, status: 'stopped', runtimeStatus: 'stopped', worktree: null };
         }
-        return { ...session, status: 'stopped' };
+        return { ...session, status: 'stopped', runtimeStatus: 'stopped' };
       }));
     } catch (err: unknown) {
       if (removeWorktree) {
         setSessions((current) => current.map((session) => (
-          session.id === sessionId ? { ...session, status: 'stopped' } : session
+          session.id === sessionId ? { ...session, status: 'stopped', runtimeStatus: 'stopped' } : session
         )));
       }
       setError(err instanceof Error ? err.message : String(err));
@@ -632,18 +656,21 @@ export default function App() {
             <h2>{listMode === 'archived' ? 'Archived sessions' : 'Sessions'}</h2>
             {isListLoading && <p className="muted">Loading sessions...</p>}
             {!isListLoading && sessions.length === 0 && <p className="muted">{listMode === 'archived' ? 'No archived sessions.' : 'No sessions yet.'}</p>}
-            {sessions.map((session) => (
-              <button
-                key={session.id}
-                className={session.id === activeId ? 'session active' : 'session'}
-                onClick={() => setActiveId(session.id)}
-              >
-                <strong>{session.name || session.cwd}</strong>
-                <span className="session-path" title={session.cwd}>{session.cwd}</span>
-                {session.worktree && <span className="session-path" title={session.worktree.branch}>{session.worktree.branch}</span>}
-                <em className={`status status-${session.status}`}>{session.status}</em>
-              </button>
-            ))}
+            {sessions.map((session) => {
+              const runtimeStatus = session.runtimeStatus ?? session.status;
+              return (
+                <button
+                  key={session.id}
+                  className={session.id === activeId ? 'session active' : 'session'}
+                  onClick={() => setActiveId(session.id)}
+                >
+                  <strong>{session.name || session.cwd}</strong>
+                  <span className="session-path" title={session.cwd}>{session.cwd}</span>
+                  {session.worktree && <span className="session-path" title={session.worktree.branch}>{session.worktree.branch}</span>}
+                  <em className={`status status-${runtimeStatus}`}>{runtimeStatusLabels[runtimeStatus]}</em>
+                </button>
+              );
+            })}
           </section>
         </aside>
       )}
