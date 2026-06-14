@@ -4,6 +4,8 @@
 
 Claude Remote Web is a Rust daemon plus React Web UI for controlling Claude Code sessions on a remote devbox. The browser is only a control surface; repositories, files, Claude CLI, and gateway configuration stay on the devbox.
 
+The product goal is to be the web version of the Claude app: its functionality, UI design, and interactions should stay as close to the Claude app as practical.
+
 Default access is SSH-only:
 
 ```text
