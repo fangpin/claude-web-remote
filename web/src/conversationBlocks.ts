@@ -630,11 +630,24 @@ function isIgnorableErrorPayload(payload: ObjectPayload): boolean {
   return /NODE_TLS_REJECT_UNAUTHORIZED|node --trace-warnings/i.test(line);
 }
 
+function resultOutcome(payload: ObjectPayload): string | null {
+  return stringField(payload, ['subtype', 'status', 'reason', 'event', 'phase'])?.toLowerCase() ?? null;
+}
+
+function isClaudeResultPayload(event: UiEvent, payload: ObjectPayload): boolean {
+  return payloadType(event, payload).toLowerCase() === 'result';
+}
+
+function isSuccessfulResultPayload(event: UiEvent, payload: ObjectPayload): boolean {
+  return isClaudeResultPayload(event, payload) && resultOutcome(payload) === 'success';
+}
+
 function isErrorLikePayload(event: UiEvent, payload: ObjectPayload): boolean {
   if (event.kind === 'error') return true;
 
   const type = payloadType(event, payload).toLowerCase();
   if (type === 'tool_use' || type === 'tool_result') return false;
+  if (isClaudeResultPayload(event, payload) && /error|failed|failure/.test(resultOutcome(payload) ?? '')) return true;
   if (hasStructuredFailure(payload)) return true;
   if (/error|failed|failure|exception|stderr/.test(type)) return true;
 
@@ -676,6 +689,7 @@ function normalizedItems(event: UiEvent): NormalizedItem[] | null {
   if (isErrorLikePayload(event, payload)) {
     return isIgnorableErrorPayload(payload) ? [] : [{ type: 'error', event, payload }];
   }
+  if (isSuccessfulResultPayload(event, payload)) return [];
   if (event.kind === 'system') return [];
 
   const role = roleFromEvent(event, payload);
