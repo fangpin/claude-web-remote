@@ -49,7 +49,6 @@ type Props = {
   sendStatusText: string;
   suggestions: ClaudeCommand[];
   view: AppView;
-  actions: ReactNode;
   startSurface: ReactNode;
   onAddPathContextAttachment: (path: string) => void;
   onAddTextContextAttachment: (name: string, content: string) => void;
@@ -310,7 +309,6 @@ export default function ConversationWorkspace({
   sendStatusText,
   suggestions,
   view,
-  actions,
   startSurface,
   onAddPathContextAttachment,
   onAddTextContextAttachment,
@@ -383,7 +381,6 @@ export default function ConversationWorkspace({
               </div>
               <p title={workspacePathForSession(activeSession)}>{workspacePathForSession(activeSession)}</p>
             </div>
-            {actions}
           </header>
           {listMode === 'archived' && (
             <p className="deleted-note">This session is archived and read-only. Unarchive it before resuming work or sending messages.</p>

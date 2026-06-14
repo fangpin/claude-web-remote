@@ -538,50 +538,36 @@ function focusFallbackAfterSidebarClose() {
     if (!activeSession) return null;
     if (sessionState.listMode === 'archived' || activeSession.deletedAt) {
       return (
-        <details className="actions action-menu">
-          <summary>More</summary>
-          <div>
-            <button onClick={sessionState.onUnarchive}>Unarchive</button>
-            <button className="danger" onClick={sessionState.onDelete}>Delete</button>
-          </div>
-        </details>
+        <div className="actions session-actions">
+          <button onClick={sessionState.onUnarchive}>Unarchive</button>
+          <button className="danger" onClick={sessionState.onDelete}>Delete</button>
+        </div>
       );
     }
 
     if (activeSession.status === 'running') {
       return (
-        <details className="actions action-menu">
-          <summary>More</summary>
-          <div>
-            {activeSession.worktree ? renderWorktreeStopActions() : <button onClick={() => sessionState.onStop(false)}>End session</button>}
-            <button onClick={sessionState.onRestart}>Restart</button>
-            <button className="danger" onClick={sessionState.onArchive}>Archive</button>
-          </div>
-        </details>
+        <div className="actions session-actions">
+          {activeSession.worktree ? renderWorktreeStopActions() : <button onClick={() => sessionState.onStop(false)}>End session</button>}
+          <button onClick={sessionState.onRestart}>Restart</button>
+          <button className="danger" onClick={sessionState.onArchive}>Archive</button>
+        </div>
       );
     }
 
     if (activeSession.status === 'starting') {
       return (
-        <details className="actions action-menu">
-          <summary>More</summary>
-          <div>
-            {activeSession.worktree ? renderWorktreeStopActions() : <button onClick={() => sessionState.onStop(false)}>End session</button>}
-            <button className="danger" onClick={sessionState.onArchive}>Archive</button>
-          </div>
-        </details>
+        <div className="actions session-actions">
+          {activeSession.worktree ? renderWorktreeStopActions() : <button onClick={() => sessionState.onStop(false)}>End session</button>}
+          <button className="danger" onClick={sessionState.onArchive}>Archive</button>
+        </div>
       );
     }
 
     return (
-      <div className="actions">
+      <div className="actions session-actions">
         <button className="primary-action" onClick={sessionState.onResume}>{getContinueActionLabel(activeSession)}</button>
-        <details className="action-menu">
-          <summary>More</summary>
-          <div>
-            <button className="danger" onClick={sessionState.onArchive}>Archive</button>
-          </div>
-        </details>
+        <button className="danger" onClick={sessionState.onArchive}>Archive</button>
       </div>
     );
   }
@@ -609,6 +595,7 @@ function focusFallbackAfterSidebarClose() {
           sessionSearch={sessionState.sessionSearch}
           sessions={sessionState.sessions}
           visibleSessions={sessionState.visibleSessions}
+          sessionActions={renderActions()}
           onNewChat={() => sessionState.openStartSurface()}
           onSelectSession={sessionState.selectSession}
           onSetListMode={sessionState.setListMode}
@@ -653,7 +640,6 @@ function focusFallbackAfterSidebarClose() {
           sendStatusText={composerState.sendStatusText}
           suggestions={composerState.suggestions}
           view={view}
-          actions={renderActions()}
           startSurface={(
             <ProjectHome
               cwd={sessionState.cwd}
