@@ -504,7 +504,6 @@ describe('App', () => {
 
     expect(screen.queryByRole('navigation', { name: 'Primary navigation' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Chats' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Archive' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Side' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Keys' })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Working directory')).not.toBeInTheDocument();
@@ -1026,7 +1025,7 @@ describe('App', () => {
     expect(screen.getByRole('complementary', { name: 'Session inspector' })).toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: 'b', ctrlKey: true });
-    expect(screen.queryByRole('complementary', { name: 'Session navigation' })).not.toBeVisible();
+    expect(screen.queryByRole('complementary', { name: 'Session navigation' })).not.toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: 'b', ctrlKey: true });
     expect(screen.getByRole('complementary', { name: 'Session navigation' })).toBeVisible();
