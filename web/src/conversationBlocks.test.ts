@@ -599,6 +599,24 @@ describe('buildConversationBlocks', () => {
     ]);
   });
 
+  it('hides successful Claude result events while preserving failed result events', () => {
+    const blocks = buildConversationBlocks([
+      event(1, 'raw', { type: 'result', subtype: 'success', duration_ms: 1250 }),
+      event(2, 'raw', { type: 'result', status: 'success' }),
+      event(3, 'raw', { type: 'result', subtype: 'error', error: 'command failed' })
+    ]);
+
+    expect(blocks).toEqual([
+      {
+        id: 'error-3',
+        type: 'error',
+        message: 'command failed',
+        eventIds: [3],
+        rawEvents: [{ id: 3, kind: 'raw', payload: { type: 'result', subtype: 'error', error: 'command failed' } }]
+      }
+    ]);
+  });
+
   it('covers representative Claude stream-json corpus shapes with stable blocks', () => {
     expect(buildConversationBlocks(streamJsonCorpus.plainMessages)).toMatchObject([
       { type: 'message', role: 'assistant', text: 'Hello from Claude.' },
