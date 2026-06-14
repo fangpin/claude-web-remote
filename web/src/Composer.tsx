@@ -3,6 +3,40 @@ import { runtimeStatusLabels } from './AppShell';
 import type { ClaudeCommand, SlashCommandToken } from './autocomplete';
 import type { ComposerContextAttachment, SessionInfo } from './types';
 
+type ComposerContextDetail = {
+  label: string;
+  value: string;
+};
+
+function basename(path: string): string {
+  const normalized = path.replace(/\/+$/, '');
+  const parts = normalized.split('/').filter(Boolean);
+  return parts.at(-1) ?? (normalized || 'Workspace');
+}
+
+function composerTargetLabel(session: SessionInfo): string {
+  const target = basename(session.worktree?.sourceCwd ?? session.cwd);
+  return session.worktree ? `Target: ${target} · worktree` : `Target: ${target}`;
+}
+
+function composerTargetTitle(session: SessionInfo): string {
+  return session.worktree?.sourceCwd ?? session.cwd;
+}
+
+function composerContextDetails(session: SessionInfo): ComposerContextDetail[] {
+  return [
+    { label: 'cwd', value: session.cwd },
+    { label: 'permission', value: session.permissionMode },
+    ...(session.worktree
+      ? [
+          { label: 'source', value: session.worktree.sourceCwd },
+          { label: 'worktree', value: session.worktree.worktreeCwd },
+          { label: 'branch', value: session.worktree.branch }
+        ]
+      : [])
+  ];
+}
+
 type Props = {
   activeSession: SessionInfo;
   activeSuggestionIndex: number;
@@ -68,20 +102,7 @@ export default function Composer({
   const hasAutocomplete = suggestions.length > 0 && autocompleteToken;
   const runtimeStatus = activeSession.runtimeStatus ?? activeSession.status;
   const statusLabel = isAwaitingClaude ? 'Claude is working' : runtimeStatusLabels[runtimeStatus];
-  const contextSummary = [
-    activeSession.permissionMode,
-    activeSession.worktree?.branch ?? 'direct cwd'
-  ].join(' / ');
-  const contextDetails = [
-    { label: 'cwd', value: activeSession.cwd },
-    { label: 'permission', value: activeSession.permissionMode },
-    ...(activeSession.worktree
-      ? [
-          { label: 'branch', value: activeSession.worktree.branch },
-          { label: 'source', value: activeSession.worktree.sourceCwd }
-        ]
-      : [])
-  ];
+  const contextDetails = composerContextDetails(activeSession);
 
   function addPathContext() {
     if (!pathContext.trim()) return;
@@ -108,12 +129,13 @@ export default function Composer({
       <div className="composer-context" aria-label="Composer context">
         <span className="composer-status-pill">
           <span aria-hidden="true" className="composer-status-dot" />
-          status: {statusLabel}
+          {statusLabel}
         </span>
-        <details className="composer-context-menu composer-context-menu-primary">
-          <summary aria-label="Show composer context">
-            <span>Context</span>
-            <strong>{contextSummary}</strong>
+        <span className="composer-context-chip">Permission: {activeSession.permissionMode}</span>
+        <span className="composer-context-chip" title={composerTargetTitle(activeSession)}>{composerTargetLabel(activeSession)}</span>
+        <details className="composer-context-menu">
+          <summary aria-label="Show session context details">
+            <span>Details</span>
           </summary>
           <dl>
             {contextDetails.map((item) => (
