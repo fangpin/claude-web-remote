@@ -241,7 +241,7 @@ Session transcripts can be read without attaching to a running Claude process:
 GET /api/sessions/<session-id>/transcript?afterId=<last-seen-event-id>&limit=<max-events>
 ```
 
-This returns persisted append-only UI events as `{ "events": [...] }` for active, stopped, ended, failed, or archived sessions. `limit` keeps long-session initial loads bounded by returning only the latest matching events, and `beforeId` can page backward through older transcript windows. The Web UI also caps per-session events retained in browser memory while keeping the persisted transcript append-only. `GET /api/sessions/<session-id>/events?afterId=...` remains the WebSocket replay-then-live stream for running sessions. Archived sessions remain read-only and reject mutation routes such as input, stop, restart, and resume until unarchived.
+This returns persisted append-only UI events as `{ "events": [...] }` for active, stopped, ended, failed, or archived sessions. `limit` keeps long-session initial loads bounded by returning only the latest matching events, and `beforeId` can page backward through older transcript windows. The Web UI renders a bounded event window and loads older transcript pages as the conversation scrolls upward while keeping the persisted transcript append-only. `GET /api/sessions/<session-id>/events?afterId=...` remains the WebSocket replay-then-live stream for running sessions. Archived sessions remain read-only and reject mutation routes such as input, stop, restart, and resume until unarchived.
 
 ## Diagnostics
 

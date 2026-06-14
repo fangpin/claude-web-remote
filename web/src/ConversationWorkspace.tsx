@@ -30,11 +30,12 @@ type Props = {
   error: ApiError | null;
   eventConnectionError: string | null;
   eventConnectionState: EventConnectionState;
-  eventRenderLimit: number;
+  visibleEventCount: number;
   eventsRef: RefObject<HTMLDivElement | null>;
   activeWorktreeStatus: WorktreeStatus | null;
   activeWorktreeStatusError: string | null;
   isWorktreeStatusLoading: boolean;
+  canLoadOlderEvents: boolean;
   hiddenEventCount: number;
   reviewSurface: ReviewSurface | null;
   isAwaitingClaude: boolean;
@@ -288,11 +289,12 @@ export default function ConversationWorkspace({
   error,
   eventConnectionError,
   eventConnectionState,
-  eventRenderLimit,
+  visibleEventCount,
   eventsRef,
   activeWorktreeStatus,
   activeWorktreeStatusError,
   isWorktreeStatusLoading,
+  canLoadOlderEvents,
   hiddenEventCount,
   reviewSurface,
   isAwaitingClaude,
@@ -414,13 +416,17 @@ export default function ConversationWorkspace({
               {(eventConnectionState === 'connecting' || eventConnectionState === 'reconnecting') && activeBlocks.length === 0 && hiddenEventCount === 0 && (
                 <LoadingConversation />
               )}
-              {hiddenEventCount > 0 && (
+              {canLoadOlderEvents && (
                 <div className="event-limit-note">
-                  <span>Showing latest {eventRenderLimit} events. {hiddenEventCount} older events hidden.</span>
+                  <span>
+                    Showing latest {visibleEventCount} events.
+                    {hiddenEventCount > 0 ? ` ${hiddenEventCount} older events hidden.` : ''}
+                    {' '}Scroll up to load earlier.
+                  </span>
                   <button type="button" onClick={onLoadOlderEvents}>Load earlier</button>
                 </div>
               )}
-              {activeBlocks.length === 0 && hiddenEventCount === 0 && eventConnectionState !== 'connecting' && eventConnectionState !== 'reconnecting' && (
+              {activeBlocks.length === 0 && !canLoadOlderEvents && hiddenEventCount === 0 && eventConnectionState !== 'connecting' && eventConnectionState !== 'reconnecting' && (
                 <section className="conversation-empty" aria-label="Conversation starter">
                   <span className="empty-eyebrow">Ready when you are</span>
                   <h3>What would you like Claude to do?</h3>

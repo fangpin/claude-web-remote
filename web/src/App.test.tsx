@@ -164,7 +164,11 @@ function eventsResponse(url: string): Response | null {
   const sessionId = match[1];
   const params = new URLSearchParams(match[2] ?? '');
   const afterId = Number(params.get('afterId') ?? 0);
-  const events = (eventsBySession[sessionId] ?? []).filter((event) => event.id > afterId);
+  const beforeId = Number(params.get('beforeId') ?? 0);
+  const limit = Number(params.get('limit') ?? 0);
+  let events = (eventsBySession[sessionId] ?? []).filter((event) => event.id > afterId);
+  if (beforeId > 0) events = events.filter((event) => event.id < beforeId);
+  if (limit > 0 && events.length > limit) events = events.slice(-limit);
   return jsonResponse({ events });
 }
 
@@ -1175,6 +1179,32 @@ describe('App', () => {
     expect(within(worktreeContext).getByText('pin/abc123')).toBeInTheDocument();
     expect(within(worktreeContext).getByText('/repo/one')).toBeInTheDocument();
     expect(within(worktreeContext).getByText('/repo/one/.claude/worktrees/abc123')).toBeInTheDocument();
+  });
+
+  it('loads earlier transcript events when scrolling to the top', async () => {
+    eventsBySession = {
+      s1: Array.from({ length: 96 }, (_, index) => ({
+        id: index + 1,
+        sessionId: 's1',
+        time: '2026-06-11T00:00:00Z',
+        kind: (index % 2 === 0 ? 'user' : 'assistant') as UiEvent['kind'],
+        payload: { message: `history event ${index + 1}` }
+      }))
+    };
+    render(<App />);
+
+    expect(await screen.findByText('history event 96')).toBeInTheDocument();
+    expect(screen.queryByText('history event 1')).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/transcript?limit=80', undefined);
+
+    const eventsElement = document.querySelector<HTMLElement>('.events');
+    expect(eventsElement).not.toBeNull();
+    Object.defineProperty(eventsElement, 'scrollTop', { configurable: true, writable: true, value: 0 });
+    Object.defineProperty(eventsElement, 'scrollHeight', { configurable: true, writable: true, value: 2000 });
+    fireEvent.scroll(eventsElement as HTMLElement);
+
+    expect(await screen.findByText('history event 1')).toBeInTheDocument();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/transcript?beforeId=17&limit=80', undefined));
   });
 
   it('shows an empty conversation state and fills suggestions without sending', async () => {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { eventsUrl, listSessionEvents } from './api';
 import { buildConversationBlocks } from './conversationBlocks';
 import { extractSessionPlan } from './sessionPlan';
@@ -16,8 +16,6 @@ type SessionConnection = {
   state: EventConnectionState;
   error: string | null;
 };
-
-const MAX_STORED_EVENTS_PER_SESSION = 500;
 
 type UseSessionEventsOptions = {
   activeId: string | null;
@@ -87,15 +85,8 @@ function latestPersistedEventId(events: UiEvent[]): number {
   return events.reduce((latest, event) => (event.id > latest ? event.id : latest), 0);
 }
 
-function trimStoredEvents(events: UiEvent[]): UiEvent[] {
-  if (events.length <= MAX_STORED_EVENTS_PER_SESSION) return events;
-  const pendingEvents = events.filter((event) => event.id < 0);
-  const persistedEvents = events.filter((event) => event.id >= 0).slice(-MAX_STORED_EVENTS_PER_SESSION);
-  return [...persistedEvents, ...pendingEvents];
-}
-
 function mergeEvents(current: UiEvent[], incoming: UiEvent[] = []): UiEvent[] {
-  if (incoming.length === 0) return trimStoredEvents(current);
+  if (incoming.length === 0) return current;
   const incomingUserTexts = new Set(
     incoming
       .map(userEventText)
@@ -114,7 +105,7 @@ function mergeEvents(current: UiEvent[], incoming: UiEvent[] = []): UiEvent[] {
   for (const event of incoming) {
     if (event.id >= 0) byId.set(event.id, event);
   }
-  return trimStoredEvents([...Array.from(byId.values()).sort((a, b) => a.id - b.id), ...pendingEvents]);
+  return [...Array.from(byId.values()).sort((a, b) => a.id - b.id), ...pendingEvents];
 }
 
 export function useSessionEvents({
@@ -127,22 +118,28 @@ export function useSessionEvents({
   refreshSessionTasks
 }: UseSessionEventsOptions) {
   const [events, setEvents] = useState<Record<string, UiEvent[]>>({});
+  const [visibleEventCounts, setVisibleEventCounts] = useState<Record<string, number>>({});
+  const [canLoadOlderEventsBySession, setCanLoadOlderEventsBySession] = useState<Record<string, boolean>>({});
   const [connections, setConnections] = useState<Record<string, SessionConnection>>({});
   const [awaitingClaudeSessionIds, setAwaitingClaudeSessionIds] = useState<Set<string>>(() => new Set());
   const [pendingEventId, setPendingEventId] = useState<number | null>(null);
   const [connectionRetryToken, setConnectionRetryToken] = useState(0);
+  const [isLoadingOlderEvents, setIsLoadingOlderEvents] = useState(false);
   const activeIdRef = useRef<string | null>(null);
   const eventsRef = useRef<HTMLDivElement | null>(null);
   const pendingMessagesRef = useRef<Record<string, PendingMessage[]>>({});
+  const preserveScrollRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
+  const skipNextAutoScrollRef = useRef(false);
   activeIdRef.current = activeId;
 
   const activeEvents = useMemo(
     () => (activeId ? events[activeId] ?? [] : []),
     [activeId, events]
   );
+  const activeVisibleEventCount = activeId ? visibleEventCounts[activeId] ?? eventRenderLimit : eventRenderLimit;
   const visibleEvents = useMemo(
-    () => activeEvents.slice(-eventRenderLimit),
-    [activeEvents, eventRenderLimit]
+    () => activeEvents.slice(-activeVisibleEventCount),
+    [activeEvents, activeVisibleEventCount]
   );
   const activeBlocks = useMemo(
     () => buildConversationBlocks(visibleEvents),
@@ -164,6 +161,7 @@ export function useSessionEvents({
     ? connections[activeId] ?? defaultActiveConnection
     : defaultActiveConnection;
   const hiddenEventCount = activeEvents.length - visibleEvents.length;
+  const canLoadOlderEvents = activeId ? hiddenEventCount > 0 || canLoadOlderEventsBySession[activeId] === true : false;
   const isAwaitingClaude = activeId ? awaitingClaudeSessionIds.has(activeId) : false;
 
   function setConnection(sessionId: string, update: Partial<SessionConnection>) {
@@ -247,6 +245,16 @@ export function useSessionEvents({
       delete next[sessionId];
       return next;
     });
+    setVisibleEventCounts((current) => {
+      const next = { ...current };
+      delete next[sessionId];
+      return next;
+    });
+    setCanLoadOlderEventsBySession((current) => {
+      const next = { ...current };
+      delete next[sessionId];
+      return next;
+    });
     pendingMessagesRef.current = {
       ...pendingMessagesRef.current,
       [sessionId]: []
@@ -254,17 +262,55 @@ export function useSessionEvents({
     markAwaitingClaude(sessionId, false);
   }
 
-  async function loadOlderEvents() {
-    if (!activeId) return;
+  const loadOlderEvents = useCallback(async () => {
+    if (!activeId || isLoadingOlderEvents) return;
     const current = events[activeId] ?? [];
+    const mayFetchOlder = canLoadOlderEventsBySession[activeId] === true;
+    if (current.length <= activeVisibleEventCount && !mayFetchOlder) return;
     const firstPersistedId = current.find((event) => event.id >= 0)?.id;
-    if (!firstPersistedId) return;
-    const older = await listSessionEvents(activeId, 0, eventRenderLimit, firstPersistedId);
-    setEvents((latest) => ({
-      ...latest,
-      [activeId]: mergeEvents(older, latest[activeId] ?? [])
-    }));
-  }
+    if (current.length <= activeVisibleEventCount && !firstPersistedId) return;
+    const eventsElement = eventsRef.current;
+    if (eventsElement) {
+      preserveScrollRef.current = {
+        scrollHeight: eventsElement.scrollHeight,
+        scrollTop: eventsElement.scrollTop
+      };
+      skipNextAutoScrollRef.current = true;
+    }
+    if (current.length > activeVisibleEventCount) {
+      setVisibleEventCounts((counts) => ({
+        ...counts,
+        [activeId]: Math.min(current.length, activeVisibleEventCount + eventRenderLimit)
+      }));
+      return;
+    }
+    if (!firstPersistedId || !mayFetchOlder) return;
+    setIsLoadingOlderEvents(true);
+    try {
+      const older = await listSessionEvents(activeId, 0, eventRenderLimit, firstPersistedId);
+      if (activeIdRef.current !== activeId) return;
+      if (older.length === 0) {
+        preserveScrollRef.current = null;
+        skipNextAutoScrollRef.current = false;
+      }
+      setCanLoadOlderEventsBySession((currentFlags) => ({
+        ...currentFlags,
+        [activeId]: older.length >= eventRenderLimit
+      }));
+      setEvents((latest) => ({
+        ...latest,
+        [activeId]: mergeEvents(older, latest[activeId] ?? [])
+      }));
+      setVisibleEventCounts((counts) => ({
+        ...counts,
+        [activeId]: Math.min((events[activeId]?.length ?? 0) + older.length, activeVisibleEventCount + eventRenderLimit)
+      }));
+    } finally {
+      if (activeIdRef.current === activeId) {
+        setIsLoadingOlderEvents(false);
+      }
+    }
+  }, [activeId, activeVisibleEventCount, canLoadOlderEventsBySession, eventRenderLimit, events, isLoadingOlderEvents]);
 
   function retryActiveEvents() {
     if (!activeId) return;
@@ -282,6 +328,12 @@ export function useSessionEvents({
         const afterId = latestPersistedEventId(events[sessionId] ?? []);
         const loaded = await listSessionEvents(sessionId, afterId, afterId > 0 ? undefined : eventRenderLimit);
         if (cancelled || activeIdRef.current !== sessionId) return;
+        if (afterId === 0) {
+          setCanLoadOlderEventsBySession((current) => ({
+            ...current,
+            [sessionId]: loaded.length >= eventRenderLimit
+          }));
+        }
         setEvents((current) => ({
           ...current,
           [sessionId]: mergeEvents(current[sessionId] ?? [], loaded)
@@ -369,11 +421,35 @@ export function useSessionEvents({
     markAwaitingClaude(activeId, false);
   }, [activeId, isComposerSession]);
 
+  useLayoutEffect(() => {
+    const eventsElement = eventsRef.current;
+    const preserved = preserveScrollRef.current;
+    if (!eventsElement || !preserved) return;
+    eventsElement.scrollTop = preserved.scrollTop + (eventsElement.scrollHeight - preserved.scrollHeight);
+    preserveScrollRef.current = null;
+  }, [visibleEvents.length]);
+
   useEffect(() => {
     const eventsElement = eventsRef.current;
     if (!eventsElement) return;
+    if (skipNextAutoScrollRef.current) {
+      skipNextAutoScrollRef.current = false;
+      return;
+    }
     eventsElement.scrollTop = eventsElement.scrollHeight;
   }, [activeId, visibleEvents.length]);
+
+  useEffect(() => {
+    const eventsElement = eventsRef.current;
+    if (!eventsElement) return;
+    function onScroll() {
+      if (eventsElement.scrollTop <= 48 && canLoadOlderEvents) {
+        void loadOlderEvents();
+      }
+    }
+    eventsElement.addEventListener('scroll', onScroll);
+    return () => eventsElement.removeEventListener('scroll', onScroll);
+  }, [canLoadOlderEvents, loadOlderEvents]);
 
   useEffect(() => {
     if (pendingEventId === null) return;
@@ -396,6 +472,7 @@ export function useSessionEvents({
     addPendingMessage,
     events,
     eventsRef,
+    canLoadOlderEvents,
     hiddenEventCount,
     isAwaitingClaude,
     loadOlderEvents,
