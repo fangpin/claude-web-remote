@@ -769,18 +769,25 @@ describe('App', () => {
     expect(screen.getAllByText('Raw events')).toHaveLength(2);
   });
 
-  it('creates a session from the form and can include worktree request data', async () => {
+  it('creates a session from the start composer and sends the initial prompt', async () => {
     render(<App />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'New chat' }));
-    expect(await screen.findByRole('heading', { name: 'Where should Claude work?' })).toBeInTheDocument();
-    expect(screen.getByText('Choose a devbox workspace, then start with the same calm chat flow as the Claude app.')).toBeInTheDocument();
-    expect(screen.getByText('Advanced options').closest('details')).toHaveAttribute('open');
+    expect(await screen.findByRole('heading', { name: 'What would you like Claude to do?' })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Ask Claude to explain, edit, test, review…')).toBeInTheDocument();
+    expect(screen.getByLabelText('Start prompt')).toHaveFocus();
+    expect(screen.getByText('Project: one')).toBeInTheDocument();
+    expect(screen.getByText('Worktree: On')).toBeInTheDocument();
+    expect(screen.getByText('Permission: bypassPermissions')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Workspace context')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Change project context' }));
     fireEvent.change(await screen.findByLabelText('Workspace context'), { target: { value: '/repo/two' } });
     expect(screen.getByText('Skip prompts for trusted local repos.')).toBeInTheDocument();
     expect(screen.getByLabelText('Use git worktree')).toBeChecked();
-    fireEvent.click(screen.getByText('Start chat'));
 
+    fireEvent.change(screen.getByLabelText('Start prompt'), { target: { value: 'Explain this repo structure' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     expect(await screen.findByRole('heading', { name: 'two', level: 2 })).toBeInTheDocument();
     expect(screen.queryByLabelText('Working directory')).not.toBeInTheDocument();
     const createCall = fetchMock.mock.calls.find(([url, init]) => url === '/api/sessions' && init?.method === 'POST');
@@ -790,6 +797,9 @@ describe('App', () => {
       worktree: { enabled: true }
     });
     expect(JSON.parse(String(createCall?.[1]?.body))).not.toHaveProperty('name');
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s6/input', expect.objectContaining({ method: 'POST' })));
+    const inputCall = fetchMock.mock.calls.find(([url]) => String(url) === '/api/sessions/s6/input');
+    expect(JSON.parse(String(inputCall?.[1]?.body))).toEqual({ text: 'Explain this repo structure' });
   });
 
   it('switches to active mode when creating from archived mode', async () => {
@@ -799,8 +809,10 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { name: 'Archived Repo' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Change project context' }));
     fireEvent.change(await screen.findByLabelText('Workspace context'), { target: { value: '/repo/two' } });
-    fireEvent.click(screen.getByText('Start chat'));
+    fireEvent.change(screen.getByLabelText('Start prompt'), { target: { value: 'Start from archive mode' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     expect(await screen.findByRole('heading', { name: 'two', level: 2 })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Active' })).toHaveAttribute('aria-pressed', 'true');
@@ -812,16 +824,58 @@ describe('App', () => {
     render(<App />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'New chat' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Change project context' }));
     fireEvent.change(await screen.findByLabelText('Workspace context'), { target: { value: '~' } });
-    fireEvent.click(screen.getByText('Start chat'));
+    fireEvent.change(screen.getByLabelText('Start prompt'), { target: { value: 'Try invalid cwd' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     expect(await screen.findByText('invalid request: cwd does not exist: ~')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'What would you like Claude to do?' })).toBeInTheDocument();
   });
 
-  it('shows recent projects and fills the launch directory', async () => {
+  it('opens the created session and reports an error when initial prompt sending fails', async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const eventResponse = init?.method === undefined ? eventsResponse(url) : null;
+      if (eventResponse) return eventResponse;
+      if (url === '/api/sessions' && !init) return jsonResponse({ sessions });
+      if (url === '/api/tasks' || url.endsWith('/tasks')) return jsonResponse(emptyTaskGroups);
+      if (url === '/api/sessions' && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body));
+        return jsonResponse({
+          ...sessions[0],
+          id: 's6',
+          name: null,
+          cwd: body.cwd,
+          worktree: null,
+          updatedAt: '2026-06-12T00:00:00Z'
+        });
+      }
+      if (url === '/api/sessions/s6/input' && init?.method === 'POST') return jsonResponse({ error: 'initial input failed' }, 500);
+      if (url.endsWith('/transcript') || url.includes('/transcript?')) return jsonResponse({ events: [] });
+      return jsonResponse({ ok: true });
+    });
+
     render(<App />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'New chat' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Change project context' }));
+    fireEvent.change(screen.getByLabelText('Workspace context'), { target: { value: '/repo/two' } });
+    fireEvent.change(screen.getByLabelText('Start prompt'), { target: { value: 'This send will fail' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    expect(await screen.findByRole('heading', { name: 'two', level: 2 })).toBeInTheDocument();
+    expect(await screen.findByText('initial input failed')).toBeInTheDocument();
+  });
+
+  it('shows recent projects in project context and updates the context chip', async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'New chat' }));
+    expect(await screen.findByText('Project: one')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Recent projects')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Change project context' }));
     const recentProjects = await screen.findByLabelText('Recent projects');
     expect(within(recentProjects).getByText('external')).toBeInTheDocument();
     expect(within(recentProjects).getAllByText('/repo').length).toBeGreaterThan(0);
@@ -830,10 +884,38 @@ describe('App', () => {
     expect(within(recentProjects).queryByText('external-worktree')).not.toBeInTheDocument();
     expect(within(recentProjects).queryByText('abc123')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Use /repo/stopped as working directory' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Use /repo/stopped as project context' }));
 
     expect(screen.getByLabelText('Workspace context')).toHaveValue('/repo/stopped');
-    expect(screen.getByText('Claude will create an isolated worktree from /repo/stopped.')).toBeInTheDocument();
+    expect(screen.getByText('Project: stopped')).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/sessions' && init?.method === 'POST')).toBe(false);
+  });
+
+  it('fills start prompt suggestions without creating a session', async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'New chat' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Explain this repo' }));
+
+    expect(screen.getByLabelText('Start prompt')).toHaveValue('Explain this repo');
+    expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/sessions' && init?.method === 'POST')).toBe(false);
+  });
+
+  it('blocks start composer submission until cwd and prompt are present', async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'New chat' }));
+    const sendButton = await screen.findByRole('button', { name: 'Send' });
+    expect(sendButton).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText('Start prompt'), { target: { value: 'Run tests' } });
+    expect(sendButton).not.toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Change project context' }));
+    fireEvent.change(screen.getByLabelText('Workspace context'), { target: { value: '   ' } });
+    expect(sendButton).toBeDisabled();
+
+    expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/sessions' && init?.method === 'POST')).toBe(false);
   });
 
   it('shows a calmer empty state for search misses', async () => {
@@ -865,7 +947,7 @@ describe('App', () => {
     const sidebar = await screen.findByRole('complementary', { name: 'Session navigation' });
     expect(within(sidebar).getByText('Could not load chats.')).toBeInTheDocument();
     expect(within(sidebar).getByText('Details')).toBeInTheDocument();
-    expect(screen.getByRole('main', { name: 'Conversation workspace' })).toHaveTextContent('Where should Claude work?');
+    expect(screen.getByRole('main', { name: 'Conversation workspace' })).toHaveTextContent('What would you like Claude to do?');
 
     shouldFail = false;
     fireEvent.click(within(sidebar).getByRole('button', { name: 'Retry' }));
@@ -976,7 +1058,7 @@ describe('App', () => {
     expect(messageInput).toHaveValue('keep draft');
 
     fireEvent.keyDown(window, { key: 'n', ctrlKey: true });
-    expect(await screen.findByRole('heading', { name: 'Where should Claude work?' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'What would you like Claude to do?' })).toBeInTheDocument();
 
     const search = screen.getByRole('searchbox', { name: 'Search sessions' });
     fireEvent.change(search, { target: { value: '/' } });
@@ -1050,9 +1132,9 @@ describe('App', () => {
     expect(screen.queryByLabelText('Keyboard shortcuts')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
-    expect(await screen.findByRole('heading', { name: 'Where should Claude work?' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'What would you like Claude to do?' })).toBeInTheDocument();
     fireEvent.keyDown(window, { key: 'Escape' });
-    expect(screen.getByRole('heading', { name: 'Where should Claude work?' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'What would you like Claude to do?' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Show inspector' })).toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: 'i', ctrlKey: true });
@@ -1061,8 +1143,10 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: 'Show inspector' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Change project context' }));
     fireEvent.change(await screen.findByLabelText('Workspace context'), { target: { value: '/repo/two' } });
-    fireEvent.click(screen.getByText('Start chat'));
+    fireEvent.change(screen.getByLabelText('Start prompt'), { target: { value: 'Focus composer after create' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     const messageInput = await screen.findByLabelText('Message');
     await waitFor(() => expect(messageInput).toHaveFocus());
@@ -1557,7 +1641,7 @@ describe('App', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Archived' }));
 
     expect(await screen.findByRole('heading', { name: 'No archived chat selected.' })).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'Where should Claude work?' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'What would you like Claude to do?' })).not.toBeInTheDocument();
   });
 
   it('ignores stale active list responses after switching to archived mode', async () => {
