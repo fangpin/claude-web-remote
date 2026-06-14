@@ -279,6 +279,12 @@ function openInspector(): HTMLElement {
   return inspector;
 }
 
+function openActivityDrawer(): HTMLElement {
+  const button = screen.getByRole('button', { name: 'Open activity drawer' });
+  fireEvent.click(button);
+  return screen.getByRole('complementary', { name: 'Activity drawer' });
+}
+
 class FakeWebSocket {
   static instances: FakeWebSocket[] = [];
   onopen: (() => void) | null = null;
@@ -1702,30 +1708,45 @@ describe('App', () => {
     expect(screen.getByText('Stop only')).toBeInTheDocument();
   });
 
-  it('shows session tasks in the inspector and can switch to all tasks and plan', async () => {
+  it('opens the Activity drawer from the conversation header and defaults to activity', async () => {
     render(<App />);
 
-    const inspector = openInspector();
-    fireEvent.click(within(inspector).getByRole('tab', { name: 'Session tasks' }));
-    const sessionPanel = within(inspector).getByRole('tabpanel', { name: 'Session tasks' });
-    expect(within(sessionPanel).getByRole('heading', { name: 'Session tasks' })).toBeInTheDocument();
-    expect(await within(sessionPanel).findByText('Agent: Review branch')).toBeInTheDocument();
-    expect(within(inspector).queryByRole('tab', { name: 'Details' })).not.toBeInTheDocument();
-    expect(within(inspector).getByRole('tab', { name: 'Session tasks' })).toHaveAttribute('tabIndex', '0');
-    expect(within(inspector).getByRole('tab', { name: 'All tasks' })).toHaveAttribute('tabIndex', '-1');
-    expect(within(inspector).getByRole('tab', { name: 'Plan' })).toHaveAttribute('tabIndex', '-1');
+    await screen.findByRole('heading', { name: 'Repo One' });
+    expect(screen.queryByRole('complementary', { name: 'Activity drawer' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('complementary', { name: 'Session inspector' })).not.toBeInTheDocument();
 
-    fireEvent.keyDown(within(inspector).getByRole('tab', { name: 'Session tasks' }), { key: 'ArrowRight' });
-    expect(within(inspector).getByRole('tab', { name: 'All tasks' })).toHaveAttribute('aria-selected', 'true');
-    expect(within(inspector).getByRole('tab', { name: 'All tasks' })).toHaveFocus();
-    expect(within(inspector).getByRole('tab', { name: 'Session tasks' })).toHaveAttribute('tabIndex', '-1');
+    const drawer = openActivityDrawer();
+    expect(within(drawer).getByRole('heading', { name: 'Activity' })).toBeInTheDocument();
+    expect(within(drawer).getByRole('tab', { name: 'Activity' })).toHaveAttribute('aria-selected', 'true');
+    expect(within(drawer).getByText('Current run')).toBeInTheDocument();
+    expect(within(drawer).getByText(/Claude is waiting/i)).toBeInTheDocument();
+    expect(within(drawer).getByRole('tab', { name: 'Tasks' })).toHaveAttribute('tabIndex', '-1');
+    expect(within(drawer).getByRole('tab', { name: 'Plan' })).toHaveAttribute('tabIndex', '-1');
+    expect(within(drawer).queryByRole('tab', { name: 'Session tasks' })).not.toBeInTheDocument();
+  });
 
-    fireEvent.click(within(inspector).getByRole('tab', { name: 'All tasks' }));
-    const allTasksPanel = within(inspector).getByRole('tabpanel', { name: 'All tasks' });
+  it('shows current tasks, advanced all tasks, and plan inside the Activity drawer', async () => {
+    render(<App />);
+
+    const drawer = openActivityDrawer();
+    fireEvent.click(within(drawer).getByRole('tab', { name: 'Tasks' }));
+    const tasksPanel = within(drawer).getByRole('tabpanel', { name: 'Tasks' });
+    expect(within(tasksPanel).getByRole('heading', { name: 'Tasks' })).toBeInTheDocument();
+    expect(await within(tasksPanel).findByText('Agent: Review branch')).toBeInTheDocument();
+    expect(within(drawer).getByRole('tab', { name: 'Tasks' })).toHaveAttribute('tabIndex', '0');
+    expect(within(drawer).getByRole('tab', { name: 'Plan' })).toHaveAttribute('tabIndex', '-1');
+
+    fireEvent.keyDown(within(drawer).getByRole('tab', { name: 'Tasks' }), { key: 'ArrowRight' });
+    expect(within(drawer).getByRole('tab', { name: 'Plan' })).toHaveAttribute('aria-selected', 'true');
+    expect(within(drawer).getByRole('tab', { name: 'Plan' })).toHaveFocus();
+    expect(within(drawer).getByRole('tab', { name: 'Tasks' })).toHaveAttribute('tabIndex', '-1');
+
+    fireEvent.click(within(drawer).getByRole('button', { name: 'All tasks' }));
+    const allTasksPanel = within(drawer).getByRole('tabpanel', { name: 'All tasks' });
     expect(await within(allTasksPanel).findByText('Agent: Check stopped repo')).toBeInTheDocument();
 
-    fireEvent.click(within(inspector).getByRole('tab', { name: 'Plan' }));
-    const planPanel = within(inspector).getByRole('tabpanel', { name: 'Plan' });
+    fireEvent.click(within(drawer).getByRole('tab', { name: 'Plan' }));
+    const planPanel = within(drawer).getByRole('tabpanel', { name: 'Plan' });
     expect(within(planPanel).getByText('No plan available for this session.')).toBeInTheDocument();
 
     await waitFor(() => expect(FakeWebSocket.instances.length).toBe(1));
