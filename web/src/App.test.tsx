@@ -627,9 +627,8 @@ describe('App', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'New chat' }));
     expect(await screen.findByRole('heading', { name: 'What can I help with?' })).toBeInTheDocument();
     expect(screen.getByText('Choose a workspace context, then ask Claude to inspect, change, explain, or ship code.')).toBeInTheDocument();
-    expect(screen.getByText('Advanced options').closest('details')).not.toHaveAttribute('open');
+    expect(screen.getByText('Advanced options').closest('details')).toHaveAttribute('open');
     fireEvent.change(await screen.findByLabelText('Workspace context'), { target: { value: '/repo/two' } });
-    fireEvent.click(screen.getByText('Advanced options'));
     expect(screen.getByText('Skip prompts for trusted local repos.')).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText('Use git worktree'));
     fireEvent.click(screen.getByText('Start chat'));

@@ -120,7 +120,7 @@ export default function ProjectHome({
             </div>
           )}
 
-          <details className="advanced-session-options">
+          <details className="advanced-session-options" open>
             <summary>Advanced options</summary>
             <div className="advanced-session-grid">
               <label className="checkbox-label option-line">
