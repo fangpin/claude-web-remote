@@ -38,10 +38,37 @@ describe('ConversationBlockList', () => {
     expect(within(article).getByRole('heading', { name: 'Summary', level: 1 }).closest('.message-text')).toHaveClass('message-text');
     expect(within(article).getByText('inline code')).toHaveProperty('tagName', 'CODE');
     expect(within(article).getByText('first item')).toHaveProperty('tagName', 'LI');
-    expect(within(article).getByText(/const answer = 42/).closest('pre')).toHaveClass('message-code');
+    const messageCode = within(article).getByText('const').closest('pre');
+    expect(messageCode).toHaveClass('message-code');
+    expect(messageCode).toHaveTextContent('const answer = 42;');
+    expect(within(article).getByText('const')).toHaveClass('hljs-keyword');
+    expect(within(article).getByText('42')).toHaveClass('hljs-number');
     expect(within(article).getByText('TypeScript')).toHaveClass('code-language');
     expect(within(article).getByRole('button', { name: 'Copy code' })).toHaveClass('copy-button');
     expect(within(article).getByText('Raw events')).toBeInTheDocument();
+  });
+
+  it('renders GitHub-flavored Markdown tables', () => {
+    const blocks: ConversationBlock[] = [
+      {
+        id: 'message-table-markdown',
+        type: 'message',
+        role: 'assistant',
+        text: '| Name | Status |\n| --- | --- |\n| Alpha | Done |\n| Beta | Pending |',
+        eventIds: [2],
+        rawEvents: [rawEvent(2, { message: 'table markdown' })]
+      }
+    ];
+
+    render(<ConversationBlockList blocks={blocks} />);
+
+    const article = screen.getByRole('article');
+    const table = within(article).getByRole('table');
+    expect(table.closest('.message-text')).toHaveClass('message-text');
+    expect(within(table).getByRole('columnheader', { name: 'Name' })).toBeInTheDocument();
+    expect(within(table).getByRole('columnheader', { name: 'Status' })).toBeInTheDocument();
+    expect(within(table).getByRole('cell', { name: 'Alpha' })).toBeInTheDocument();
+    expect(within(table).getByRole('cell', { name: 'Done' })).toBeInTheDocument();
   });
 
   it('uses react-markdown for richer message Markdown without rendering raw HTML', () => {
@@ -282,8 +309,11 @@ describe('ConversationBlockList', () => {
     expect(within(articles[0]).getByRole('button', { name: 'Copy code' })).toHaveClass('copy-button');
     expect(within(articles[1]).getByText('Failure')).toBeInTheDocument();
     expect(within(articles[1]).getByText('TSX')).toHaveClass('code-language');
-    expect(within(articles[1]).getByText('const answer = 42;')).toHaveProperty('tagName', 'CODE');
-    expect(within(articles[1]).getByText('const answer = 42;').closest('pre')).toHaveClass('tool-result-pre', 'code');
+    const toolCode = within(articles[1]).getByText('const').closest('pre');
+    expect(toolCode).toHaveClass('tool-result-pre', 'code');
+    expect(toolCode).toHaveTextContent('const answer = 42;');
+    expect(within(articles[1]).getByText('const')).toHaveClass('hljs-keyword');
+    expect(within(articles[1]).getByText('42')).toHaveClass('hljs-number');
     expect(within(articles[2]).getByText('Paths')).toBeInTheDocument();
     expect(within(articles[2]).getByText('web/src/App.tsx').closest('ul')).toHaveClass('tool-path-list');
     expect(within(articles[2]).getByText('2 paths')).toBeInTheDocument();
@@ -487,7 +517,9 @@ describe('ConversationBlockList', () => {
     expect(css).toMatch(/\.message-block\.system\b/);
     expect(css).toMatch(/\.message-text h1\b/);
     expect(css).toMatch(/\.message-text ul,/);
+    expect(css).toMatch(/\.message-text table\b/);
     expect(css).toMatch(/\.message-text \.message-code\b/);
+    expect(css).toMatch(/\.hljs-keyword\b/);
     expect(css).toMatch(/\.task-block\.pending\b/);
     expect(css).not.toMatch(/\.task-header\s+small/);
     expect(css).not.toMatch(/\.task-header\s*>\s*div/);
