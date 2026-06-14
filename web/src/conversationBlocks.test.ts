@@ -85,7 +85,7 @@ describe('buildConversationBlocks', () => {
     ]);
   });
 
-  it('preserves Claude stream-json user text content as raw details only', () => {
+  it('keeps Claude stream-json user wrappers out of the visible transcript', () => {
     const userPayload = {
       type: 'user',
       message: { role: 'user', content: [{ type: 'text', text: 'Base directory for this skill: /tmp/skill' }] }
@@ -94,9 +94,8 @@ describe('buildConversationBlocks', () => {
 
     expect(blocks).toEqual([
       {
-        id: 'raw-1',
-        type: 'raw',
-        label: 'User',
+        id: 'anchor-event-1',
+        type: 'anchor',
         eventIds: [1],
         rawEvents: [{ id: 1, kind: 'user', payload: userPayload }]
       }
@@ -115,6 +114,7 @@ describe('buildConversationBlocks', () => {
         type: 'tool',
         name: 'Bash',
         status: 'completed',
+        density: 'compact',
         inputSummary: '$ git status',
         resultSummary: 'clean',
         resultKind: 'text',
@@ -248,6 +248,7 @@ describe('buildConversationBlocks', () => {
         type: 'tool',
         name: 'Read',
         status: 'running',
+        density: 'compact',
         inputSummary: '/tmp/example.txt',
         resultSummary: '',
         resultKind: 'text',
@@ -305,7 +306,7 @@ describe('buildConversationBlocks', () => {
         resultLanguage: 'tsx',
         resultDisplay: 'visible'
       },
-      { id: 'tool-toolu_list', type: 'tool', resultKind: 'paths', resultDisplay: 'collapsed' }
+      { id: 'anchor-toolu_list-6', type: 'anchor' }
     ]);
   });
 
@@ -511,23 +512,13 @@ describe('buildConversationBlocks', () => {
         eventIds: [3, 4]
       },
       {
-        id: 'task-toolu_list',
-        type: 'task',
-        title: 'Task list',
-        source: 'Task list',
-        status: 'completed',
-        summary: 'Completed.',
-        completionSummary: '1 pending task',
+        id: 'anchor-toolu_list-6',
+        type: 'anchor',
         eventIds: [5, 6]
       },
       {
-        id: 'task-toolu_get',
-        type: 'task',
-        title: 'Task #7',
-        source: 'Task lookup',
-        status: 'completed',
-        summary: 'Completed.',
-        completionSummary: 'Task #7: Add tests',
+        id: 'anchor-toolu_get-8',
+        type: 'anchor',
         eventIds: [7, 8]
       },
       {
@@ -582,7 +573,7 @@ describe('buildConversationBlocks', () => {
     expect(blocks).toEqual([]);
   });
 
-  it('renders standalone raw events with descriptive labels while hiding system events', () => {
+  it('renders unknown raw events with a subdued user-facing label while hiding system events', () => {
     const blocks = buildConversationBlocks([
       event(1, 'raw', { message: 'transport detail' }),
       event(2, 'system', { message: 'session detail' })
@@ -592,7 +583,8 @@ describe('buildConversationBlocks', () => {
       {
         id: 'raw-1',
         type: 'raw',
-        label: 'Raw',
+        label: 'Unknown event',
+        severity: 'warning',
         eventIds: [1],
         rawEvents: [{ id: 1, kind: 'raw', payload: { message: 'transport detail' } }]
       }
@@ -611,12 +603,8 @@ describe('buildConversationBlocks', () => {
 
     expect(buildConversationBlocks(streamJsonCorpus.toolUseAndResult)).toMatchObject([
       {
-        id: 'tool-toolu_ls',
-        type: 'tool',
-        name: 'Bash',
-        status: 'completed',
-        resultSummary: 'App.tsx\nmain.tsx',
-        resultDisplay: 'collapsed',
+        id: 'anchor-toolu_ls-21',
+        type: 'anchor',
         eventIds: [20, 21]
       }
     ]);
@@ -661,7 +649,7 @@ describe('buildConversationBlocks', () => {
     ]);
 
     expect(buildConversationBlocks(streamJsonCorpus.permissionWaitingEvent)).toMatchObject([
-      { id: 'raw-60', type: 'raw', label: 'Raw · Permission request', eventIds: [60] }
+      { id: 'raw-60', type: 'raw', label: 'Permission event', severity: 'permission', eventIds: [60] }
     ]);
 
     expect(buildConversationBlocks(streamJsonCorpus.stderrSystemError)).toMatchObject([
@@ -670,7 +658,60 @@ describe('buildConversationBlocks', () => {
     ]);
 
     expect(buildConversationBlocks(streamJsonCorpus.malformedUnknownPayload)).toMatchObject([
-      { id: 'raw-80', type: 'raw', label: 'Raw · Future event · Delta chunk', eventIds: [80] }
+      { id: 'raw-80', type: 'raw', label: 'Unknown event', severity: 'warning', eventIds: [80] }
+    ]);
+
+    expect(buildConversationBlocks(streamJsonCorpus.streamingText)).toMatchObject([
+      {
+        id: 'message-assistant-83',
+        type: 'message',
+        role: 'assistant',
+        text: 'Hello streamed world.',
+        eventIds: [82, 83, 84, 85, 86, 87, 88]
+      }
+    ]);
+
+    expect(buildConversationBlocks(streamJsonCorpus.partialStreamingText)).toMatchObject([
+      {
+        id: 'message-assistant-90',
+        type: 'message',
+        role: 'assistant',
+        text: 'Partial response',
+        eventIds: [89, 90, 91]
+      }
+    ]);
+
+    expect(buildConversationBlocks(streamJsonCorpus.streamingToolUse)).toMatchObject([
+      { id: 'anchor-toolu_stream_read-98', type: 'anchor', eventIds: [92, 93, 94, 95, 96, 97, 98] }
+    ]);
+
+    expect(buildConversationBlocks(streamJsonCorpus.partialStreamingToolUse)).toMatchObject([
+      {
+        id: 'tool-toolu_partial',
+        type: 'tool',
+        name: 'Bash',
+        status: 'running',
+        inputSummary: '{"command":"npm',
+        eventIds: [99, 100]
+      }
+    ]);
+
+    expect(buildConversationBlocks(streamJsonCorpus.mixedStreamingMessage)).toMatchObject([
+      {
+        id: 'message-assistant-102',
+        type: 'message',
+        role: 'assistant',
+        text: 'I will inspect it.',
+        eventIds: [101, 102, 103, 106]
+      },
+      {
+        id: 'tool-toolu_mixed',
+        type: 'tool',
+        name: 'Bash',
+        status: 'running',
+        inputSummary: '$ git status',
+        eventIds: [101, 104, 105, 106]
+      }
     ]);
 
     expect(buildConversationBlocks(streamJsonCorpus.interleavedEvents)).toMatchObject([
@@ -700,6 +741,50 @@ describe('buildConversationBlocks', () => {
         resultSummary: 'late output',
         eventIds: [101, 100]
       }
+    ]);
+  });
+
+  it('hides noisy raw metadata and internal bookkeeping cards by default', () => {
+    const blocks = buildConversationBlocks([
+      event(1, 'raw', { type: 'result', subtype: 'success' }),
+      event(2, 'user', { type: 'user', message: { content: [{ type: 'text', text: 'internal wrapper' }] } }),
+      event(3, 'tool', { type: 'tool_use', id: 'toolu_list', name: 'TaskList', input: {} }),
+      event(4, 'tool', { type: 'tool_result', tool_use_id: 'toolu_list', content: '1 task' }),
+      event(5, 'tool', { type: 'tool_use', id: 'toolu_get', name: 'TaskGet', input: { taskId: '1' } }),
+      event(6, 'tool', { type: 'tool_result', tool_use_id: 'toolu_get', content: 'Task #1' }),
+      event(7, 'tool', { type: 'tool_use', id: 'toolu_update', name: 'TaskUpdate', input: { taskId: '1', status: 'completed' } }),
+      event(8, 'tool', { type: 'tool_result', tool_use_id: 'toolu_update', content: 'updated' }),
+      event(9, 'tool', { type: 'tool_use', id: 'toolu_ls', name: 'Bash', input: { command: 'ls web/src' } }),
+      event(10, 'tool', { type: 'tool_result', tool_use_id: 'toolu_ls', content: 'App.tsx' })
+    ]);
+
+    expect(blocks.every((block) => block.type === 'anchor')).toBe(true);
+  });
+
+  it('renders meaningful task and command work as compact instead of prominent full cards', () => {
+    const blocks = buildConversationBlocks([
+      event(1, 'tool', { type: 'tool_use', id: 'toolu_create', name: 'TaskCreate', input: { subject: 'Fix output rendering' } }),
+      event(2, 'tool', { type: 'tool_result', tool_use_id: 'toolu_create', content: 'Task #1 created successfully' }),
+      event(3, 'tool', { type: 'tool_use', id: 'toolu_test', name: 'Bash', input: { command: 'npm --prefix web test' } }),
+      event(4, 'tool', { type: 'tool_result', tool_use_id: 'toolu_test', content: 'Tests passed' })
+    ]);
+
+    expect(blocks).toMatchObject([
+      { id: 'task-toolu_create', type: 'task', title: 'Fix output rendering', density: 'compact' },
+      { id: 'tool-toolu_test', type: 'tool', name: 'Bash', density: 'compact', resultDisplay: 'collapsed' }
+    ]);
+  });
+
+  it('keeps failed task updates and permission raw events visible', () => {
+    const blocks = buildConversationBlocks([
+      event(1, 'tool', { type: 'tool_use', id: 'toolu_update_failed', name: 'TaskUpdate', input: { taskId: '1', status: 'completed' } }),
+      event(2, 'tool', { type: 'tool_result', tool_use_id: 'toolu_update_failed', is_error: true, content: 'Task update failed' }),
+      event(3, 'raw', { type: 'permission_request', status: 'waiting', prompt: 'Allow command?' })
+    ]);
+
+    expect(blocks).toMatchObject([
+      { id: 'task-toolu_update_failed', type: 'task', status: 'failed', failureSummary: 'Task update failed' },
+      { id: 'raw-3', type: 'raw', label: 'Permission event', severity: 'permission' }
     ]);
   });
 });

@@ -263,7 +263,7 @@ function toolResultTitle(block: ToolBlock): string {
 
 function ToolBlockView({ block }: { block: ToolBlock }) {
   return (
-    <article id={blockElementId(block)} className={`conversation-block tool-block ${block.status} result-${block.resultKind}`}>
+    <article id={blockElementId(block)} className={`conversation-block tool-block ${block.status} result-${block.resultKind}${block.density === 'compact' ? ' compact' : ''}`}>
       <header className="block-header tool-activity-header">
         <span className="tool-name">{block.name}</span>
         <span className={`tool-status tool-status-${block.status}`}>
@@ -293,7 +293,7 @@ function ToolBlockView({ block }: { block: ToolBlock }) {
 
 function TaskBlockView({ block }: { block: TaskBlock }) {
   return (
-    <article id={blockElementId(block)} className={`conversation-block task-block ${block.status}`}>
+    <article id={blockElementId(block)} className={`conversation-block task-block ${block.status}${block.density === 'compact' ? ' compact' : ''}`}>
       <header className="block-header task-header">
         <span className="task-title-row">
           <span className="task-status-dot" aria-hidden="true" />
@@ -348,7 +348,7 @@ function ErrorBlockView({ block }: { block: ErrorBlock }) {
 
 function RawBlockView({ block }: { block: RawBlock }) {
   return (
-    <article id={blockElementId(block)} className="conversation-block raw-block">
+    <article id={blockElementId(block)} className={`conversation-block raw-block ${block.severity ?? 'info'}`}>
       <header className="block-header">
         <span>{block.label}</span>
       </header>

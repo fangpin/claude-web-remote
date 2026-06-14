@@ -1,4 +1,12 @@
-import { toolPresentation, toolResultSemantics, type ToolResultKind } from './presentationPolicy';
+import {
+  rawEventPresentation,
+  taskToolPresentation,
+  toolActivityPresentation,
+  toolPresentation,
+  toolResultSemantics,
+  type RawSeverity,
+  type ToolResultKind
+} from './presentationPolicy';
 import type { EventKind, UiEvent } from './types';
 
 type ObjectPayload = Record<string, unknown>;
@@ -19,6 +27,7 @@ export type ToolBlock = {
   type: 'tool';
   name: string;
   status: 'running' | 'completed' | 'failed';
+  density?: 'full' | 'compact';
   inputSummary: string;
   resultSummary: string;
   resultKind: ToolResultKind;
@@ -35,6 +44,7 @@ export type TaskBlock = {
   title: string;
   source: string;
   status: 'pending' | 'running' | 'completed' | 'failed';
+  density?: 'full' | 'compact';
   summary: string;
   detail?: string;
   completionSummary?: string;
@@ -56,6 +66,7 @@ export type RawBlock = {
   id: string;
   type: 'raw';
   label: string;
+  severity?: RawSeverity;
   eventIds: number[];
   rawEvents: RawEventRef[];
 };
@@ -71,22 +82,42 @@ export type ConversationBlock = MessageBlock | ToolBlock | TaskBlock | ErrorBloc
 
 type PendingTool = {
   event: UiEvent;
+  events: UiEvent[];
   payload: ObjectPayload;
   blockIndex: number;
 };
 
 type PendingToolResult = {
   event: UiEvent;
+  events: UiEvent[];
   payload: ObjectPayload;
   blockIndex?: number;
 };
 
 type NormalizedItem =
-  | { type: 'message'; event: UiEvent; role: MessageBlock['role']; text: string }
-  | { type: 'tool_use'; event: UiEvent; payload: ObjectPayload }
-  | { type: 'tool_result'; event: UiEvent; payload: ObjectPayload }
-  | { type: 'raw'; event: UiEvent }
+  | { type: 'message'; event: UiEvent; events?: UiEvent[]; role: MessageBlock['role']; text: string }
+  | { type: 'tool_use'; event: UiEvent; events?: UiEvent[]; payload: ObjectPayload }
+  | { type: 'tool_result'; event: UiEvent; events?: UiEvent[]; payload: ObjectPayload }
+  | { type: 'raw'; event: UiEvent; label?: string; severity?: RawSeverity }
+  | { type: 'anchor'; event: UiEvent; events?: UiEvent[]; id?: string }
   | { type: 'error'; event: UiEvent; payload: ObjectPayload };
+
+type StreamingContentBlock = {
+  type: 'text' | 'tool_use';
+  index: number;
+  firstEvent: UiEvent;
+  events: UiEvent[];
+  text: string;
+  id: string | null;
+  name: string | null;
+  inputJson: string;
+  input: unknown;
+};
+
+type StreamingMessage = {
+  lifecycleEvents: UiEvent[];
+  contentBlocks: StreamingContentBlock[];
+};
 
 function isObject(value: unknown): value is ObjectPayload {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -94,6 +125,16 @@ function isObject(value: unknown): value is ObjectPayload {
 
 function rawEvent(event: UiEvent): RawEventRef {
   return { id: event.id, kind: event.kind, payload: event.payload };
+}
+
+function rawEvents(events: UiEvent[]): RawEventRef[] {
+  return events.map(rawEvent);
+}
+
+function uniqueEvents(events: UiEvent[]): UiEvent[] {
+  const byId = new Map<number, UiEvent>();
+  for (const event of events) byId.set(event.id, event);
+  return Array.from(byId.values()).sort((a, b) => a.id - b.id);
 }
 
 function stringField(payload: ObjectPayload, keys: string[]): string | null {
@@ -514,33 +555,41 @@ function taskSummaries(
   };
 }
 
-function makeMessageBlock(event: UiEvent, role: MessageBlock['role'], text: string): MessageBlock {
+function makeMessageBlock(event: UiEvent, role: MessageBlock['role'], text: string, events = [event]): MessageBlock {
   return {
     id: `message-${role}-${event.id}`,
     type: 'message',
     role,
     text,
-    eventIds: [event.id],
-    rawEvents: [rawEvent(event)]
+    eventIds: events.map((sourceEvent) => sourceEvent.id),
+    rawEvents: rawEvents(events)
   };
 }
 
-function appendMessage(block: MessageBlock, event: UiEvent, text: string): MessageBlock {
+function appendMessage(block: MessageBlock, event: UiEvent, text: string, events = [event]): MessageBlock {
   return {
     ...block,
     text: `${block.text}\n\n${text}`,
-    eventIds: [...block.eventIds, event.id],
-    rawEvents: [...block.rawEvents, rawEvent(event)]
+    eventIds: [...block.eventIds, ...events.map((sourceEvent) => sourceEvent.id)],
+    rawEvents: [...block.rawEvents, ...rawEvents(events)]
   };
 }
 
-function makeToolBlock(toolUse: UiEvent, usePayload: ObjectPayload, resultEvent?: UiEvent, resultPayload?: ObjectPayload): ToolBlock | TaskBlock {
+function makeToolBlock(
+  toolUse: UiEvent,
+  usePayload: ObjectPayload,
+  resultEvent?: UiEvent,
+  resultPayload?: ObjectPayload,
+  useEvents = [toolUse],
+  resultEvents = resultEvent ? [resultEvent] : [],
+  density: 'full' | 'compact' = 'full'
+): ToolBlock | TaskBlock {
   const name = toolName(usePayload);
   const id = toolUseId(usePayload) ?? String(toolUse.id);
   const input = usePayload.input;
   const inputSummary = summarizeToolInput(name, input);
   const result = resultPayload ? resultSummary(resultPayload) : '';
-  const events = resultEvent ? [toolUse, resultEvent] : [toolUse];
+  const events = [...useEvents, ...resultEvents];
   const taskLike = isBackgroundBash(name, input, result) || isTaskTool(name);
 
   if (taskLike) {
@@ -551,6 +600,7 @@ function makeToolBlock(toolUse: UiEvent, usePayload: ObjectPayload, resultEvent?
       title: taskTitle(name, input),
       source: taskSource(name, input),
       status,
+      ...(density === 'compact' ? { density } : {}),
       ...taskSummaries(name, input, inputSummary, result, status, resultEvent !== undefined),
       eventIds: events.map((event) => event.id),
       rawEvents: events.map(rawEvent)
@@ -566,6 +616,7 @@ function makeToolBlock(toolUse: UiEvent, usePayload: ObjectPayload, resultEvent?
     type: 'tool',
     name,
     status,
+    ...(density === 'compact' ? { density } : {}),
     inputSummary,
     resultSummary: displayResultSummary(name, status, result, resultDisplay),
     resultKind: resultSemantics.kind,
@@ -608,7 +659,7 @@ function makeAnchorBlock(id: string, events: UiEvent[]): AnchorBlock {
     id: `anchor-${id}-${events.at(-1)?.id ?? events[0]?.id ?? 'event'}`,
     type: 'anchor',
     eventIds: events.map((event) => event.id),
-    rawEvents: events.map(rawEvent)
+    rawEvents: rawEvents(events)
   };
 }
 
@@ -667,6 +718,165 @@ function errorMessage(event: UiEvent, payload: ObjectPayload): string {
   return summarize(event.payload) || rawLabel(event);
 }
 
+function streamingIndex(payload: ObjectPayload): number | null {
+  const index = payload.index;
+  return typeof index === 'number' && Number.isInteger(index) ? index : null;
+}
+
+function streamingType(event: UiEvent): string | null {
+  if (!isObject(event.payload)) return null;
+  const type = event.payload.type;
+  return typeof type === 'string' ? type : null;
+}
+
+function isStreamingEvent(event: UiEvent): boolean {
+  return [
+    'message_start',
+    'content_block_start',
+    'content_block_delta',
+    'content_block_stop',
+    'message_delta',
+    'message_stop'
+  ].includes(streamingType(event) ?? '');
+}
+
+function parsePartialJson(value: string): unknown {
+  if (!value.trim()) return {};
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
+function blockEvents(streamingMessage: StreamingMessage, contentBlock: StreamingContentBlock): UiEvent[] {
+  return uniqueEvents([...streamingMessage.lifecycleEvents, ...contentBlock.events]);
+}
+
+function upsertStreamingContentBlock(
+  streamingMessage: StreamingMessage,
+  index: number,
+  event: UiEvent,
+  type: StreamingContentBlock['type']
+): StreamingContentBlock {
+  let contentBlock = streamingMessage.contentBlocks.find((block) => block.index === index);
+  if (!contentBlock) {
+    contentBlock = {
+      type,
+      index,
+      firstEvent: event,
+      events: [],
+      text: '',
+      id: null,
+      name: null,
+      inputJson: '',
+      input: {}
+    };
+    streamingMessage.contentBlocks.push(contentBlock);
+    streamingMessage.contentBlocks.sort((a, b) => a.index - b.index);
+  }
+  if (!contentBlock.events.some((sourceEvent) => sourceEvent.id === event.id)) {
+    contentBlock.events.push(event);
+  }
+  return contentBlock;
+}
+
+function streamingItems(event: UiEvent, streamingMessage: StreamingMessage | null): { consumed: boolean; message: StreamingMessage | null; items: NormalizedItem[] } {
+  if (!isObject(event.payload)) return { consumed: false, message: streamingMessage, items: [] };
+  const payload = event.payload;
+  const type = streamingType(event);
+
+  if (type === 'message_start') {
+    const message = payload.message;
+    if (isObject(message) && message.role === 'assistant') {
+      return { consumed: true, message: { lifecycleEvents: [event], contentBlocks: [] }, items: [] };
+    }
+    return { consumed: false, message: streamingMessage, items: [] };
+  }
+
+  if (!streamingMessage && isStreamingEvent(event)) {
+    streamingMessage = { lifecycleEvents: [], contentBlocks: [] };
+  }
+  if (!streamingMessage) return { consumed: false, message: streamingMessage, items: [] };
+
+  if (type === 'content_block_start') {
+    const index = streamingIndex(payload);
+    const contentBlock = isObject(payload.content_block) ? payload.content_block : null;
+    const blockType = typeof contentBlock?.type === 'string' ? contentBlock.type : null;
+    if (index === null || (blockType !== 'text' && blockType !== 'tool_use')) {
+      return { consumed: false, message: streamingMessage, items: [] };
+    }
+    const block = upsertStreamingContentBlock(streamingMessage, index, event, blockType);
+    if (blockType === 'text') {
+      const text = contentBlock ? stringField(contentBlock, ['text']) : null;
+      if (text) block.text += text;
+    } else if (contentBlock) {
+      block.id = stringField(contentBlock, ['id']) ?? block.id;
+      block.name = stringField(contentBlock, ['name']) ?? block.name;
+      if (contentBlock.input !== undefined) {
+        block.input = contentBlock.input;
+        block.inputJson = typeof contentBlock.input === 'string' ? contentBlock.input : isObject(contentBlock.input) && Object.keys(contentBlock.input).length === 0 ? '' : JSON.stringify(contentBlock.input);
+      }
+    }
+    return { consumed: true, message: streamingMessage, items: [] };
+  }
+
+  if (type === 'content_block_delta') {
+    const index = streamingIndex(payload);
+    const delta = isObject(payload.delta) ? payload.delta : null;
+    const deltaType = typeof delta?.type === 'string' ? delta.type : null;
+    if (index === null || !delta || (deltaType !== 'text_delta' && deltaType !== 'input_json_delta')) {
+      return { consumed: false, message: streamingMessage, items: [] };
+    }
+    if (deltaType === 'text_delta') {
+      const block = upsertStreamingContentBlock(streamingMessage, index, event, 'text');
+      const text = stringField(delta, ['text']);
+      if (text) block.text += text;
+    } else {
+      const block = upsertStreamingContentBlock(streamingMessage, index, event, 'tool_use');
+      const partialJson = typeof delta.partial_json === 'string' ? delta.partial_json : '';
+      block.inputJson += partialJson;
+      block.input = parsePartialJson(block.inputJson);
+    }
+    return { consumed: true, message: streamingMessage, items: [] };
+  }
+
+  if (type === 'content_block_stop' || type === 'message_delta') {
+    streamingMessage.lifecycleEvents.push(event);
+    return { consumed: true, message: streamingMessage, items: [] };
+  }
+
+  if (type === 'message_stop') {
+    streamingMessage.lifecycleEvents.push(event);
+    return { consumed: true, message: null, items: streamingContentItems(streamingMessage) };
+  }
+
+  return { consumed: false, message: streamingMessage, items: [] };
+}
+
+function streamingContentItems(streamingMessage: StreamingMessage): NormalizedItem[] {
+  return streamingMessage.contentBlocks.flatMap((block): NormalizedItem[] => {
+    const events = blockEvents(streamingMessage, block);
+    if (block.type === 'text') {
+      return block.text ? [{ type: 'message', event: block.firstEvent, events, role: 'assistant', text: block.text }] : [];
+    }
+
+    return [
+      {
+        type: 'tool_use',
+        event: block.firstEvent,
+        events,
+        payload: {
+          type: 'tool_use',
+          id: block.id ?? String(block.firstEvent.id),
+          name: block.name ?? 'tool',
+          input: block.input
+        }
+      }
+    ];
+  });
+}
+
 function normalizedItems(event: UiEvent): NormalizedItem[] | null {
   const payload = isObject(event.payload) ? event.payload : { value: event.payload };
   const type = payloadType(event, payload);
@@ -703,26 +913,40 @@ function normalizedItems(event: UiEvent): NormalizedItem[] | null {
   const text = textContent(payload);
   if (text && role && !isClaudeUserPayload && !isClaudeSystemPayload) return [{ type: 'message', event, role, text }];
 
-  return isClaudeUserPayload ? [{ type: 'raw', event }] : null;
+  if (isClaudeUserPayload) {
+    const presentation = rawEventPresentation(event.kind, event.payload);
+    if (presentation.visibility === 'hidden') return [];
+    if (presentation.visibility === 'anchor') return [{ type: 'anchor', event }];
+    return [{ type: 'raw', event, label: presentation.label, severity: presentation.severity }];
+  }
+
+  return null;
 }
 
 export function buildConversationBlocks(events: UiEvent[]): ConversationBlock[] {
   const blocks: ConversationBlock[] = [];
   const pendingTools = new Map<string, PendingTool>();
   const pendingToolResults = new Map<string, PendingToolResult>();
+  let streamingMessage: StreamingMessage | null = null;
 
-  for (const event of events) {
-    const items = normalizedItems(event);
-
+  function appendItems(items: NormalizedItem[] | null, fallbackEvent?: UiEvent) {
     if (!items) {
+      if (!fallbackEvent) return;
+      const presentation = rawEventPresentation(fallbackEvent.kind, fallbackEvent.payload);
+      if (presentation.visibility === 'hidden') return;
+      if (presentation.visibility === 'anchor') {
+        blocks.push(makeAnchorBlock('raw', [fallbackEvent]));
+        return;
+      }
       blocks.push({
-        id: `raw-${event.id}`,
+        id: `raw-${fallbackEvent.id}`,
         type: 'raw',
-        label: rawLabel(event),
-        eventIds: [event.id],
-        rawEvents: [rawEvent(event)]
+        label: presentation.label ?? rawLabel(fallbackEvent),
+        severity: presentation.severity,
+        eventIds: [fallbackEvent.id],
+        rawEvents: [rawEvent(fallbackEvent)]
       });
-      continue;
+      return;
     }
 
     for (const item of items) {
@@ -741,30 +965,46 @@ export function buildConversationBlocks(events: UiEvent[]): ConversationBlock[] 
         blocks.push({
           id: `raw-${item.event.id}`,
           type: 'raw',
-          label: rawLabel(item.event),
+          label: item.label ?? rawLabel(item.event),
+          ...(item.severity ? { severity: item.severity } : {}),
           eventIds: [item.event.id],
           rawEvents: [rawEvent(item.event)]
         });
         continue;
       }
 
+      if (item.type === 'anchor') {
+        blocks.push(makeAnchorBlock(item.id ?? 'event', item.events ?? [item.event]));
+        continue;
+      }
+
       if (item.type === 'message') {
+        const sourceEvents = item.events ?? [item.event];
         const previous = blocks[blocks.length - 1];
         if (previous?.type === 'message' && previous.role === item.role) {
-          blocks[blocks.length - 1] = appendMessage(previous, item.event, item.text);
+          blocks[blocks.length - 1] = appendMessage(previous, item.event, item.text, sourceEvents);
         } else {
-          blocks.push(makeMessageBlock(item.event, item.role, item.text));
+          blocks.push(makeMessageBlock(item.event, item.role, item.text, sourceEvents));
         }
         continue;
       }
 
       if (item.type === 'tool_use') {
         const id = toolUseId(item.payload) ?? String(item.event.id);
+        const sourceEvents = item.events ?? [item.event];
         const pendingResult = pendingToolResults.get(id);
         if (pendingResult) {
-          const block = makeToolBlock(item.event, item.payload, pendingResult.event, pendingResult.payload);
-          if (block.type === 'tool' && toolPresentation(block.name, block.status, block.resultSummary).visibility === 'hidden') {
-            blocks.push(makeAnchorBlock(id, [item.event, pendingResult.event]));
+          const name = toolName(item.payload);
+          const result = resultSummary(pendingResult.payload);
+          const status = hasFailedResult(pendingResult.payload, result) ? 'failed' : 'completed';
+          const presentation = isTaskTool(name)
+            ? taskToolPresentation(name, status, item.payload.input, result)
+            : toolActivityPresentation(name, status, item.payload.input, result);
+          const block = makeToolBlock(item.event, item.payload, pendingResult.event, pendingResult.payload, sourceEvents, pendingResult.events, presentation.visibility === 'compact' ? 'compact' : 'full');
+          if (presentation.visibility === 'hidden' || presentation.visibility === 'anchor' || (block.type === 'tool' && toolPresentation(block.name, block.status, block.resultSummary).visibility === 'hidden')) {
+            const anchor = makeAnchorBlock(id, [...sourceEvents, ...pendingResult.events]);
+            if (pendingResult.blockIndex !== undefined) blocks[pendingResult.blockIndex] = anchor;
+            else blocks.push(anchor);
           } else if (pendingResult.blockIndex !== undefined) {
             blocks[pendingResult.blockIndex] = block;
           } else {
@@ -772,20 +1012,35 @@ export function buildConversationBlocks(events: UiEvent[]): ConversationBlock[] 
           }
           pendingToolResults.delete(id);
         } else {
-          const blockIndex = blocks.length;
-          pendingTools.set(id, { event: item.event, payload: item.payload, blockIndex });
-          blocks.push(makeToolBlock(item.event, item.payload));
+          const name = toolName(item.payload);
+          const presentation = isTaskTool(name)
+            ? taskToolPresentation(name, 'running', item.payload.input, '')
+            : toolActivityPresentation(name, 'running', item.payload.input, '');
+          if (presentation.visibility === 'hidden' || presentation.visibility === 'anchor') {
+            blocks.push(makeAnchorBlock(id, sourceEvents));
+          } else {
+            const blockIndex = blocks.length;
+            pendingTools.set(id, { event: item.event, events: sourceEvents, payload: item.payload, blockIndex });
+            blocks.push(makeToolBlock(item.event, item.payload, undefined, undefined, sourceEvents, [], presentation.visibility === 'compact' ? 'compact' : 'full'));
+          }
         }
         continue;
       }
 
+      const sourceEvents = item.events ?? [item.event];
       const id = resultToolUseId(item.payload);
       if (id) {
         const pending = pendingTools.get(id);
         if (pending) {
-          const block = makeToolBlock(pending.event, pending.payload, item.event, item.payload);
-          if (block.type === 'tool' && toolPresentation(block.name, block.status, block.resultSummary).visibility === 'hidden') {
-            blocks[pending.blockIndex] = makeAnchorBlock(id, [pending.event, item.event]);
+          const name = toolName(pending.payload);
+          const result = resultSummary(item.payload);
+          const status = hasFailedResult(item.payload, result) ? 'failed' : 'completed';
+          const presentation = isTaskTool(name)
+            ? taskToolPresentation(name, status, pending.payload.input, result)
+            : toolActivityPresentation(name, status, pending.payload.input, result);
+          const block = makeToolBlock(pending.event, pending.payload, item.event, item.payload, pending.events, sourceEvents, presentation.visibility === 'compact' ? 'compact' : 'full');
+          if (presentation.visibility === 'hidden' || presentation.visibility === 'anchor' || (block.type === 'tool' && toolPresentation(block.name, block.status, block.resultSummary).visibility === 'hidden')) {
+            blocks[pending.blockIndex] = makeAnchorBlock(id, [...pending.events, ...sourceEvents]);
           } else {
             blocks[pending.blockIndex] = block;
           }
@@ -793,10 +1048,10 @@ export function buildConversationBlocks(events: UiEvent[]): ConversationBlock[] 
         } else {
           const block = makeStandaloneToolResult(item.event, item.payload);
           if (shouldShowStandaloneToolResult(block)) {
-            pendingToolResults.set(id, { event: item.event, payload: item.payload, blockIndex: blocks.length });
+            pendingToolResults.set(id, { event: item.event, events: sourceEvents, payload: item.payload, blockIndex: blocks.length });
             blocks.push(block);
           } else {
-            pendingToolResults.set(id, { event: item.event, payload: item.payload });
+            pendingToolResults.set(id, { event: item.event, events: sourceEvents, payload: item.payload });
           }
         }
       } else {
@@ -805,6 +1060,19 @@ export function buildConversationBlocks(events: UiEvent[]): ConversationBlock[] 
       }
     }
   }
+
+  for (const event of events) {
+    const streaming = streamingItems(event, streamingMessage);
+    streamingMessage = streaming.message;
+    if (streaming.consumed) {
+      appendItems(streaming.items);
+      continue;
+    }
+
+    appendItems(normalizedItems(event), event);
+  }
+
+  if (streamingMessage) appendItems(streamingContentItems(streamingMessage));
 
   return blocks;
 }

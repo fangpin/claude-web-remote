@@ -67,6 +67,22 @@ function userEventText(event: UiEvent): string | null {
   return event.kind === 'user' ? textFromEventPayload(event.payload) : null;
 }
 
+function isAssistantProgressEvent(event: UiEvent): boolean {
+  if (event.kind === 'assistant') return true;
+  if (!isObjectPayload(event.payload)) return false;
+  const type = event.payload.type;
+  if (type === 'message_start' || type === 'message_stop') return true;
+  if (type === 'content_block_start') {
+    const contentBlock = event.payload.content_block;
+    return isObjectPayload(contentBlock) && contentBlock.type === 'text';
+  }
+  if (type === 'content_block_delta') {
+    const delta = event.payload.delta;
+    return isObjectPayload(delta) && delta.type === 'text_delta';
+  }
+  return false;
+}
+
 function latestPersistedEventId(events: UiEvent[]): number {
   return events.reduce((latest, event) => (event.id > latest ? event.id : latest), 0);
 }
@@ -320,7 +336,7 @@ export function useSessionEvents({
           markAwaitingClaude(sessionId, true);
           return;
         }
-        if (event.kind === 'assistant' || event.kind === 'error') {
+        if (isAssistantProgressEvent(event) || event.kind === 'error') {
           markAwaitingClaude(sessionId, false);
         }
         setEvents((current) => ({
