@@ -50,7 +50,7 @@ npm --prefix web test
 npm --prefix web run build
 ```
 
-In a fresh git worktree, install frontend dependencies before running frontend checks if `web/node_modules` is missing:
+In a fresh git worktree, install frontend dependencies before running frontend checks if `web/node_modules` is missing. If `npm --prefix web test` fails with `vitest: command not found`, run this install command and rerun the checks:
 
 ```bash
 npm --prefix web install
