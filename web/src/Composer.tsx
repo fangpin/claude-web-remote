@@ -17,6 +17,7 @@ type Props = {
   isSending: boolean;
   message: string;
   messageInputRef: RefObject<HTMLTextAreaElement | null>;
+  promptHistory: string[];
   sendStatusText: string;
   suggestions: ClaudeCommand[];
   onAddPathContextAttachment: (path: string) => void;
@@ -28,7 +29,7 @@ type Props = {
   onRemoveContextAttachment: (id: string) => void;
   onSend: (event: FormEvent) => void;
   onSetActiveSuggestionIndex: (index: number) => void;
-  onStopSession: () => void;
+  onUsePrompt: (prompt: string) => void;
 };
 
 export default function Composer({
@@ -45,6 +46,7 @@ export default function Composer({
   isSending,
   message,
   messageInputRef,
+  promptHistory,
   sendStatusText,
   suggestions,
   onAddPathContextAttachment,
@@ -56,9 +58,10 @@ export default function Composer({
   onRemoveContextAttachment,
   onSend,
   onSetActiveSuggestionIndex,
-  onStopSession
+  onUsePrompt
 }: Props) {
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
+  const [historyMenuOpen, setHistoryMenuOpen] = useState(false);
   const [pathContext, setPathContext] = useState('');
   const [textContextName, setTextContextName] = useState('');
   const [textContextContent, setTextContextContent] = useState('');
@@ -107,11 +110,7 @@ export default function Composer({
           <span aria-hidden="true" className="composer-status-dot" />
           status: {statusLabel}
         </span>
-        <span className="composer-context-chip composer-context-wide" title={activeSession.cwd}>cwd: {activeSession.cwd}</span>
-        <span className="composer-context-chip composer-context-wide">permission: {activeSession.permissionMode}</span>
-        {activeSession.worktree && <span className="composer-context-chip composer-context-wide" title={activeSession.worktree.branch}>branch: {activeSession.worktree.branch}</span>}
-        {activeSession.worktree && <span className="composer-context-chip composer-context-wide" title={activeSession.worktree.sourceCwd}>source: {activeSession.worktree.sourceCwd}</span>}
-        <details className="composer-context-menu">
+        <details className="composer-context-menu composer-context-menu-primary">
           <summary aria-label="Show composer context">
             <span>Context</span>
             <strong>{contextSummary}</strong>
@@ -130,10 +129,33 @@ export default function Composer({
         <div className="context-attachment-chips" aria-label="Context attachments">
           {contextAttachments.map((attachment) => {
             const label = attachment.type === 'path' ? `@${attachment.path}` : attachment.name;
-            const kind = attachment.type === 'path' ? 'Repo path' : 'Pasted text';
+            if (attachment.type === 'text') {
+              const lineCount = attachment.content.trim() ? attachment.content.trim().split(/\r?\n/).length : 0;
+              return (
+                <details className="context-snippet-card" key={attachment.id}>
+                  <summary>
+                    <span>
+                      <strong>{attachment.name}</strong>
+                      <small>{lineCount} {lineCount === 1 ? 'line' : 'lines'} · {attachment.content.length} chars</small>
+                    </span>
+                    <button
+                      type="button"
+                      aria-label={`Remove ${label}`}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        onRemoveContextAttachment(attachment.id);
+                      }}
+                    >
+                      ×
+                    </button>
+                  </summary>
+                  <pre>{attachment.content}</pre>
+                </details>
+              );
+            }
             return (
               <span className="context-attachment-chip" key={attachment.id} title={label}>
-                <span className="context-attachment-kind">{kind}</span>
+                <span className="context-attachment-kind">Repo path</span>
                 <span className="context-attachment-label">{label}</span>
                 <button
                   type="button"
@@ -198,9 +220,45 @@ export default function Composer({
           </div>
         )}
       </div>
+      <div className="composer-hints" aria-label="Composer shortcuts">
+        <span>Enter to send</span>
+        <span>Shift Enter for newline</span>
+        <span>/ for commands</span>
+        <span>↑ for history</span>
+      </div>
       <div className="composer-actions">
         <span id="composer-send-status" aria-live="polite">{sendStatusText}</span>
         <div>
+          <div className="composer-history-menu">
+            <button
+              className="composer-history-button"
+              type="button"
+              disabled={!isComposerSession || promptHistory.length === 0}
+              aria-expanded={historyMenuOpen}
+              aria-haspopup="menu"
+              onClick={() => setHistoryMenuOpen((open) => !open)}
+            >
+              History
+            </button>
+            {historyMenuOpen && (
+              <div className="prompt-history-popover" role="menu" aria-label="Prompt history">
+                {promptHistory.slice(0, 8).map((prompt, index) => (
+                  <button
+                    key={`${prompt}-${index}`}
+                    type="button"
+                    role="menuitem"
+                    title={prompt}
+                    onClick={() => {
+                      onUsePrompt(prompt);
+                      setHistoryMenuOpen(false);
+                    }}
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <div className="composer-attachment-menu">
             <button
               className="composer-attach-button"
@@ -263,11 +321,6 @@ export default function Composer({
               </div>
             )}
           </div>
-          {isComposerSession && (
-            <button className="composer-stop-button" type="button" onClick={onStopSession} disabled={isSending}>
-              Stop session
-            </button>
-          )}
           <button
             className="send-button"
             type="submit"

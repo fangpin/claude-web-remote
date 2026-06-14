@@ -8,7 +8,8 @@ The code, files, git repositories, Claude CLI, and model gateway all stay on the
 
 - Rust daemon with REST and WebSocket APIs
 - React Web UI for multi-session control
-- Session creation by working directory
+- Chat-first session creation with workspace context selection
+- Session rename/update support
 - Optional git worktree sessions with branch, dirty state, and changed-file visibility
 - Streaming event display from `claude --output-format stream-json`
 - User input forwarding to the remote Claude process
@@ -181,22 +182,22 @@ If accessing from another machine, run the printed SSH tunnel command on your lo
 
 ## Create a session
 
-Open the Web UI and click **New chat**. The start screen lets you choose a recent project or enter a devbox path:
+Open the Web UI and click **New chat**. The start screen asks what Claude can help with, then lets you choose a recent project or enter a devbox workspace context:
 
 ```text
-Working directory: /path/to/remote/repo
+Workspace context: /path/to/remote/repo
 ```
 
-Permission mode and git worktree creation live under **Advanced options**. The daemon starts the configured launcher in the selected working directory, streams events back to the browser, and names the session from the first user message.
+Permission mode and git worktree creation live under **Advanced options**. The daemon starts the configured launcher in the selected workspace context, streams events back to the browser, and names the session from the first user message. Chat titles can be renamed later from the conversation header.
 
 ## Add context to a prompt
 
 Use the composer `+` button to attach context references before sending:
 
-- Repo path references are sent as `@path/to/file` in the prompt, so Claude Code can read the file from the session working directory. Use paths relative to the session cwd. The Web UI does not read the file contents or browse arbitrary devbox paths.
-- Pasted text context is sent as a named fenced text block with the prompt.
+- Repo path references are sent as `@path/to/file` in the prompt, so Claude Code can read the file from the session working directory. Use paths relative to the session cwd. Dirty worktree changed files can be attached directly from the worktree panel. The Web UI does not read the file contents or browse arbitrary devbox paths.
+- Pasted text context appears as a collapsible snippet card with line/character counts, then is sent as a named fenced text block with the prompt.
 
-Attachment chips can be removed before sending. Attachments are cleared after a successful send.
+Attachment chips and snippet cards can be removed before sending. Attachments are cleared after a successful send.
 
 ## Keyboard shortcuts
 
@@ -213,17 +214,34 @@ The Web UI supports app-level shortcuts for keyboard-first navigation:
 
 `Cmd/Ctrl+L` is intentionally left to the browser address bar; use `Cmd/Ctrl+K` or `/` to return to Claude input.
 
-Enable **Use git worktree** to start Claude in an isolated checkout. Worktree sessions show the checkout path, source repo, branch, clean/dirty state, and changed files in the session header. `Stop only` keeps the worktree for review; `Stop and remove worktree` is only available for clean app-created worktrees and never force-removes dirty changes.
+Enable **Use git worktree** to start Claude in an isolated checkout. Worktree sessions show the checkout path, source repo, branch, clean/dirty state, and changed files in the session header. Dirty worktrees expose a read-only **View diff** action. Worktree sessions can also copy delivery context for manual commit/PR handoff without executing git writes. `Stop only` keeps the worktree for review; `Stop and remove worktree` is only available for clean app-created worktrees and never force-removes dirty changes.
 
-## Session History API
+## Session API
+
+Worktree diffs are read-only and available for worktree sessions:
+
+```text
+GET /api/sessions/<session-id>/worktree-diff
+```
+
+This returns `{ "diff": "..." }` for the current unstaged worktree diff.
+
+Session names can be updated without restarting Claude:
+
+```text
+PATCH /api/sessions/<session-id>
+{ "name": "Renamed chat" }
+```
+
+Send `null` or an empty string to clear the custom name and fall back to the workspace-derived title.
 
 Session transcripts can be read without attaching to a running Claude process:
 
 ```text
-GET /api/sessions/<session-id>/transcript?afterId=<last-seen-event-id>
+GET /api/sessions/<session-id>/transcript?afterId=<last-seen-event-id>&limit=<max-events>
 ```
 
-This returns persisted append-only UI events as `{ "events": [...] }` for active, stopped, ended, failed, or archived sessions. `GET /api/sessions/<session-id>/events?afterId=...` remains the WebSocket replay-then-live stream for running sessions. Archived sessions remain read-only and reject mutation routes such as input, stop, restart, and resume until unarchived.
+This returns persisted append-only UI events as `{ "events": [...] }` for active, stopped, ended, failed, or archived sessions. `limit` keeps long-session initial loads bounded by returning only the latest matching events, and `beforeId` can page backward through older transcript windows. The Web UI also caps per-session events retained in browser memory while keeping the persisted transcript append-only. `GET /api/sessions/<session-id>/events?afterId=...` remains the WebSocket replay-then-live stream for running sessions. Archived sessions remain read-only and reject mutation routes such as input, stop, restart, and resume until unarchived.
 
 ## Diagnostics
 
@@ -279,4 +297,4 @@ Expected current coverage:
 - Prefer SSH local port forwarding for access.
 - `launcher` is argv-based and is not executed through a shell.
 - The first version does not include multi-user authentication or interactive allow/deny permission prompts.
-- The Web UI may highlight risky or permission-like actions, but approval/denial still has to happen in the terminal until the daemon exposes a real permission decision API.
+- The current raw Claude Code CLI `stream-json` control path does not expose documented browser-side stop-generating or permission approve/deny frames. The Web UI may highlight risky or permission-like actions, but approval/denial still has to happen in the terminal until the daemon adopts a real permission decision control API.

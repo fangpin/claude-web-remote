@@ -191,6 +191,25 @@ impl SessionManager {
         self.session_info(meta).await
     }
 
+    pub async fn update_session_name(
+        &self,
+        session_id: Uuid,
+        name: Option<String>,
+    ) -> AppResult<SessionInfo> {
+        let trimmed = name
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let meta = self
+            .store
+            .update_meta(session_id, |meta| {
+                meta.name = trimmed;
+                meta.updated_at = Utc::now();
+                Ok(())
+            })
+            .await?;
+        self.session_info(meta).await
+    }
+
     pub async fn list_tasks(&self) -> AppResult<TaskGroups> {
         let metas = self.store.list_meta(SessionListFilter::Active).await?;
         let mut tasks = Vec::new();
@@ -270,6 +289,15 @@ impl SessionManager {
             .as_ref()
             .ok_or_else(|| AppError::InvalidRequest("session has no worktree".to_string()))?;
         self.worktree_manager.status(worktree).await
+    }
+
+    pub async fn worktree_diff(&self, session_id: Uuid) -> AppResult<crate::WorktreeDiff> {
+        let meta = self.load_active_meta(session_id).await?;
+        let worktree = meta
+            .worktree
+            .as_ref()
+            .ok_or_else(|| AppError::InvalidRequest("session has no worktree".to_string()))?;
+        self.worktree_manager.diff(worktree).await
     }
 
     pub async fn stop_and_remove_worktree(&self, session_id: Uuid) -> AppResult<()> {

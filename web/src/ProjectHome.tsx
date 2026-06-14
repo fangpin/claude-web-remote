@@ -73,19 +73,19 @@ export default function ProjectHome({
       <div className="project-home-inner">
         <header className="project-home-hero">
           <span className="empty-eyebrow">New chat</span>
-          <h2>Where should Claude work?</h2>
-          <p>Start from a recent project, continue a nearby conversation, or choose a directory on the devbox.</p>
+          <h2>What can I help with?</h2>
+          <p>Choose a workspace context, then ask Claude to inspect, change, explain, or ship code.</p>
         </header>
 
         <form className="project-launch-card" onSubmit={onCreateSession} aria-label="Start a new Claude session">
           <div className="project-cwd-row">
             <label className="field-stack" htmlFor="project-home-cwd">
-              <span>Working directory</span>
+              <span>Workspace context</span>
               <input
                 id="project-home-cwd"
                 value={cwd}
                 onChange={(event) => onSetCwd(event.target.value)}
-                placeholder="/data00/home/user/repos/project"
+                placeholder="Choose a repo path on the devbox"
                 required
               />
             </label>
@@ -97,7 +97,7 @@ export default function ProjectHome({
             <div className="project-home-section" aria-label="Recent projects">
               <div className="project-section-heading">
                 <h3>Recent projects</h3>
-                <p>Pick a repo to use as the launch context.</p>
+                <p>Pick the codebase Claude should understand first.</p>
               </div>
               <div className="project-card-grid">
                 {recentProjects.map((project) => (

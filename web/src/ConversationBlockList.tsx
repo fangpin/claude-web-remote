@@ -112,11 +112,44 @@ function CodeFrame({
   );
 }
 
+function diffStats(code: string): { files: string[]; additions: number; deletions: number } {
+  const files: string[] = [];
+  let additions = 0;
+  let deletions = 0;
+
+  code.split('\n').forEach((line) => {
+    if (line.startsWith('diff --git ')) {
+      const match = line.match(/^diff --git a\/(.+?) b\/(.+)$/);
+      files.push(match?.[2] ?? line.replace(/^diff --git\s+/, ''));
+    } else if (line.startsWith('+') && !line.startsWith('+++')) {
+      additions += 1;
+    } else if (line.startsWith('-') && !line.startsWith('---')) {
+      deletions += 1;
+    }
+  });
+
+  return { files: [...new Set(files)], additions, deletions };
+}
+
 function DiffResult({ code }: { code: string }) {
+  const stats = diffStats(code);
+
   return (
-    <CodeFrame code={code} language="diff" className="tool-result-pre diff" variant="tool">
-      <code className="language-diff">
-        {code.split('\n').map((line, index) => {
+    <div className="diff-preview">
+      <div className="diff-summary" aria-label="Diff summary">
+        <span>{stats.files.length || 1} changed {stats.files.length === 1 ? 'file' : 'files'}</span>
+        <span className="diff-additions">+{stats.additions}</span>
+        <span className="diff-deletions">-{stats.deletions}</span>
+      </div>
+      {stats.files.length > 0 && (
+        <ul className="diff-file-list" aria-label="Changed files">
+          {stats.files.slice(0, 4).map((file) => <li key={file} title={file}>{file}</li>)}
+          {stats.files.length > 4 && <li>+ {stats.files.length - 4} more</li>}
+        </ul>
+      )}
+      <CodeFrame code={code} language="diff" className="tool-result-pre diff" variant="tool">
+        <code className="language-diff">
+          {code.split('\n').map((line, index) => {
           const kind =
             line.startsWith('+') && !line.startsWith('+++')
               ? 'addition'
@@ -132,9 +165,10 @@ function DiffResult({ code }: { code: string }) {
               {line || ' '}
             </span>
           );
-        })}
-      </code>
-    </CodeFrame>
+          })}
+        </code>
+      </CodeFrame>
+    </div>
   );
 }
 
@@ -166,8 +200,12 @@ function MessageMarkdown({ text }: { text: string }) {
 function MessageBlockView({ block }: { block: MessageBlock }) {
   return (
     <article id={blockElementId(block)} className={`conversation-block message-block ${block.role}`}>
-      <header className="block-header">
-        <span>{roleLabel(block.role)}</span>
+      <header className="block-header message-header">
+        <span className="message-author">
+          <span className="message-avatar" aria-hidden="true">{block.role === 'assistant' ? 'C' : block.role === 'user' ? 'Y' : 'S'}</span>
+          <span>{roleLabel(block.role)}</span>
+        </span>
+        <span>{block.eventIds.length === 1 ? '1 event' : `${block.eventIds.length} events`}</span>
       </header>
       <MessageMarkdown text={block.text} />
       <RawEventDetails rawEvents={block.rawEvents} />
@@ -228,25 +266,27 @@ function ToolBlockView({ block }: { block: ToolBlock }) {
     <article id={blockElementId(block)} className={`conversation-block tool-block ${block.status} result-${block.resultKind}`}>
       <header className="block-header tool-activity-header">
         <span className="tool-name">{block.name}</span>
-        <span className="tool-status">{block.status}</span>
+        <span className={`tool-status tool-status-${block.status}`}>
+          <span className="tool-status-dot" aria-hidden="true" />
+          {block.status}
+        </span>
       </header>
       <div className="tool-activity-body">
         {block.inputSummary.trim() && <p className="tool-input-summary">{block.inputSummary}</p>}
         {block.resultLabel && <p className="tool-result-label">{block.resultLabel}</p>}
       </div>
-      {block.resultSummary.trim() && block.resultDisplay === 'visible' && (
-        <section className="block-section tool-result visible-result">
-          <h4>{toolResultTitle(block)}</h4>
-          <ToolResultContent block={block} />
-        </section>
-      )}
-      {block.resultSummary.trim() && block.resultDisplay === 'collapsed' && (
-        <details className="block-section tool-result collapsed-result">
-          <summary>{block.resultLabel}</summary>
-          <ToolResultContent block={block} />
+      {(block.resultSummary.trim() || block.rawEvents.length > 0) && (
+        <details className="block-section tool-result collapsed-result tool-details">
+          <summary>{block.status === 'running' ? 'Details' : block.resultLabel || 'Details'}</summary>
+          {block.resultSummary.trim() && block.resultDisplay !== 'hidden' && (
+            <section className="tool-result-detail">
+              <h4>{toolResultTitle(block)}</h4>
+              <ToolResultContent block={block} />
+            </section>
+          )}
+          <RawEventDetails rawEvents={block.rawEvents} />
         </details>
       )}
-      <RawEventDetails rawEvents={block.rawEvents} />
     </article>
   );
 }

@@ -27,6 +27,10 @@ export type WorktreeStatus = {
   shortStatus: string[];
 };
 
+export type WorktreeDiff = {
+  diff: string;
+};
+
 export type SessionInfo = {
   id: string;
   name?: string | null;

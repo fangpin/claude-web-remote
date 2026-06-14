@@ -307,6 +307,10 @@ beforeEach(() => {
     if (worktreeStatusMatch && !init) {
       return worktreeStatusResponse(worktreeStatusMatch[1]);
     }
+    const worktreeDiffMatch = url.match(/^\/api\/sessions\/([^/?]+)\/worktree-diff$/);
+    if (worktreeDiffMatch && !init) {
+      return jsonResponse({ diff: 'diff --git a/web/src/App.tsx b/web/src/App.tsx\n+changed' });
+    }
     if (url === '/api/sessions' && !init) {
       return jsonResponse({ sessions });
     }
@@ -334,6 +338,12 @@ beforeEach(() => {
           : null,
         updatedAt: '2026-06-12T00:00:00Z'
       });
+    }
+    const patchSessionMatch = url.match(/^\/api\/sessions\/([^/?]+)$/);
+    if (patchSessionMatch && init?.method === 'PATCH') {
+      const body = JSON.parse(String(init.body));
+      const session = sessions.find((item) => item.id === patchSessionMatch[1]) ?? sessions[0];
+      return jsonResponse({ ...session, name: body.name, updatedAt: '2026-06-12T00:00:00Z' });
     }
     if (url === '/api/tasks') {
       return jsonResponse(taskGroups);
@@ -421,6 +431,7 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock);
   vi.stubGlobal('WebSocket', FakeWebSocket);
   vi.stubGlobal('confirm', vi.fn(() => true));
+  vi.stubGlobal('prompt', vi.fn((_message: string, value?: string) => value ?? 'Renamed chat'));
 });
 
 afterEach(() => {
@@ -435,7 +446,7 @@ describe('App', () => {
     const primaryNavigation = await screen.findByRole('navigation', { name: 'Primary navigation' });
     expect(primaryNavigation).toBeInTheDocument();
     expect(within(primaryNavigation).getByRole('button', { name: 'Sessions' })).toHaveAttribute('aria-current', 'page');
-    expect(within(primaryNavigation).getByRole('button', { name: 'Config' })).toHaveAttribute('aria-current', 'false');
+    expect(within(primaryNavigation).queryByRole('button', { name: 'Settings' })).not.toBeInTheDocument();
     expect(screen.getByRole('complementary', { name: 'Session navigation' })).toBeInTheDocument();
     expect(screen.getByRole('main', { name: 'Conversation workspace' })).toBeInTheDocument();
     expect(screen.getByRole('complementary', { name: 'Session inspector' })).toBeInTheDocument();
@@ -459,15 +470,17 @@ describe('App', () => {
 
     expect((await screen.findAllByText('Repo One')).length).toBeGreaterThan(0);
     expect(screen.getAllByText('/repo/one').length).toBeGreaterThan(0);
-    expect(screen.getByRole('heading', { name: 'Previous 7 days' })).toBeInTheDocument();
-    expect(screen.getByText('Fresh context from this week')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'one' })).toBeInTheDocument();
+    expect(screen.getAllByText('/repo · Active this week').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Ready for your reply').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Claude is working').length).toBeGreaterThan(0);
     expect(screen.getByText('Can resume')).toBeInTheDocument();
     expectSessionStatus('Repo One', 'Waiting for you');
     expectSessionStatus('Worktree Repo', 'Running');
     expectSessionStatus('Stopped Repo', 'Ended');
-    expect(screen.getByText('Remote Claude session')).toBeInTheDocument();
+    expect(screen.getByText('Claude chat')).toBeInTheDocument();
+    expect(screen.getByLabelText('Claude: Claude is waiting')).toBeInTheDocument();
+    expect(screen.getByLabelText('Claude attention notification')).toHaveTextContent('Claude is waiting');
     expect(screen.getAllByLabelText('Claude needs your review')).toHaveLength(2);
     expect(screen.getAllByRole('heading', { name: 'Claude is waiting' })).toHaveLength(2);
     expect(screen.getAllByText('Web approval controls are not available in this build.')).toHaveLength(2);
@@ -562,7 +575,9 @@ describe('App', () => {
 
     render(<App />);
 
-    expect(await screen.findAllByText('Claude requested an action that may be destructive or affect shared state.')).toHaveLength(2);
+    expect(await screen.findAllByText('Claude requested an action that may be destructive or affect shared state.')).toHaveLength(4);
+    expect(screen.getAllByRole('button', { name: 'Review' }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: 'Copy review' }).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Bash').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Deletes files recursively or forcefully.').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Remove dist · $ rm -rf dist').length).toBeGreaterThan(0);
@@ -610,16 +625,16 @@ describe('App', () => {
     render(<App />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'New chat' }));
-    expect(await screen.findByRole('heading', { name: 'Where should Claude work?' })).toBeInTheDocument();
-    expect(screen.getByText('Start from a recent project, continue a nearby conversation, or choose a directory on the devbox.')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'What can I help with?' })).toBeInTheDocument();
+    expect(screen.getByText('Choose a workspace context, then ask Claude to inspect, change, explain, or ship code.')).toBeInTheDocument();
     expect(screen.getByText('Advanced options').closest('details')).not.toHaveAttribute('open');
-    fireEvent.change(await screen.findByLabelText('Working directory'), { target: { value: '/repo/two' } });
+    fireEvent.change(await screen.findByLabelText('Workspace context'), { target: { value: '/repo/two' } });
     fireEvent.click(screen.getByText('Advanced options'));
     expect(screen.getByText('Skip prompts for trusted local repos.')).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText('Use git worktree'));
     fireEvent.click(screen.getByText('Start chat'));
 
-    expect(await screen.findByRole('heading', { name: '/repo/two' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'two', level: 2 })).toBeInTheDocument();
     expect(screen.queryByLabelText('Working directory')).not.toBeInTheDocument();
     const createCall = fetchMock.mock.calls.find(([url, init]) => url === '/api/sessions' && init?.method === 'POST');
     expect(JSON.parse(String(createCall?.[1]?.body))).toMatchObject({
@@ -637,10 +652,10 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { name: 'Archived Repo' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
-    fireEvent.change(await screen.findByLabelText('Working directory'), { target: { value: '/repo/two' } });
+    fireEvent.change(await screen.findByLabelText('Workspace context'), { target: { value: '/repo/two' } });
     fireEvent.click(screen.getByText('Start chat'));
 
-    expect(await screen.findByRole('heading', { name: '/repo/two' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'two', level: 2 })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Active' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: 'Archived' })).toHaveAttribute('aria-pressed', 'false');
     expect(screen.queryByRole('button', { name: /Archived Repo/ })).not.toBeInTheDocument();
@@ -650,7 +665,7 @@ describe('App', () => {
     render(<App />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'New chat' }));
-    fireEvent.change(await screen.findByLabelText('Working directory'), { target: { value: '~' } });
+    fireEvent.change(await screen.findByLabelText('Workspace context'), { target: { value: '~' } });
     fireEvent.click(screen.getByText('Start chat'));
 
     expect(await screen.findByText('invalid request: cwd does not exist: ~')).toBeInTheDocument();
@@ -670,7 +685,7 @@ describe('App', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Use /repo/stopped as working directory' }));
 
-    expect(screen.getByLabelText('Working directory')).toHaveValue('/repo/stopped');
+    expect(screen.getByLabelText('Workspace context')).toHaveValue('/repo/stopped');
     expect(screen.getByText('Claude will start in /repo/stopped.')).toBeInTheDocument();
   });
 
@@ -703,7 +718,7 @@ describe('App', () => {
     const sidebar = await screen.findByRole('complementary', { name: 'Session navigation' });
     expect(within(sidebar).getByText('Could not load chats.')).toBeInTheDocument();
     expect(within(sidebar).getByText('Details')).toBeInTheDocument();
-    expect(screen.getByRole('main', { name: 'Conversation workspace' })).toHaveTextContent('Where should Claude work?');
+    expect(screen.getByRole('main', { name: 'Conversation workspace' })).toHaveTextContent('What can I help with?');
 
     shouldFail = false;
     fireEvent.click(within(sidebar).getByRole('button', { name: 'Retry' }));
@@ -717,7 +732,7 @@ describe('App', () => {
       const url = String(input);
       if (url === '/api/sessions' && !init) return jsonResponse({ sessions: defaultSessions });
       if (url === '/api/tasks' || url.endsWith('/tasks')) return jsonResponse(emptyTaskGroups);
-      if (url === '/api/sessions/s1/transcript') {
+      if (url === '/api/sessions/s1/transcript' || url === '/api/sessions/s1/transcript?limit=80') {
         if (shouldFailTranscript) return jsonResponse({ error: 'transcript store unavailable' }, 500);
         return jsonResponse({
           events: [
@@ -800,6 +815,7 @@ describe('App', () => {
     fireEvent.keyDown(window, { key: '/' });
     await waitFor(() => expect(messageInput).toHaveFocus());
     expect(messageInput).toHaveValue('/');
+    expect(screen.getByLabelText('Composer shortcuts')).toHaveTextContent('/ for commands');
     expect(screen.getByRole('listbox', { name: 'Claude command suggestions' })).toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: 'Escape' });
@@ -810,11 +826,29 @@ describe('App', () => {
     await waitFor(() => expect(messageInput).toHaveFocus());
     expect(messageInput).toHaveValue('keep draft');
 
+    fireEvent.keyDown(window, { key: 'n', ctrlKey: true });
+    expect(await screen.findByRole('heading', { name: 'What can I help with?' })).toBeInTheDocument();
+
     const search = screen.getByRole('searchbox', { name: 'Search sessions' });
     fireEvent.change(search, { target: { value: '/' } });
     fireEvent.keyDown(search, { key: '/' });
     expect(search).toHaveValue('/');
     expect(messageInput).toHaveValue('keep draft');
+  });
+
+  it('opens the command palette with quick actions', async () => {
+    render(<App />);
+
+    await screen.findAllByText('Repo One');
+    fireEvent.keyDown(window, { key: 'p', ctrlKey: true });
+
+    const palette = await screen.findByRole('dialog', { name: 'Command palette' });
+    expect(screen.getByRole('textbox', { name: 'Search commands' })).toHaveFocus();
+    expect(palette).toHaveTextContent('New chat');
+    expect(palette).toHaveTextContent('Open slash commands');
+    expect(palette).toHaveTextContent('Repo One');
+    expect(palette).toHaveTextContent('Open settings');
+    expect(palette).toHaveTextContent('Hide inspector');
   });
 
   it('toggles panels and cycles sessions with app-level shortcuts', async () => {
@@ -853,9 +887,9 @@ describe('App', () => {
     expect(screen.queryByLabelText('Keyboard shortcuts')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
-    expect(await screen.findByRole('heading', { name: 'Where should Claude work?' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'What can I help with?' })).toBeInTheDocument();
     fireEvent.keyDown(window, { key: 'Escape' });
-    expect(screen.getByRole('heading', { name: 'Where should Claude work?' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'What can I help with?' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Show inspector' })).toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: 'i', ctrlKey: true });
@@ -864,7 +898,7 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: 'Show inspector' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
-    fireEvent.change(await screen.findByLabelText('Working directory'), { target: { value: '/repo/two' } });
+    fireEvent.change(await screen.findByLabelText('Workspace context'), { target: { value: '/repo/two' } });
     fireEvent.click(screen.getByText('Start chat'));
 
     const messageInput = await screen.findByLabelText('Message');
@@ -1045,10 +1079,12 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: /Send/ })).toBeDisabled();
   });
 
-  it('stops the active session from the composer', async () => {
+  it('keeps end session in the header overflow instead of the composer', async () => {
     render(<App />);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Stop session' }));
+    expect(screen.queryByRole('button', { name: 'Stop session' })).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByText('More'));
+    fireEvent.click(screen.getByRole('button', { name: 'End session' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/stop', expect.objectContaining({ method: 'POST' })));
   });
@@ -1057,15 +1093,17 @@ describe('App', () => {
     render(<App />);
 
     const context = await screen.findByLabelText('Composer context');
-    expect(within(context).getByText('cwd: /repo/one')).toBeInTheDocument();
-    expect(within(context).getByText('permission: acceptEdits')).toBeInTheDocument();
     expect(context).toHaveTextContent('status: Waiting for you');
+    fireEvent.click(within(context).getByText('Context'));
+    expect(within(context).getByText('/repo/one')).toBeInTheDocument();
+    expect(within(context).getByText('acceptEdits')).toBeInTheDocument();
 
     fireEvent.click(sessionButton('Worktree Repo'));
 
     const worktreeContext = await screen.findByLabelText('Composer context');
-    expect(within(worktreeContext).getByText('branch: pin/abc123')).toBeInTheDocument();
-    expect(within(worktreeContext).getByText('source: /repo/one')).toBeInTheDocument();
+    fireEvent.click(within(worktreeContext).getByText('Context'));
+    expect(within(worktreeContext).getByText('pin/abc123')).toBeInTheDocument();
+    expect(within(worktreeContext).getByText('/repo/one')).toBeInTheDocument();
   });
 
   it('shows an empty conversation state and fills suggestions without sending', async () => {
@@ -1085,11 +1123,22 @@ describe('App', () => {
     await waitFor(() => expect(FakeWebSocket.instances.length).toBe(1));
     act(() => FakeWebSocket.instances[0].onopen?.());
     expect(await screen.findByRole('heading', { name: 'What would you like Claude to do?' })).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/transcript', undefined);
+    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/transcript?limit=80', undefined);
     fireEvent.click(screen.getByRole('button', { name: 'Run the relevant tests' }));
 
     expect(screen.getByLabelText('Message')).toHaveValue('Run the relevant tests');
     expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/sessions/s1/input')).toBe(false);
+  });
+
+  it('renames the active chat from the header', async () => {
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'Repo One' })).toBeInTheDocument();
+    vi.mocked(window.prompt).mockReturnValueOnce('Renamed Repo');
+    fireEvent.click(screen.getByRole('button', { name: 'Rename chat' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1', expect.objectContaining({ method: 'PATCH' })));
+    expect(await screen.findByRole('heading', { name: 'Renamed Repo' })).toBeInTheDocument();
   });
 
   it('updates an unnamed chat with an auto-generated title after the first message', async () => {
@@ -1106,7 +1155,7 @@ describe('App', () => {
 
     render(<App />);
 
-    expect(await screen.findByRole('heading', { name: '/repo/one' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'one', level: 2 })).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Name this chat from the first prompt please' } });
     fireEvent.click(screen.getByText('Send'));
@@ -1118,7 +1167,8 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByRole('heading', { name: 'Repo One' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
+    fireEvent.click(screen.getByText('More'));
+    expect(screen.getByRole('button', { name: 'End session' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Restart' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Archive' })).toBeInTheDocument();
     expect(within(screen.getByLabelText('Session continuity')).getByText('Waiting for you')).toBeInTheDocument();
@@ -1136,7 +1186,8 @@ describe('App', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s2/resume', expect.objectContaining({ method: 'POST' })));
     await waitFor(() => expect(FakeWebSocket.instances.length).toBe(socketsBeforeResume + 1));
     expect(FakeWebSocket.instances.at(-1)?.url).toContain('/api/sessions/s2/events?afterId=0');
-    expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
+    fireEvent.click(screen.getByText('More'));
+    expect(screen.getByRole('button', { name: 'End session' })).toBeInTheDocument();
   });
 
   it.each<SessionStatus>(['stopped', 'exited', 'failed'])('explains fresh-start continuation for %s sessions without Claude context', async (status) => {
@@ -1158,6 +1209,7 @@ describe('App', () => {
     expect(within(screen.getByLabelText('Session continuity')).getByText('Will start fresh')).toBeInTheDocument();
     expect(screen.getByText('This session cannot resume its Claude context. Start fresh from this workspace to continue.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Start fresh from this workspace' })).toBeInTheDocument();
+    fireEvent.click(screen.getByText('More'));
     expect(screen.getByRole('button', { name: 'Archive' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Start fresh from this workspace' }));
@@ -1180,7 +1232,8 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByRole('heading', { name: 'Starting Repo' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
+    fireEvent.click(screen.getByText('More'));
+    expect(screen.getByRole('button', { name: 'End session' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Archive' })).toBeInTheDocument();
     expect(screen.getByLabelText('Message')).toBeDisabled();
     expect(screen.getByText('Claude is starting. You can send once the session is ready.')).toBeInTheDocument();
@@ -1207,8 +1260,9 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { name })).toBeInTheDocument();
     expect(within(screen.getByLabelText('Session continuity')).getByText('Can resume')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Resume conversation' })).toBeInTheDocument();
+    fireEvent.click(screen.getByText('More'));
     expect(screen.getByRole('button', { name: 'Archive' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'End session' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Restart' })).not.toBeInTheDocument();
   });
 
@@ -1216,6 +1270,7 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByRole('heading', { name: 'Repo One' })).toBeInTheDocument();
+    fireEvent.click(screen.getByText('More'));
     fireEvent.click(screen.getByRole('button', { name: 'Archive' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/archive', expect.objectContaining({ method: 'POST' })));
@@ -1313,7 +1368,7 @@ describe('App', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Archived' }));
 
     expect(await screen.findByRole('heading', { name: 'No archived chat selected.' })).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'Where should Claude work?' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'What can I help with?' })).not.toBeInTheDocument();
   });
 
   it('ignores stale active list responses after switching to archived mode', async () => {
@@ -1379,6 +1434,7 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByRole('heading', { name: 'Repo One' })).toBeInTheDocument();
+    fireEvent.click(screen.getByText('More'));
     fireEvent.click(screen.getByRole('button', { name: 'Archive' }));
     fireEvent.click(sessionButton('Newest Repo'));
 
@@ -1398,15 +1454,18 @@ describe('App', () => {
 
     const activeHeaderBeforeStop = screen.getByRole('heading', { name: 'Worktree Repo' }).closest('header');
     expect(activeHeaderBeforeStop).not.toBeNull();
-    expect(within(activeHeaderBeforeStop as HTMLElement).getByText('Worktree: /repo/one/.claude/worktrees/abc123')).toBeInTheDocument();
-    expect(within(activeHeaderBeforeStop as HTMLElement).getByText('Source: /repo/one')).toBeInTheDocument();
-    expect(within(activeHeaderBeforeStop as HTMLElement).getByText('Branch: pin/abc123')).toBeInTheDocument();
+    fireEvent.click(within(activeHeaderBeforeStop as HTMLElement).getByText('Chat details'));
+    expect(within(activeHeaderBeforeStop as HTMLElement).getAllByText('/repo/one/.claude/worktrees/abc123').length).toBeGreaterThan(0);
+    expect(within(activeHeaderBeforeStop as HTMLElement).getByText('/repo/one')).toBeInTheDocument();
+    expect(within(activeHeaderBeforeStop as HTMLElement).getByText('pin/abc123')).toBeInTheDocument();
     expect(await screen.findByText('Clean')).toBeInTheDocument();
     expect(screen.getByText('Base: HEAD')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy delivery context' })).toBeInTheDocument();
+    fireEvent.click(screen.getByText('More'));
     fireEvent.click(screen.getByText('Stop and remove worktree'));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s4/stop-and-remove-worktree', expect.objectContaining({ method: 'POST' })));
-    await waitFor(() => expect(screen.queryByText('Branch: pin/abc123')).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText('pin/abc123')).not.toBeInTheDocument());
     const activeHeader = screen.getByRole('heading', { name: 'Worktree Repo' }).closest('header');
     expect(activeHeader).not.toBeNull();
     expect(within(activeHeader as HTMLElement).getByText('/repo/one')).toBeInTheDocument();
@@ -1420,6 +1479,11 @@ describe('App', () => {
 
     expect(await screen.findByText('1 changed file')).toBeInTheDocument();
     expect(screen.getByText('web/src/App.tsx')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Attach' }));
+    expect(await screen.findByLabelText('Context attachments')).toHaveTextContent('@web/src/App.tsx');
+    fireEvent.click(screen.getByRole('button', { name: 'View diff' }));
+    expect(await screen.findByText('Worktree diff')).toBeInTheDocument();
+    expect(screen.getByText(/diff --git a\/web\/src\/App\.tsx/)).toBeInTheDocument();
     expect(screen.getByText(/cleanup is blocked until you commit, stash, or clean/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Review dirty worktree first' })).toBeDisabled();
     expect(screen.getByText('Stop only')).toBeInTheDocument();
@@ -1440,6 +1504,7 @@ describe('App', () => {
 
     fireEvent.click(await screen.findByText('External Worktree Repo'));
 
+    fireEvent.click(screen.getByText('More'));
     expect(screen.queryByText('Stop and remove worktree')).not.toBeInTheDocument();
     expect(screen.getByText('Stop only')).toBeInTheDocument();
   });
@@ -1573,11 +1638,13 @@ describe('App', () => {
     expect(archivedButton).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('opens the config view from the sidebar', async () => {
+  it('keeps settings accessible from the command palette', async () => {
     render(<App />);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Config' }));
+    fireEvent.keyDown(window, { key: 'p', ctrlKey: true });
+    const palette = await screen.findByRole('dialog', { name: 'Command palette' });
 
-    expect(await screen.findByText('Daemon config')).toBeInTheDocument();
+    expect(palette).toHaveTextContent('Open settings');
+    expect(palette).toHaveTextContent('View app and runtime configuration');
   });
 });

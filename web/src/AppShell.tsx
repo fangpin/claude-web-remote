@@ -19,12 +19,13 @@ type Props = {
   isInspectorOpen: boolean;
   isShortcutHelpOpen: boolean;
   isSidebarOpen: boolean;
+  attentionState: 'idle' | 'working' | 'review';
+  attentionLabel: string | null;
   sidebar: ReactNode;
   workspace: ReactNode;
   inspector: ReactNode;
   onSetShortcutHelpOpen: (isOpen: boolean) => void;
   onShowActiveSessions: () => void;
-  onShowConfig: () => void;
   onShowArchivedSessions: () => void;
   onToggleSidebar: () => void;
 };
@@ -35,36 +36,32 @@ export default function AppShell({
   isInspectorOpen,
   isShortcutHelpOpen,
   isSidebarOpen,
+  attentionState,
+  attentionLabel,
   sidebar,
   workspace,
   inspector,
   onSetShortcutHelpOpen,
   onShowActiveSessions,
-  onShowConfig,
   onShowArchivedSessions,
   onToggleSidebar
 }: Props) {
   return (
     <div className={`app-shell view-${view} ${isInspectorOpen ? 'inspector-open' : 'inspector-closed'} ${isSidebarOpen ? 'sidebar-open' : 'sidebar-closed'}`}>
       <nav className="primary-rail" aria-label="Primary navigation">
-        <div className="rail-brand" aria-label="Claude Remote Web">CRW</div>
+        <div className={`rail-brand attention-${attentionState}`} aria-label={attentionLabel ? `Claude: ${attentionLabel}` : 'Claude'}>
+          C
+          {attentionState !== 'idle' && <span className="rail-attention-dot" aria-hidden="true" />}
+        </div>
         <button
           type="button"
           aria-current={view === 'sessions' && listMode === 'active' ? 'page' : 'false'}
           className={view === 'sessions' && listMode === 'active' ? 'active' : ''}
-          title="Show active sessions"
+          title={attentionLabel ?? 'Show active sessions'}
           onClick={onShowActiveSessions}
         >
           Sessions
-        </button>
-        <button
-          type="button"
-          aria-current={view === 'config' ? 'page' : 'false'}
-          className={view === 'config' ? 'active' : ''}
-          title="Open daemon config"
-          onClick={onShowConfig}
-        >
-          Config
+          {attentionState !== 'idle' && <span className={`rail-button-dot ${attentionState}`} aria-hidden="true" />}
         </button>
         <button
           type="button"
@@ -99,7 +96,9 @@ export default function AppShell({
             <section id="keyboard-shortcuts-help" className="shortcut-help-popover" aria-label="Keyboard shortcuts">
               <h2>Keyboard shortcuts</h2>
               <dl>
-                <div><dt>⌘/Ctrl K</dt><dd>Focus command input</dd></div>
+                <div><dt>⌘/Ctrl P</dt><dd>Open command palette</dd></div>
+                <div><dt>⌘/Ctrl N</dt><dd>New chat</dd></div>
+                <div><dt>⌘/Ctrl K</dt><dd>Focus composer</dd></div>
                 <div><dt>/</dt><dd>Focus composer</dd></div>
                 <div><dt>⌘/Ctrl B</dt><dd>Toggle sidebar</dd></div>
                 <div><dt>⌘/Ctrl I</dt><dd>Toggle inspector</dd></div>

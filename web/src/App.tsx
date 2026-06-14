@@ -42,6 +42,9 @@ export default function App() {
   const [view, setView] = useState<AppView>('sessions');
   const [isInspectorOpen, setIsInspectorOpen] = useState(true);
   const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [dismissedAttentionKey, setDismissedAttentionKey] = useState<string | null>(null);
+  const [notifiedAttentionKey, setNotifiedAttentionKey] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('session');
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
@@ -151,7 +154,131 @@ export default function App() {
     });
   }
 
-  function focusFallbackAfterSidebarClose() {
+  type CommandPaletteAction = {
+  id: string;
+  title: string;
+  hint: string;
+  kind: 'Command' | 'Chat';
+  shortcut?: string;
+  run: () => void;
+};
+
+function AttentionToast({
+  title,
+  message,
+  canNotify,
+  onEnableNotifications,
+  onReview,
+  onDismiss
+}: {
+  title: string;
+  message: string;
+  canNotify: boolean;
+  onEnableNotifications: () => void;
+  onReview: () => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <section className="attention-toast" role="status" aria-label="Claude attention notification">
+      <div>
+        <span className="state-kicker">Claude needs attention</span>
+        <strong>{title}</strong>
+        <p>{message}</p>
+      </div>
+      <div className="attention-toast-actions">
+        <button type="button" onClick={onReview}>Review</button>
+        {canNotify && <button type="button" onClick={onEnableNotifications}>Enable notifications</button>}
+        <button type="button" onClick={onDismiss} aria-label="Dismiss attention notification">Dismiss</button>
+      </div>
+    </section>
+  );
+}
+
+function CommandPalette({ actions, onClose }: { actions: CommandPaletteAction[]; onClose: () => void }) {
+  const [query, setQuery] = useState('');
+  const [activeIndex, setActiveIndex] = useState(0);
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleActions = normalizedQuery
+    ? actions.filter((action) => `${action.title} ${action.hint}`.toLowerCase().includes(normalizedQuery))
+    : actions;
+
+  function runAction(action: CommandPaletteAction) {
+    action.run();
+    onClose();
+  }
+
+  function onKeyDown(event: KeyboardEvent<HTMLElement>) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+    if (event.key === 'ArrowDown' && visibleActions.length > 0) {
+      event.preventDefault();
+      setActiveIndex((index) => (index + 1) % visibleActions.length);
+      return;
+    }
+    if (event.key === 'ArrowUp' && visibleActions.length > 0) {
+      event.preventDefault();
+      setActiveIndex((index) => (index - 1 + visibleActions.length) % visibleActions.length);
+      return;
+    }
+    if (event.key === 'Enter' && visibleActions[activeIndex]) {
+      event.preventDefault();
+      runAction(visibleActions[activeIndex]);
+    }
+  }
+
+  return (
+    <div className="command-palette-backdrop" role="presentation" onMouseDown={onClose}>
+      <section className="command-palette" role="dialog" aria-modal="true" aria-label="Command palette" onKeyDown={onKeyDown} onMouseDown={(event) => event.stopPropagation()}>
+        <div className="command-palette-header">
+          <span className="state-kicker">Quick actions</span>
+          <h2>What would you like to do?</h2>
+        </div>
+        <label className="command-palette-search">
+          <span className="sr-only">Search commands</span>
+          <input
+            autoFocus
+            value={query}
+            placeholder="Search commands..."
+            aria-label="Search commands"
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setActiveIndex(0);
+            }}
+            onInput={(event) => {
+              setQuery(event.currentTarget.value);
+              setActiveIndex(0);
+            }}
+          />
+        </label>
+        <div className="command-palette-list" aria-label="Command palette actions">
+          {visibleActions.length > 0 ? visibleActions.map((action, index) => (
+            <button
+              key={action.id}
+              type="button"
+              className={index === activeIndex ? 'active' : undefined}
+              aria-current={index === activeIndex ? 'true' : undefined}
+              onMouseEnter={() => setActiveIndex(index)}
+              onClick={() => runAction(action)}
+            >
+              <span>
+                <strong>{action.title}</strong>
+                <small><span className="command-palette-kind">{action.kind}</span>{action.hint}</small>
+              </span>
+              {action.shortcut && <kbd>{action.shortcut}</kbd>}
+            </button>
+          )) : (
+            <p className="command-palette-empty">No commands match “{query}”.</p>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function focusFallbackAfterSidebarClose() {
     requestAnimationFrame(() => {
       const activeElement = document.activeElement;
       if (!(activeElement instanceof HTMLElement) || !activeElement.closest('.session-sidebar')) return;
@@ -199,6 +326,77 @@ export default function App() {
     eventState.setPendingEventId(activity.anchorEventId);
   }
 
+  function onOpenReviewActivity(review: typeof currentReviewSurface) {
+    if (!review?.activity) return;
+    setView('sessions');
+    setIsInspectorOpen(true);
+    setInspectorTab('activity');
+    onSelectActivity(review.activity);
+  }
+
+  function showActiveSessions() {
+    setView('sessions');
+    setIsSidebarOpen(true);
+    sessionState.setListMode('active');
+  }
+
+  function showArchivedSessions() {
+    setView('sessions');
+    setIsSidebarOpen(true);
+    sessionState.setListMode('archived');
+  }
+
+  function openNewChat() {
+    showActiveSessions();
+    sessionState.openStartSurface();
+  }
+
+  const attentionState = currentReviewSurface ? 'review' : eventState.isAwaitingClaude ? 'working' : 'idle';
+  const attentionLabel = currentReviewSurface?.title ?? (eventState.isAwaitingClaude ? 'Claude is working' : null);
+  const attentionKey = currentReviewSurface
+    ? `${sessionState.activeSession?.id ?? 'session'}:${currentReviewSurface.activity?.id ?? currentReviewSurface.title}`
+    : null;
+  const shouldShowAttentionToast = Boolean(currentReviewSurface && attentionKey !== dismissedAttentionKey);
+  const canRequestNotifications = typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default';
+
+  async function enableBrowserNotifications() {
+    if (!('Notification' in window)) return;
+    await Notification.requestPermission();
+  }
+
+  useEffect(() => {
+    if (!currentReviewSurface || !attentionKey || notifiedAttentionKey === attentionKey) return;
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    new Notification(currentReviewSurface.title, {
+      body: currentReviewSurface.message,
+      tag: attentionKey
+    });
+    setNotifiedAttentionKey(attentionKey);
+  }, [attentionKey, currentReviewSurface, notifiedAttentionKey]);
+
+  const chatSwitchActions: CommandPaletteAction[] = sessionState.visibleSessions.slice(0, 6).map((session) => ({
+    id: `chat-${session.id}`,
+    title: session.name || session.cwd,
+    hint: `Open chat · ${session.cwd}`,
+    kind: 'Chat',
+    run: () => {
+      setView('sessions');
+      setIsSidebarOpen(true);
+      sessionState.selectSession(session.id);
+    }
+  }));
+  const commandPaletteActions: CommandPaletteAction[] = [
+    { id: 'new-chat', title: 'New chat', hint: 'Choose a project and start a Claude session', kind: 'Command', shortcut: 'N', run: openNewChat },
+    { id: 'focus-composer', title: 'Focus composer', hint: 'Jump back to the message input', kind: 'Command', shortcut: '⌘K', run: () => focusComposer(false) },
+    { id: 'slash-command', title: 'Open slash commands', hint: 'Start command autocomplete in the composer', kind: 'Command', shortcut: '/', run: () => focusComposer(true) },
+    ...chatSwitchActions,
+    { id: 'active-sessions', title: 'Show active chats', hint: 'Return to active conversations', kind: 'Command', run: showActiveSessions },
+    { id: 'archived-sessions', title: 'Show archived chats', hint: 'Browse archived conversations', kind: 'Command', run: showArchivedSessions },
+    { id: 'settings', title: 'Open settings', hint: 'View app and runtime configuration', kind: 'Command', run: () => setView('config') },
+    { id: 'toggle-sidebar', title: isSidebarOpen ? 'Hide sidebar' : 'Show sidebar', hint: 'Toggle project and chat navigation', kind: 'Command', shortcut: '⌘B', run: toggleSidebar },
+    { id: 'toggle-inspector', title: isInspectorOpen ? 'Hide inspector' : 'Show inspector', hint: 'Toggle activity, tasks, plan, and diagnostics', kind: 'Command', shortcut: '⌘I', run: () => setIsInspectorOpen((open) => !open) }
+  ];
+
   useEffect(() => {
     if (!shouldFocusComposerAfterCreateRef.current || !isComposerSession) return;
     shouldFocusComposerAfterCreateRef.current = false;
@@ -211,6 +409,11 @@ export default function App() {
       const hasAutocomplete = composerState.suggestions.length > 0 && composerState.autocompleteToken;
 
       if (event.key === 'Escape') {
+        if (isCommandPaletteOpen) {
+          event.preventDefault();
+          setIsCommandPaletteOpen(false);
+          return;
+        }
         if (isShortcutHelpOpen) {
           event.preventDefault();
           setIsShortcutHelpOpen(false);
@@ -225,6 +428,19 @@ export default function App() {
           event.preventDefault();
           setIsInspectorOpen(false);
         }
+        return;
+      }
+
+      if (hasAppModifier(event) && event.key.toLowerCase() === 'p') {
+        event.preventDefault();
+        setIsShortcutHelpOpen(false);
+        setIsCommandPaletteOpen((open) => !open);
+        return;
+      }
+
+      if (hasAppModifier(event) && event.key.toLowerCase() === 'n') {
+        event.preventDefault();
+        openNewChat();
         return;
       }
 
@@ -322,59 +538,67 @@ export default function App() {
     if (!activeSession) return null;
     if (sessionState.listMode === 'archived' || activeSession.deletedAt) {
       return (
-        <div className="actions">
-          <button onClick={sessionState.onUnarchive}>Unarchive</button>
-          <button className="danger" onClick={sessionState.onDelete}>Delete</button>
-        </div>
+        <details className="actions action-menu">
+          <summary>More</summary>
+          <div>
+            <button onClick={sessionState.onUnarchive}>Unarchive</button>
+            <button className="danger" onClick={sessionState.onDelete}>Delete</button>
+          </div>
+        </details>
       );
     }
 
     if (activeSession.status === 'running') {
       return (
-        <div className="actions">
-          {activeSession.worktree ? renderWorktreeStopActions() : <button onClick={() => sessionState.onStop(false)}>Stop</button>}
-          <button onClick={sessionState.onRestart}>Restart</button>
-          <button className="danger" onClick={sessionState.onArchive}>Archive</button>
-        </div>
+        <details className="actions action-menu">
+          <summary>More</summary>
+          <div>
+            {activeSession.worktree ? renderWorktreeStopActions() : <button onClick={() => sessionState.onStop(false)}>End session</button>}
+            <button onClick={sessionState.onRestart}>Restart</button>
+            <button className="danger" onClick={sessionState.onArchive}>Archive</button>
+          </div>
+        </details>
       );
     }
 
     if (activeSession.status === 'starting') {
       return (
-        <div className="actions">
-          {activeSession.worktree ? renderWorktreeStopActions() : <button onClick={() => sessionState.onStop(false)}>Stop</button>}
-          <button className="danger" onClick={sessionState.onArchive}>Archive</button>
-        </div>
+        <details className="actions action-menu">
+          <summary>More</summary>
+          <div>
+            {activeSession.worktree ? renderWorktreeStopActions() : <button onClick={() => sessionState.onStop(false)}>End session</button>}
+            <button className="danger" onClick={sessionState.onArchive}>Archive</button>
+          </div>
+        </details>
       );
     }
 
     return (
       <div className="actions">
         <button className="primary-action" onClick={sessionState.onResume}>{getContinueActionLabel(activeSession)}</button>
-        <button className="danger" onClick={sessionState.onArchive}>Archive</button>
+        <details className="action-menu">
+          <summary>More</summary>
+          <div>
+            <button className="danger" onClick={sessionState.onArchive}>Archive</button>
+          </div>
+        </details>
       </div>
     );
   }
 
   return (
+    <>
     <AppShell
       view={view}
       listMode={sessionState.listMode}
       isInspectorOpen={isInspectorOpen}
       isShortcutHelpOpen={isShortcutHelpOpen}
       isSidebarOpen={isSidebarOpen}
+      attentionState={attentionState}
+      attentionLabel={attentionLabel}
       onSetShortcutHelpOpen={setIsShortcutHelpOpen}
-      onShowActiveSessions={() => {
-        setView('sessions');
-        setIsSidebarOpen(true);
-        sessionState.setListMode('active');
-      }}
-      onShowConfig={() => setView('config')}
-      onShowArchivedSessions={() => {
-        setView('sessions');
-        setIsSidebarOpen(true);
-        sessionState.setListMode('archived');
-      }}
+      onShowActiveSessions={showActiveSessions}
+      onShowArchivedSessions={showArchivedSessions}
       onToggleSidebar={toggleSidebar}
       sidebar={
         <SessionSidebar
@@ -425,6 +649,7 @@ export default function App() {
           listMode={sessionState.listMode}
           message={composerState.message}
           messageInputRef={composerState.messageInputRef}
+          promptHistory={composerState.promptHistory}
           sendStatusText={composerState.sendStatusText}
           suggestions={composerState.suggestions}
           view={view}
@@ -452,9 +677,12 @@ export default function App() {
           onRemoveContextAttachment={composerState.removeContextAttachment}
           onSend={composerState.onSend}
           onSetActiveSuggestionIndex={composerState.setActiveSuggestionIndex}
-          onStopSession={() => sessionState.onStop(false)}
+          onUsePrompt={composerState.usePrompt}
           onDismissError={() => reportApiError(null)}
           onRetryEvents={eventState.retryActiveEvents}
+          onLoadOlderEvents={eventState.loadOlderEvents}
+          onOpenReviewActivity={onOpenReviewActivity}
+          onRenameSession={sessionState.onRename}
           onUseEmptyStatePrompt={composerState.useEmptyStatePrompt}
         />
       }
@@ -486,5 +714,20 @@ export default function App() {
         />
       }
     />
+    {shouldShowAttentionToast && currentReviewSurface && attentionKey && (
+      <AttentionToast
+        title={currentReviewSurface.title}
+        message={currentReviewSurface.message}
+        canNotify={canRequestNotifications}
+        onEnableNotifications={enableBrowserNotifications}
+        onReview={() => {
+          onOpenReviewActivity(currentReviewSurface);
+          setDismissedAttentionKey(attentionKey);
+        }}
+        onDismiss={() => setDismissedAttentionKey(attentionKey)}
+      />
+    )}
+    {isCommandPaletteOpen && <CommandPalette actions={commandPaletteActions} onClose={() => setIsCommandPaletteOpen(false)} />}
+    </>
   );
 }

@@ -32,7 +32,8 @@ describe('ConversationBlockList', () => {
 
     const article = screen.getByRole('article');
     expect(article).toHaveClass('conversation-block', 'message-block', 'assistant');
-    expect(within(article).getByText('Claude').closest('header')).toHaveClass('block-header');
+    expect(within(article).getByText('Claude').closest('header')).toHaveClass('block-header', 'message-header');
+    expect(within(article).getByText('C')).toHaveClass('message-avatar');
     expect(within(article).getByRole('heading', { name: 'Summary', level: 1 })).toBeInTheDocument();
     expect(within(article).getByRole('heading', { name: 'Summary', level: 1 }).closest('.message-text')).toHaveClass('message-text');
     expect(within(article).getByText('inline code')).toHaveProperty('tagName', 'CODE');
@@ -137,10 +138,12 @@ describe('ConversationBlockList', () => {
     expect(article).toHaveClass('conversation-block', 'tool-block', 'completed');
     expect(within(article).getByText('Bash')).toBeInTheDocument();
     expect(within(article).getByText('completed').closest('header')).toHaveClass('tool-activity-header');
+    expect(within(article).getByText('completed').closest('.tool-status')).toHaveClass('tool-status-completed');
     expect(within(article).getByText('$ git status')).toBeInTheDocument();
-    expect(within(article).getByText('Result shown (14 chars)')).toBeInTheDocument();
-    expect(within(article).getByText('Result').closest('section')).toHaveClass('block-section');
-    expect(within(article).getByText('On branch main')).toBeInTheDocument();
+    expect(within(article).getAllByText('Result shown (14 chars)')).toHaveLength(2);
+    const details = within(article).getByText('On branch main').closest('details');
+    expect(details).toHaveClass('tool-details');
+    expect(details).not.toHaveAttribute('open');
   });
 
   it('hides Read tool result output from the main card while keeping raw details', () => {
@@ -165,7 +168,7 @@ describe('ConversationBlockList', () => {
     const article = screen.getByRole('article');
     expect(within(article).getByText('Read')).toBeInTheDocument();
     expect(within(article).getByText('/tmp/a.txt')).toBeInTheDocument();
-    expect(within(article).getByText('Read output hidden (20 chars)')).toBeInTheDocument();
+    expect(within(article).getAllByText('Read output hidden (20 chars)')).toHaveLength(2);
     expect(within(article).queryByText('Result')).not.toBeInTheDocument();
     expect(within(article).queryByText('secret file contents')).not.toBeInTheDocument();
     expect(within(article).getByText('Raw events')).toBeInTheDocument();
@@ -219,7 +222,7 @@ describe('ConversationBlockList', () => {
 
     const article = screen.getByRole('article');
     expect(article).toHaveClass('tool-block', 'failed', 'result-text');
-    expect(within(article).getByText('Failure').closest('section')).toHaveClass('visible-result');
+    expect(within(article).getByText('Failure').closest('section')).toHaveClass('tool-result-detail');
     expect(within(article).getByText('Command failed with exit code 1').closest('pre')).toHaveClass('tool-result-pre', 'text');
     expect(within(article).getByRole('button', { name: 'Copy code' })).toHaveClass('copy-button');
   });
@@ -480,7 +483,7 @@ describe('ConversationBlockList', () => {
   it('keeps App.css selectors aligned with rendered conversation block DOM', () => {
     const css = appCss();
 
-    expect(css).toMatch(/\.conversation-workspace\s*{[^}]*grid-template-rows:\s*auto\s+minmax\(0,\s*1fr\)\s+auto/s);
+    expect(css).toMatch(/\.conversation-workspace\s*{[^}]*grid-template-rows:\s*auto\s+auto\s+minmax\(0,\s*1fr\)\s+auto/s);
     expect(css).toMatch(/\.message-block\.system\b/);
     expect(css).toMatch(/\.message-text h1\b/);
     expect(css).toMatch(/\.message-text ul,/);

@@ -17,6 +17,8 @@ type SessionConnection = {
   error: string | null;
 };
 
+const MAX_STORED_EVENTS_PER_SESSION = 500;
+
 type UseSessionEventsOptions = {
   activeId: string | null;
   activeSession: SessionInfo | null;
@@ -69,8 +71,15 @@ function latestPersistedEventId(events: UiEvent[]): number {
   return events.reduce((latest, event) => (event.id > latest ? event.id : latest), 0);
 }
 
+function trimStoredEvents(events: UiEvent[]): UiEvent[] {
+  if (events.length <= MAX_STORED_EVENTS_PER_SESSION) return events;
+  const pendingEvents = events.filter((event) => event.id < 0);
+  const persistedEvents = events.filter((event) => event.id >= 0).slice(-MAX_STORED_EVENTS_PER_SESSION);
+  return [...persistedEvents, ...pendingEvents];
+}
+
 function mergeEvents(current: UiEvent[], incoming: UiEvent[] = []): UiEvent[] {
-  if (incoming.length === 0) return current;
+  if (incoming.length === 0) return trimStoredEvents(current);
   const incomingUserTexts = new Set(
     incoming
       .map(userEventText)
@@ -89,7 +98,7 @@ function mergeEvents(current: UiEvent[], incoming: UiEvent[] = []): UiEvent[] {
   for (const event of incoming) {
     if (event.id >= 0) byId.set(event.id, event);
   }
-  return [...Array.from(byId.values()).sort((a, b) => a.id - b.id), ...pendingEvents];
+  return trimStoredEvents([...Array.from(byId.values()).sort((a, b) => a.id - b.id), ...pendingEvents]);
 }
 
 export function useSessionEvents({
@@ -229,6 +238,18 @@ export function useSessionEvents({
     markAwaitingClaude(sessionId, false);
   }
 
+  async function loadOlderEvents() {
+    if (!activeId) return;
+    const current = events[activeId] ?? [];
+    const firstPersistedId = current.find((event) => event.id >= 0)?.id;
+    if (!firstPersistedId) return;
+    const older = await listSessionEvents(activeId, 0, eventRenderLimit, firstPersistedId);
+    setEvents((latest) => ({
+      ...latest,
+      [activeId]: mergeEvents(older, latest[activeId] ?? [])
+    }));
+  }
+
   function retryActiveEvents() {
     if (!activeId) return;
     setConnection(activeId, { state: events[activeId]?.length ? 'reconnecting' : 'connecting', error: null });
@@ -242,7 +263,8 @@ export function useSessionEvents({
 
     async function loadHistory() {
       try {
-        const loaded = await listSessionEvents(sessionId, latestPersistedEventId(events[sessionId] ?? []));
+        const afterId = latestPersistedEventId(events[sessionId] ?? []);
+        const loaded = await listSessionEvents(sessionId, afterId, afterId > 0 ? undefined : eventRenderLimit);
         if (cancelled || activeIdRef.current !== sessionId) return;
         setEvents((current) => ({
           ...current,
@@ -360,6 +382,7 @@ export function useSessionEvents({
     eventsRef,
     hiddenEventCount,
     isAwaitingClaude,
+    loadOlderEvents,
     markAwaitingClaude,
     removePendingMessage,
     removeSessionEvents,

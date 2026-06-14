@@ -7,6 +7,7 @@ import type {
   SessionInfo,
   TaskGroups,
   UiEvent,
+  WorktreeDiff,
   WorktreeStatus
 } from './types';
 
@@ -47,9 +48,11 @@ export async function listSessionTasks(sessionId: string): Promise<TaskGroups> {
   return request<TaskGroups>(`/api/sessions/${sessionId}/tasks`);
 }
 
-export async function listSessionEvents(sessionId: string, afterId = 0): Promise<UiEvent[]> {
+export async function listSessionEvents(sessionId: string, afterId = 0, limit?: number, beforeId?: number): Promise<UiEvent[]> {
   const params = new URLSearchParams();
   if (afterId > 0) params.set('afterId', String(afterId));
+  if (beforeId && beforeId > 0) params.set('beforeId', String(beforeId));
+  if (limit && limit > 0) params.set('limit', String(limit));
   const query = params.toString();
   const result = await request<{ events: UiEvent[] }>(`/api/sessions/${sessionId}/transcript${query ? `?${query}` : ''}`);
   return Array.isArray(result.events) ? result.events : [];
@@ -81,6 +84,13 @@ export async function getSessionDiagnostics(sessionId: string): Promise<SessionD
   return request<SessionDiagnosticsResponse>(`/api/sessions/${sessionId}/diagnostics`);
 }
 
+export async function updateSession(sessionId: string, input: { name: string | null }): Promise<SessionInfo> {
+  return request<SessionInfo>(`/api/sessions/${sessionId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input)
+  });
+}
+
 export async function sendInput(sessionId: string, text: string): Promise<SessionInfo | null> {
   const result = await request<{ ok: true; session?: SessionInfo }>(`/api/sessions/${sessionId}/input`, {
     method: 'POST',
@@ -95,6 +105,10 @@ export async function stopSession(sessionId: string): Promise<void> {
 
 export async function getWorktreeStatus(sessionId: string): Promise<WorktreeStatus> {
   return request<WorktreeStatus>(`/api/sessions/${sessionId}/worktree-status`);
+}
+
+export async function getWorktreeDiff(sessionId: string): Promise<WorktreeDiff> {
+  return request<WorktreeDiff>(`/api/sessions/${sessionId}/worktree-diff`);
 }
 
 export async function stopAndRemoveWorktree(sessionId: string): Promise<void> {

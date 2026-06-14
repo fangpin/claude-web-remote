@@ -27,7 +27,9 @@ Key backend modules:
 - `crates/server/src/session.rs` manages session lifecycle and metadata.
 - `crates/server/src/store.rs` persists metadata and event logs.
 - `crates/server/src/api.rs` exposes REST and WebSocket endpoints.
-- `GET /api/sessions/{id}/transcript?afterId=<id>` returns persisted transcript events over plain HTTP for active, stopped, ended, failed, and archived sessions; `GET /api/sessions/{id}/events?afterId=<id>` remains the WebSocket replay-then-live stream for running sessions.
+- `PATCH /api/sessions/{id}` updates session metadata such as the chat name without restarting Claude.
+- `GET /api/sessions/{id}/worktree-diff` returns a read-only git diff for worktree sessions.
+- `GET /api/sessions/{id}/transcript?afterId=<id>&beforeId=<id>&limit=<n>` returns persisted transcript events over plain HTTP for active, stopped, ended, failed, and archived sessions; `limit` bounds long-session initial loads and `beforeId` pages older windows, while `GET /api/sessions/{id}/events?afterId=<id>` remains the WebSocket replay-then-live stream for running sessions.
 
 ## Commands
 
@@ -112,6 +114,7 @@ Keep `claude_bin` backward compatibility unless intentionally removing legacy co
 - Do not use shell parsing for configured launcher values.
 - Preserve full raw event payloads; frontend rendering should add readability without dropping data.
 - Keep session event logs append-only.
+- Do not add fake browser-side Stop Generating or permission approve/deny controls while driving raw Claude Code CLI stream-json; those control frames are not documented as supported.
 - Restart should use persisted Claude session id when available.
 - If no Claude session id is available, restart fresh and record a system event.
 - Bind to `127.0.0.1` by default.

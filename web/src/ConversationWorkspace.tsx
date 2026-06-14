@@ -1,4 +1,5 @@
-import type { FormEvent, KeyboardEvent, ReactNode, RefObject } from 'react';
+import { useState, type FormEvent, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { getWorktreeDiff } from './api';
 import ConfigView from './ConfigView';
 import ConversationBlockList from './ConversationBlockList';
 import Composer from './Composer';
@@ -44,6 +45,7 @@ type Props = {
   listMode: SessionListMode;
   message: string;
   messageInputRef: RefObject<HTMLTextAreaElement | null>;
+  promptHistory: string[];
   sendStatusText: string;
   suggestions: ClaudeCommand[];
   view: AppView;
@@ -58,9 +60,12 @@ type Props = {
   onRemoveContextAttachment: (id: string) => void;
   onSend: (event: FormEvent) => void;
   onSetActiveSuggestionIndex: (index: number) => void;
-  onStopSession: () => void;
+  onUsePrompt: (prompt: string) => void;
   onDismissError: () => void;
   onRetryEvents: () => void;
+  onLoadOlderEvents: () => void;
+  onOpenReviewActivity: (review: ReviewSurface) => void;
+  onRenameSession: (sessionId: string, name: string | null) => void;
   onUseEmptyStatePrompt: (prompt: string) => void;
 };
 
@@ -89,22 +94,69 @@ function worktreeStateLabel(status: WorktreeStatus | null, isLoading: boolean, e
   return `${status.changedFileCount} changed ${status.changedFileCount === 1 ? 'file' : 'files'}`;
 }
 
+function shortWorkspaceName(session: SessionInfo): string {
+  const path = session.worktree?.sourceCwd ?? session.cwd;
+  const normalized = path.replace(/\/+$/, '');
+  const parts = normalized.split('/').filter(Boolean);
+  return parts.at(-1) ?? (normalized || 'Workspace');
+}
+
 function WorktreeStatusPanel({
   session,
   status,
   error,
-  isLoading
+  isLoading,
+  onAddPathContextAttachment
 }: {
   session: SessionInfo;
   status: WorktreeStatus | null;
   error: string | null;
   isLoading: boolean;
+  onAddPathContextAttachment: (path: string) => void;
 }) {
+  const [diff, setDiff] = useState<string | null>(null);
+  const [diffError, setDiffError] = useState<string | null>(null);
+  const [isDiffLoading, setIsDiffLoading] = useState(false);
+
   if (!session.worktree) return null;
   const files = status?.files.slice(0, 8) ?? [];
   const extraFileCount = Math.max(0, (status?.files.length ?? 0) - files.length);
   const branch = status?.branch ?? session.worktree.branch;
   const baseRef = status?.baseRef ?? session.worktree.baseRef;
+
+  async function loadDiff() {
+    setIsDiffLoading(true);
+    setDiffError(null);
+    try {
+      const result = await getWorktreeDiff(session.id);
+      setDiff(result.diff || 'No unstaged diff.');
+    } catch (err: unknown) {
+      setDiffError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsDiffLoading(false);
+    }
+  }
+
+  function copyDeliveryContext() {
+    const changedFiles = status?.files.map((file) => `${file.indexStatus}${file.worktreeStatus} ${file.path}`).join('\n') || 'No changed files';
+    const content = [
+      `Session: ${session.name || session.cwd}`,
+      `Source: ${session.worktree?.sourceCwd ?? session.cwd}`,
+      `Worktree: ${session.worktree?.worktreeCwd ?? session.cwd}`,
+      `Branch: ${branch}`,
+      baseRef ? `Base: ${baseRef}` : null,
+      `State: ${worktreeStateLabel(status, isLoading, error)}`,
+      '',
+      'Changed files:',
+      changedFiles,
+      '',
+      'Suggested next steps:',
+      '- Review diff and test output.',
+      '- Commit locally when satisfied.',
+      '- Push/create PR only after explicit confirmation.'
+    ].filter((line): line is string => line !== null).join('\n');
+    void navigator.clipboard?.writeText(content);
+  }
 
   return (
     <section className={`worktree-status-panel ${status?.dirty ? 'dirty' : ''}`} aria-label="Worktree status">
@@ -112,6 +164,8 @@ function WorktreeStatusPanel({
         <span className={`worktree-state ${status?.dirty ? 'dirty' : 'clean'}`}>{worktreeStateLabel(status, isLoading, error)}</span>
         <span>Branch: {branch}</span>
         {baseRef && <span>Base: {baseRef}</span>}
+        {status?.dirty && <button type="button" onClick={loadDiff} disabled={isDiffLoading}>{isDiffLoading ? 'Loading diff...' : 'View diff'}</button>}
+        {session.worktree && <button type="button" onClick={copyDeliveryContext}>Copy delivery context</button>}
       </div>
       <dl className="worktree-paths">
         <div>
@@ -133,10 +187,18 @@ function WorktreeStatusPanel({
             <li key={`${file.indexStatus}${file.worktreeStatus}:${file.path}`}>
               <code>{file.indexStatus}{file.worktreeStatus}</code>
               <span title={file.path}>{file.path}</span>
+              <button type="button" onClick={() => onAddPathContextAttachment(file.path)}>Attach</button>
             </li>
           ))}
           {extraFileCount > 0 && <li className="worktree-more">+ {extraFileCount} more</li>}
         </ul>
+      )}
+      {diffError && <p className="worktree-warning">Unable to load diff: {diffError}</p>}
+      {diff && (
+        <details className="worktree-diff-viewer" open>
+          <summary>Worktree diff</summary>
+          <pre>{diff}</pre>
+        </details>
       )}
     </section>
   );
@@ -166,6 +228,23 @@ function ApiErrorBanner({
   );
 }
 
+function EditableSessionTitle({ session, onRename }: { session: SessionInfo; onRename: (sessionId: string, name: string | null) => void }) {
+  const title = session.name || shortWorkspaceName(session);
+
+  function rename() {
+    const nextName = window.prompt('Rename chat', title);
+    if (nextName === null) return;
+    onRename(session.id, nextName.trim() || null);
+  }
+
+  return (
+    <span className="editable-session-title">
+      <h2>{title}</h2>
+      <button type="button" onClick={rename} aria-label="Rename chat">Rename</button>
+    </span>
+  );
+}
+
 function SessionContinuitySummary({
   session,
   listMode
@@ -184,17 +263,44 @@ function SessionContinuitySummary({
   );
 }
 
+function reviewTone(review: ReviewSurface): string {
+  return review.activity?.reviewKind ?? (review.activity?.status === 'waiting' ? 'waiting' : 'paused');
+}
+
+function reviewStatusLabel(review: ReviewSurface): string {
+  if (review.activity?.reviewKind === 'permission') return 'Permission-style review';
+  if (review.activity?.reviewKind === 'risky-command') return 'Risky action';
+  if (review.activity?.reviewKind === 'failed-action') return 'Failed action';
+  if (review.activity?.status === 'running') return 'Running';
+  return 'Waiting';
+}
+
+function reviewCopyText(review: ReviewSurface): string {
+  return [
+    review.title,
+    review.message,
+    review.actionName ? `Action: ${review.actionName}` : null,
+    review.actionSummary ? `Input: ${review.actionSummary}` : null,
+    review.riskHint ? `Risk: ${review.riskHint}` : null,
+    `Working directory: ${review.cwd}`,
+    `Permission mode: ${review.permissionMode}`,
+    review.limitation
+  ].filter((line): line is string => Boolean(line)).join('\n');
+}
+
+function copyReviewText(review: ReviewSurface) {
+  void navigator.clipboard?.writeText(reviewCopyText(review));
+}
+
 function ReviewCard({ review, onOpenActivity }: { review: ReviewSurface; onOpenActivity?: () => void }) {
   return (
-    <section className={`review-card ${review.activity?.reviewKind ?? 'waiting'}`} aria-label="Claude needs your review">
+    <section className={`review-card ${reviewTone(review)}`} aria-label="Claude needs your review">
       <div className="review-card-heading">
         <div>
           <span className="state-kicker">Action review</span>
           <h3>{review.title}</h3>
         </div>
-        {review.activity && onOpenActivity && (
-          <button type="button" onClick={onOpenActivity}>Open activity</button>
-        )}
+        <span className="review-status-pill">{reviewStatusLabel(review)}</span>
       </div>
       <p>{review.message}</p>
       <dl className="review-facts">
@@ -225,7 +331,36 @@ function ReviewCard({ review, onOpenActivity }: { review: ReviewSurface; onOpenA
           </div>
         )}
       </dl>
-      <p className="review-limitation">{review.limitation}</p>
+      <div className="review-card-footer">
+        <p className="review-limitation">{review.limitation}</p>
+        <button type="button" onClick={() => copyReviewText(review)}>Copy review</button>
+        {review.activity && onOpenActivity && (
+          <button type="button" onClick={onOpenActivity}>Open activity</button>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function AttentionSurface({ review, onOpenActivity }: { review: ReviewSurface; onOpenActivity: (review: ReviewSurface) => void }) {
+  return (
+    <section className={`attention-surface ${reviewTone(review)}`} aria-label="Claude needs attention">
+      <div className="attention-orb" aria-hidden="true">
+        <span />
+      </div>
+      <div className="attention-copy">
+        <span className="attention-eyebrow">Claude needs attention</span>
+        <strong>{review.title}</strong>
+        <p>{review.message}</p>
+      </div>
+      <div className="attention-meta" aria-label="Review details">
+        <span>{reviewStatusLabel(review)}</span>
+        {review.actionName && <span>{review.actionName}</span>}
+        <span>{review.permissionMode}</span>
+      </div>
+      <button type="button" onClick={() => onOpenActivity(review)}>
+        Review
+      </button>
     </section>
   );
 }
@@ -260,6 +395,7 @@ export default function ConversationWorkspace({
   listMode,
   message,
   messageInputRef,
+  promptHistory,
   sendStatusText,
   suggestions,
   view,
@@ -274,9 +410,12 @@ export default function ConversationWorkspace({
   onRemoveContextAttachment,
   onSend,
   onSetActiveSuggestionIndex,
-  onStopSession,
+  onUsePrompt,
   onDismissError,
   onRetryEvents,
+  onLoadOlderEvents,
+  onOpenReviewActivity,
+  onRenameSession,
   onUseEmptyStatePrompt
 }: Props) {
   if (view === 'config') {
@@ -296,17 +435,40 @@ export default function ConversationWorkspace({
         <>
           <header className="conversation-header">
             <div>
-              <span className="eyebrow">{listMode === 'archived' ? 'Archived Claude session' : 'Remote Claude session'}</span>
-              <h2>{activeSession.name || activeSession.cwd}</h2>
-              <SessionContinuitySummary session={activeSession} listMode={listMode} />
-              <p title={activeSession.cwd}>{activeSession.cwd}</p>
-              {activeSession.worktree && (
-                <div className="worktree-meta">
-                  <span>Worktree: {activeSession.worktree.worktreeCwd}</span>
-                  <span>Source: {activeSession.worktree.sourceCwd}</span>
-                  <span>Branch: {activeWorktreeStatus?.branch ?? activeSession.worktree.branch}</span>
-                </div>
-              )}
+              <span className="eyebrow">{listMode === 'archived' ? 'Archived chat' : 'Claude chat'}</span>
+              <EditableSessionTitle session={activeSession} onRename={onRenameSession} />
+              <div className="conversation-header-meta">
+                <SessionContinuitySummary session={activeSession} listMode={listMode} />
+                <details className="session-context-popover">
+                  <summary>Chat details</summary>
+                  <dl>
+                    <div>
+                      <dt>Workspace</dt>
+                      <dd title={activeSession.cwd}>{activeSession.cwd}</dd>
+                    </div>
+                    <div>
+                      <dt>Permission</dt>
+                      <dd>{activeSession.permissionMode}</dd>
+                    </div>
+                    {activeSession.worktree && (
+                      <>
+                        <div>
+                          <dt>Worktree</dt>
+                          <dd title={activeSession.worktree.worktreeCwd}>{activeSession.worktree.worktreeCwd}</dd>
+                        </div>
+                        <div>
+                          <dt>Source</dt>
+                          <dd title={activeSession.worktree.sourceCwd}>{activeSession.worktree.sourceCwd}</dd>
+                        </div>
+                        <div>
+                          <dt>Branch</dt>
+                          <dd>{activeWorktreeStatus?.branch ?? activeSession.worktree.branch}</dd>
+                        </div>
+                      </>
+                    )}
+                  </dl>
+                </details>
+              </div>
             </div>
             {actions}
           </header>
@@ -318,7 +480,9 @@ export default function ConversationWorkspace({
             status={activeWorktreeStatus}
             error={activeWorktreeStatusError}
             isLoading={isWorktreeStatusLoading}
+            onAddPathContextAttachment={onAddPathContextAttachment}
           />
+          {reviewSurface && <AttentionSurface review={reviewSurface} onOpenActivity={onOpenReviewActivity} />}
           <div className="events" ref={eventsRef}>
             <div className="conversation-content">
               {connectionLabel(eventConnectionState) && (
@@ -341,10 +505,11 @@ export default function ConversationWorkspace({
               {(eventConnectionState === 'connecting' || eventConnectionState === 'reconnecting') && activeBlocks.length === 0 && hiddenEventCount === 0 && (
                 <LoadingConversation />
               )}
-              {reviewSurface && <ReviewCard review={reviewSurface} />}
+              {reviewSurface && <ReviewCard review={reviewSurface} onOpenActivity={reviewSurface.activity ? () => onOpenReviewActivity(reviewSurface) : undefined} />}
               {hiddenEventCount > 0 && (
                 <div className="event-limit-note">
-                  Showing latest {eventRenderLimit} events. {hiddenEventCount} older events hidden.
+                  <span>Showing latest {eventRenderLimit} events. {hiddenEventCount} older events hidden.</span>
+                  <button type="button" onClick={onLoadOlderEvents}>Load earlier</button>
                 </div>
               )}
               {activeBlocks.length === 0 && hiddenEventCount === 0 && eventConnectionState !== 'connecting' && eventConnectionState !== 'reconnecting' && (
@@ -380,6 +545,7 @@ export default function ConversationWorkspace({
             isSending={isSending}
             message={message}
             messageInputRef={messageInputRef}
+            promptHistory={promptHistory}
             sendStatusText={sendStatusText}
             suggestions={suggestions}
             onAddPathContextAttachment={onAddPathContextAttachment}
@@ -391,7 +557,7 @@ export default function ConversationWorkspace({
             onRemoveContextAttachment={onRemoveContextAttachment}
             onSend={onSend}
             onSetActiveSuggestionIndex={onSetActiveSuggestionIndex}
-            onStopSession={onStopSession}
+            onUsePrompt={onUsePrompt}
           />
         </>
       ) : (

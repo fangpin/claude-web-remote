@@ -399,6 +399,41 @@ async fn first_input_returns_auto_named_session() {
 }
 
 #[tokio::test]
+async fn patch_session_updates_name() {
+    let temp = tempfile::tempdir().unwrap();
+    let bin = fake_claude(temp.path());
+    let addr = spawn_app(&temp, vec![bin.to_string_lossy().to_string()]).await;
+    let client = reqwest::Client::new();
+
+    let created: Value = client
+        .post(format!("http://{addr}/api/sessions"))
+        .json(&json!({ "cwd": temp.path(), "name": "Original" }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let session_id = created["id"].as_str().unwrap();
+
+    let renamed: Value = client
+        .patch(format!("http://{addr}/api/sessions/{session_id}"))
+        .json(&json!({ "name": "Renamed chat" }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(renamed["name"], "Renamed chat");
+}
+
+#[tokio::test]
 async fn lists_tasks_across_sessions() {
     let temp = tempfile::tempdir().unwrap();
     let store = EventStore::new(temp.path().join("data")).await.unwrap();
@@ -484,7 +519,7 @@ async fn worktree_status_endpoint_reports_dirty_files() {
         .unwrap();
     let session_id = created["id"].as_str().unwrap();
     let worktree_cwd = PathBuf::from(created["worktree"]["worktreeCwd"].as_str().unwrap());
-    fs::write(worktree_cwd.join("notes.txt"), "draft\n").unwrap();
+    fs::write(worktree_cwd.join("README.md"), "changed\n").unwrap();
 
     let status: Value = client
         .get(format!(
@@ -498,10 +533,23 @@ async fn worktree_status_endpoint_reports_dirty_files() {
         .json()
         .await
         .unwrap();
+    let diff: Value = client
+        .get(format!(
+            "http://{addr}/api/sessions/{session_id}/worktree-diff"
+        ))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
 
     assert_eq!(status["dirty"], true);
     assert_eq!(status["changedFileCount"], 1);
-    assert_eq!(status["files"][0]["path"], "notes.txt");
+    assert_eq!(status["files"][0]["path"], "README.md");
+    assert!(diff["diff"].as_str().unwrap().contains("README.md"));
     assert_eq!(status["branch"], created["worktree"]["branch"]);
     assert_eq!(status["baseRef"], "HEAD");
 }

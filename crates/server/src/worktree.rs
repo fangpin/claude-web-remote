@@ -40,6 +40,12 @@ pub struct WorktreeFileStatus {
     pub original_path: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeDiff {
+    pub diff: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct WorktreeManager {
     config: WorktreeConfig,
@@ -113,6 +119,11 @@ impl WorktreeManager {
             files,
             short_status,
         })
+    }
+
+    pub async fn diff(&self, meta: &WorktreeMeta) -> AppResult<WorktreeDiff> {
+        let diff = run_git(&meta.worktree_cwd, ["diff", "--", "."]).await?;
+        Ok(WorktreeDiff { diff })
     }
 
     pub async fn remove(&self, meta: &WorktreeMeta) -> AppResult<()> {

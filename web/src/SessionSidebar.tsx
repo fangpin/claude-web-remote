@@ -13,6 +13,7 @@ type SessionSection = {
   title: string;
   description: string;
   sessions: SessionInfo[];
+  projectPath?: string;
 };
 
 type Props = {
@@ -64,20 +65,18 @@ function compareSessionsByUpdatedAt(a: SessionInfo, b: SessionInfo): number {
   return Date.parse(b.updatedAt) - Date.parse(a.updatedAt);
 }
 
-function bucketForSession(session: SessionInfo, now: Date): Pick<SessionSection, 'key' | 'title' | 'description'> {
+function timeHintForSession(session: SessionInfo, now: Date): string {
   const updatedAt = new Date(session.updatedAt);
   const dayDelta = Math.floor((startOfLocalDay(now) - startOfLocalDay(updatedAt)) / DAY_MS);
 
-  if (dayDelta <= 0) {
-    return { key: 'today', title: 'Today', description: 'Picked up today' };
-  }
-  if (dayDelta === 1) {
-    return { key: 'yesterday', title: 'Yesterday', description: 'Recent enough to resume quickly' };
-  }
-  if (dayDelta <= 7) {
-    return { key: 'previous-7-days', title: 'Previous 7 days', description: 'Fresh context from this week' };
-  }
-  return { key: 'older', title: 'Older', description: 'Longer-lived project history' };
+  if (dayDelta <= 0) return 'Active today';
+  if (dayDelta === 1) return 'Active yesterday';
+  if (dayDelta <= 7) return 'Active this week';
+  return 'Longer-lived work';
+}
+
+function sectionKeyForProject(projectPath: string): string {
+  return `project:${projectPath}`;
 }
 
 function buildSessionSections(sessions: SessionInfo[], listMode: SessionListMode, pinnedSessionIds: Set<string>): SessionSection[] {
@@ -96,18 +95,28 @@ function buildSessionSections(sessions: SessionInfo[], listMode: SessionListMode
     });
   }
 
-  const buckets = new Map<string, SessionSection>();
+  const projects = new Map<string, SessionSection>();
   unpinnedSessions.forEach((session) => {
-    const bucket = bucketForSession(session, now);
-    const existing = buckets.get(bucket.key);
+    const projectPath = projectPathForSession(session);
+    const key = sectionKeyForProject(projectPath);
+    const existing = projects.get(key);
     if (existing) {
       existing.sessions.push(session);
       return;
     }
-    buckets.set(bucket.key, { ...bucket, sessions: [session] });
+    projects.set(key, {
+      key,
+      title: pathBasename(projectPath),
+      description: `${parentPath(projectPath)} · ${timeHintForSession(session, now)}`,
+      sessions: [session],
+      projectPath
+    });
   });
 
-  return [...sections, ...buckets.values()];
+  return [
+    ...sections,
+    ...[...projects.values()].sort((a, b) => compareSessionsByUpdatedAt(a.sessions[0], b.sessions[0]))
+  ];
 }
 
 function toolbarSummary(sessionSearch: string, sessions: SessionInfo[], visibleSessions: SessionInfo[]): string {
@@ -310,7 +319,7 @@ export default function SessionSidebar({
                 <div className="session-section-heading">
                   <div>
                     <h3>{section.title}</h3>
-                    <p>{section.description}</p>
+                    <p title={section.projectPath ?? undefined}>{section.description}</p>
                   </div>
                   <span>{countLabel(section.sessions.length)}</span>
                 </div>
@@ -337,7 +346,10 @@ export default function SessionSidebar({
                           onClick={() => onSelectSession(session.id)}
                         >
                           <span className="session-title-row">
-                            <strong>{sessionTitle}</strong>
+                            <span className="session-title-main">
+                              <span className={`session-attention-dot ${runtimeStatus}`} aria-hidden="true" />
+                              <strong>{sessionTitle}</strong>
+                            </span>
                             <em className={`status status-${statusClass}`}>{statusLabel}</em>
                           </span>
                           <span className="session-resume-cue">{continuityLabel ?? resumeCueForSession(session, listMode)}</span>

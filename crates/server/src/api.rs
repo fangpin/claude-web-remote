@@ -46,19 +46,33 @@ pub struct DeleteSessionQuery {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct UpdateSessionRequest {
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EventsQuery {
     pub after_id: Option<u64>,
+    pub before_id: Option<u64>,
+    pub limit: Option<usize>,
 }
 
 pub fn build_router(state: AppState, web_dir: Option<PathBuf>) -> Router {
     let api = Router::new()
         .route("/tasks", get(list_tasks))
         .route("/sessions", get(list_sessions).post(create_session))
-        .route("/sessions/{id}", get(get_session).delete(delete_session))
+        .route(
+            "/sessions/{id}",
+            get(get_session)
+                .patch(update_session)
+                .delete(delete_session),
+        )
         .route("/sessions/{id}/tasks", get(list_session_tasks))
         .route("/sessions/{id}/input", post(send_input))
         .route("/sessions/{id}/stop", post(stop_session))
         .route("/sessions/{id}/worktree-status", get(worktree_status))
+        .route("/sessions/{id}/worktree-diff", get(worktree_diff))
         .route(
             "/sessions/{id}/stop-and-remove-worktree",
             post(stop_and_remove_worktree),
@@ -120,6 +134,16 @@ async fn get_session(
     Ok(Json(json!(state.manager.get_session(id).await?)))
 }
 
+async fn update_session(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(request): Json<UpdateSessionRequest>,
+) -> AppResult<Json<serde_json::Value>> {
+    Ok(Json(json!(
+        state.manager.update_session_name(id, request.name).await?
+    )))
+}
+
 async fn list_tasks(State(state): State<AppState>) -> AppResult<Json<serde_json::Value>> {
     Ok(Json(json!(state.manager.list_tasks().await?)))
 }
@@ -156,6 +180,13 @@ async fn worktree_status(
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
     Ok(Json(json!(state.manager.worktree_status(id).await?)))
+}
+
+async fn worktree_diff(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<serde_json::Value>> {
+    Ok(Json(json!(state.manager.worktree_diff(id).await?)))
 }
 
 async fn stop_and_remove_worktree(
@@ -230,10 +261,18 @@ async fn get_session_transcript(
     Path(id): Path<Uuid>,
     Query(query): Query<EventsQuery>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let events = state
+    let mut events = state
         .manager
         .transcript_events_after(id, query.after_id.unwrap_or(0))
         .await?;
+    if let Some(before_id) = query.before_id {
+        events.retain(|event| event.id < before_id);
+    }
+    if let Some(limit) = query.limit {
+        if events.len() > limit {
+            events = events.split_off(events.len() - limit);
+        }
+    }
     Ok(Json(json!({ "events": events })))
 }
 
@@ -682,6 +721,7 @@ done
         let first_id = events[0]["id"].as_u64().unwrap();
 
         let filtered_response = app
+            .clone()
             .oneshot(
                 Request::builder()
                     .uri(format!(
@@ -708,6 +748,46 @@ done
                 .iter()
                 .all(|event| event["id"].as_u64().unwrap() > first_id)
         );
+
+        let limited_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/sessions/{}/transcript?limit=1", session.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(limited_response.status(), StatusCode::OK);
+        let limited_body: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(limited_response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(limited_body["events"].as_array().unwrap().len(), 1);
+
+        let before_response = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/api/sessions/{}/transcript?beforeId={first_id}&limit=1",
+                        session.id
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(before_response.status(), StatusCode::OK);
+        let before_body: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(before_response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(before_body["events"].as_array().unwrap().len(), 0);
     }
 
     #[tokio::test]

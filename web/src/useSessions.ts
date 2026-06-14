@@ -9,7 +9,8 @@ import {
   resumeSession,
   stopAndRemoveWorktree,
   stopSession,
-  unarchiveSession
+  unarchiveSession,
+  updateSession
 } from './api';
 import { runtimeStatusLabels, type SessionListMode } from './AppShell';
 import type { SessionInfo, WorktreeStatus } from './types';
@@ -300,6 +301,16 @@ export function useSessions({
     }
   }
 
+  async function onRename(sessionId: string, name: string | null) {
+    setError(null);
+    try {
+      const updated = await updateSession(sessionId, { name });
+      setSessions((current) => current.map((session) => session.id === sessionId ? updated : session));
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   async function onRestart() {
     if (!activeId) return;
     const sessionId = activeId;
@@ -395,6 +406,7 @@ export function useSessions({
     onArchive,
     onCreateSession,
     onDelete,
+    onRename,
     onRestart,
     onResume,
     onStop,

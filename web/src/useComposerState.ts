@@ -250,7 +250,7 @@ export function useComposerState({
     completeSuggestion(suggestion);
   }
 
-  function useEmptyStatePrompt(prompt: string) {
+  function usePrompt(prompt: string) {
     setMessage(prompt);
     setHistoryIndex(null);
     draftBeforeHistoryRef.current = null;
@@ -258,7 +258,12 @@ export function useComposerState({
     requestAnimationFrame(() => {
       messageInputRef.current?.focus();
       messageInputRef.current?.setSelectionRange(prompt.length, prompt.length);
+      resizeMessageInput(messageInputRef.current);
     });
+  }
+
+  function useEmptyStatePrompt(prompt: string) {
+    usePrompt(prompt);
   }
 
   function addPathContextAttachment(path: string) {
@@ -393,6 +398,7 @@ export function useComposerState({
     isSending,
     message,
     messageInputRef,
+    promptHistory,
     sendStatusText,
     suggestions,
     addPathContextAttachment,
@@ -405,6 +411,7 @@ export function useComposerState({
     onSend,
     removeContextAttachment,
     setActiveSuggestionIndex,
-    useEmptyStatePrompt
+    useEmptyStatePrompt,
+    usePrompt
   };
 }
