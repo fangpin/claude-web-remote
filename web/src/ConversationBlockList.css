@@ -14,9 +14,9 @@
 .code-frame,
 .tool-path-frame {
   overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: #f7f4ee;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--surface-2);
 }
 
 .message-code-frame {
@@ -30,8 +30,8 @@
   justify-content: space-between;
   gap: 10px;
   min-height: 34px;
-  border-bottom: 1px solid var(--border);
-  background: #ebe5dc;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface-3);
   padding: 5px 7px 5px 10px;
 }
 
@@ -76,7 +76,7 @@
 
 .conversation-block .tool-code-frame .tool-result-pre,
 .message-text .message-code-frame .message-code {
-  background: #fbfaf7;
+  background: var(--surface);
 }
 
 .conversation-block .code-frame pre code {
@@ -89,7 +89,7 @@
 }
 
 .tool-result-pre.diff {
-  background: #fbfaf7;
+  background: var(--surface);
   padding: 0;
   white-space: pre;
   overflow-wrap: normal;
@@ -205,4 +205,35 @@
   font-weight: 500;
   letter-spacing: 0;
   text-transform: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  .diff-line.addition {
+    background: rgb(80 126 92 / 0.2);
+    color: #add9ba;
+  }
+
+  .diff-line.deletion {
+    background: rgb(158 70 56 / 0.22);
+    color: #efafa2;
+  }
+
+  .diff-line.hunk {
+    background: rgb(130 103 181 / 0.2);
+    color: #cdbcf2;
+  }
+
+  .diff-line.meta {
+    background: var(--surface-3);
+    color: var(--muted);
+  }
+
+  .tool-path-list li::before {
+    border-color: var(--border-strong);
+    background: var(--surface);
+  }
+
+  .tool-path-list li:hover {
+    background: var(--surface-hover);
+  }
 }
