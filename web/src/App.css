@@ -1414,6 +1414,20 @@ button.danger:hover {
   overflow-wrap: anywhere;
 }
 
+.worktree-files-details {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.worktree-files-details summary {
+  width: fit-content;
+  color: var(--accent-strong);
+  font-size: 12px;
+  font-weight: 720;
+  cursor: pointer;
+}
+
 .worktree-file-list {
   display: grid;
   gap: 4px;
