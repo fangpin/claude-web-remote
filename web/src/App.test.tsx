@@ -268,7 +268,7 @@ function expectSessionStatus(name: string, status: string) {
 function openInspector(): HTMLElement {
   const inspector = screen.getByRole('complementary', { name: 'Session inspector' });
   if (!within(inspector).queryByRole('tab', { name: 'Session tasks' })) {
-    fireEvent.click(within(inspector).getAllByRole('button', { name: 'Show inspector' })[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Show inspector' }));
   }
   return inspector;
 }
@@ -486,12 +486,12 @@ describe('App', () => {
     expectSessionStatus('Repo One', 'Waiting for you');
     expectSessionStatus('Worktree Repo', 'Running');
     expectSessionStatus('Stopped Repo', 'Ended');
-    expect(screen.getByText('Claude chat')).toBeInTheDocument();
+    expect(screen.getByText('Chat')).toBeInTheDocument();
     expect(screen.getByLabelText('Claude: Claude is waiting')).toBeInTheDocument();
     expect(screen.getByLabelText('Claude attention notification')).toHaveTextContent('Claude is waiting');
-    expect(screen.getAllByLabelText('Claude needs your review')).toHaveLength(1);
-    expect(screen.getAllByRole('heading', { name: 'Claude is waiting' })).toHaveLength(1);
-    expect(screen.getAllByText('Web approval controls are not available in this build.')).toHaveLength(1);
+    expect(screen.queryByLabelText('Claude needs attention')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Claude needs your review')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Copy review' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Allow' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Deny' })).not.toBeInTheDocument();
     const inspector = openInspector();
@@ -583,11 +583,10 @@ describe('App', () => {
 
     render(<App />);
 
-    expect(await screen.findAllByText('Claude requested an action that may be destructive or affect shared state.')).toHaveLength(3);
+    expect(await screen.findAllByText('Claude requested an action that may be destructive or affect shared state.')).toHaveLength(1);
     expect(screen.getAllByRole('button', { name: 'Review' }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole('button', { name: 'Copy review' }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'Copy review' })).not.toBeInTheDocument();
     expect(screen.getAllByText('Bash').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Deletes files recursively or forcefully.').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Remove dist · $ rm -rf dist').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Run tests · $ npm test').length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: 'Allow' })).not.toBeInTheDocument();
@@ -760,7 +759,9 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByText('Conversation connection interrupted')).toBeInTheDocument();
-    expect(screen.getByText('Details')).toBeInTheDocument();
+    const connectionState = screen.getByText('Conversation connection interrupted').closest('.connection-state');
+    expect(connectionState).not.toBeNull();
+    expect(within(connectionState as HTMLElement).getByText('Details')).toBeInTheDocument();
 
     shouldFailTranscript = false;
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
@@ -1461,7 +1462,7 @@ describe('App', () => {
 
     const activeHeaderBeforeStop = screen.getByRole('heading', { name: 'Worktree Repo' }).closest('header');
     expect(activeHeaderBeforeStop).not.toBeNull();
-    fireEvent.click(within(activeHeaderBeforeStop as HTMLElement).getByText('Chat details'));
+    fireEvent.click(within(activeHeaderBeforeStop as HTMLElement).getByText('Details'));
     expect(within(activeHeaderBeforeStop as HTMLElement).getAllByText('/repo/one/.claude/worktrees/abc123').length).toBeGreaterThan(0);
     expect(within(activeHeaderBeforeStop as HTMLElement).getByText('/repo/one')).toBeInTheDocument();
     expect(within(activeHeaderBeforeStop as HTMLElement).getByText('pin/abc123')).toBeInTheDocument();
