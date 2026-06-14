@@ -774,11 +774,12 @@ done
         .unwrap();
         assert_eq!(limited_body["events"].as_array().unwrap().len(), 1);
 
+        let second_id = events[1]["id"].as_u64().unwrap();
         let before_response = app
             .oneshot(
                 Request::builder()
                     .uri(format!(
-                        "/api/sessions/{}/transcript?beforeId={first_id}&limit=1",
+                        "/api/sessions/{}/transcript?beforeId={second_id}&limit=1",
                         session.id
                     ))
                     .body(Body::empty())
@@ -793,7 +794,9 @@ done
                 .unwrap(),
         )
         .unwrap();
-        assert_eq!(before_body["events"].as_array().unwrap().len(), 0);
+        let before_events = before_body["events"].as_array().unwrap();
+        assert_eq!(before_events.len(), 1);
+        assert_eq!(before_events[0]["id"].as_u64().unwrap(), first_id);
     }
 
     #[tokio::test]

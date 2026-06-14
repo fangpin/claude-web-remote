@@ -478,7 +478,12 @@ async function installApiMocks(page: Page) {
     if (transcriptMatch) {
       const sessionId = transcriptMatch[1];
       const afterId = Number(url.searchParams.get('afterId') ?? '0');
-      return json({ events: visualEvents.filter((event) => event.sessionId === sessionId && event.id > afterId) });
+      const beforeId = Number(url.searchParams.get('beforeId') ?? '0');
+      const limit = Number(url.searchParams.get('limit') ?? '0');
+      let events = visualEvents.filter((event) => event.sessionId === sessionId && event.id > afterId);
+      if (beforeId > 0) events = events.filter((event) => event.id < beforeId);
+      if (limit > 0 && events.length > limit) events = events.slice(-limit);
+      return json({ events });
     }
     if (path === '/api/sessions/s1/tasks') {
       return json({ background: taskGroups.background, finished: [taskGroups.finished[0]] });
@@ -509,10 +514,6 @@ async function installApiMocks(page: Page) {
     }
     if (path === '/api/config') {
       return json(configResponse);
-    }
-    if (path.endsWith('/transcript')) {
-      const sessionId = path.match(/\/api\/sessions\/([^/]+)\/transcript/)?.[1];
-      return json({ events: visualEvents.filter((event) => event.sessionId === sessionId) });
     }
     if (path.endsWith('/tasks')) {
       return json({ background: [], finished: [] });
@@ -1005,7 +1006,7 @@ test.describe('screenshot baselines', () => {
 
   test('long conversation bottom scroll has a stable baseline', async ({ page }) => {
     await selectSession(page, /Long Conversation Scroll/);
-    await expect(page.locator('.event-limit-note')).toContainText('Showing latest 80 events');
+    await expect(page.locator('.event-limit-note')).toContainText('Scroll up to load');
     const events = page.locator('.events');
     await events.evaluate((element) => {
       element.style.scrollBehavior = 'auto';

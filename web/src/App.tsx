@@ -634,11 +634,12 @@ function focusFallbackAfterSidebarClose() {
           error={apiError}
           eventConnectionError={eventState.activeConnection.error}
           eventConnectionState={eventState.activeConnection.state}
-          eventRenderLimit={EVENT_RENDER_LIMIT}
+          visibleEventCount={eventState.visibleEvents.length}
           eventsRef={eventState.eventsRef}
           activeWorktreeStatus={sessionState.activeWorktreeStatus}
           activeWorktreeStatusError={sessionState.activeWorktreeStatusError}
           isWorktreeStatusLoading={sessionState.isWorktreeStatusLoading}
+          canLoadOlderEvents={eventState.canLoadOlderEvents}
           hiddenEventCount={eventState.hiddenEventCount}
           reviewSurface={currentReviewSurface}
           isAwaitingClaude={eventState.isAwaitingClaude}
