@@ -162,21 +162,24 @@ function WorktreeStatusPanel({
     <section className={`worktree-status-panel ${status?.dirty ? 'dirty' : ''}`} aria-label="Worktree status">
       <div className="worktree-status-heading">
         <span className={`worktree-state ${status?.dirty ? 'dirty' : 'clean'}`}>{worktreeStateLabel(status, isLoading, error)}</span>
-        <span>Branch: {branch}</span>
-        {baseRef && <span>Base: {baseRef}</span>}
+        <span title={branch}>Branch: {branch}</span>
+        {baseRef && <span title={baseRef}>Base: {baseRef}</span>}
+        <details className="worktree-path-popover">
+          <summary>Paths</summary>
+          <dl className="worktree-paths">
+            <div>
+              <dt>Worktree</dt>
+              <dd title={session.worktree.worktreeCwd}>{session.worktree.worktreeCwd}</dd>
+            </div>
+            <div>
+              <dt>Source</dt>
+              <dd title={session.worktree.sourceCwd}>{session.worktree.sourceCwd}</dd>
+            </div>
+          </dl>
+        </details>
         {status?.dirty && <button type="button" onClick={loadDiff} disabled={isDiffLoading}>{isDiffLoading ? 'Loading diff...' : 'View diff'}</button>}
         {session.worktree && <button type="button" onClick={copyDeliveryContext}>Copy delivery context</button>}
       </div>
-      <dl className="worktree-paths">
-        <div>
-          <dt>Worktree</dt>
-          <dd title={session.worktree.worktreeCwd}>{session.worktree.worktreeCwd}</dd>
-        </div>
-        <div>
-          <dt>Source</dt>
-          <dd title={session.worktree.sourceCwd}>{session.worktree.sourceCwd}</dd>
-        </div>
-      </dl>
       {error && <p className="worktree-warning">Unable to read worktree status: {error}</p>}
       {status?.dirty && (
         <p className="worktree-warning">This worktree has uncommitted changes. Stop only keeps it; cleanup is blocked until you commit, stash, or clean the changes.</p>
@@ -263,109 +266,6 @@ function SessionContinuitySummary({
   );
 }
 
-function reviewTone(review: ReviewSurface): string {
-  return review.activity?.reviewKind ?? (review.activity?.status === 'waiting' ? 'waiting' : 'paused');
-}
-
-function reviewStatusLabel(review: ReviewSurface): string {
-  if (review.activity?.reviewKind === 'permission') return 'Permission-style review';
-  if (review.activity?.reviewKind === 'risky-command') return 'Risky action';
-  if (review.activity?.reviewKind === 'failed-action') return 'Failed action';
-  if (review.activity?.status === 'running') return 'Running';
-  return 'Waiting';
-}
-
-function reviewCopyText(review: ReviewSurface): string {
-  return [
-    review.title,
-    review.message,
-    review.actionName ? `Action: ${review.actionName}` : null,
-    review.actionSummary ? `Input: ${review.actionSummary}` : null,
-    review.riskHint ? `Risk: ${review.riskHint}` : null,
-    `Working directory: ${review.cwd}`,
-    `Permission mode: ${review.permissionMode}`,
-    review.limitation
-  ].filter((line): line is string => Boolean(line)).join('\n');
-}
-
-function copyReviewText(review: ReviewSurface) {
-  void navigator.clipboard?.writeText(reviewCopyText(review));
-}
-
-function ReviewCard({ review, onOpenActivity }: { review: ReviewSurface; onOpenActivity?: () => void }) {
-  return (
-    <section className={`review-card ${reviewTone(review)}`} aria-label="Claude needs your review">
-      <div className="review-card-heading">
-        <div>
-          <span className="state-kicker">Action review</span>
-          <h3>{review.title}</h3>
-        </div>
-        <span className="review-status-pill">{reviewStatusLabel(review)}</span>
-      </div>
-      <p>{review.message}</p>
-      <dl className="review-facts">
-        {review.actionName && (
-          <div>
-            <dt>Action</dt>
-            <dd>{review.actionName}</dd>
-          </div>
-        )}
-        {review.actionSummary && (
-          <div>
-            <dt>Input</dt>
-            <dd>{review.actionSummary}</dd>
-          </div>
-        )}
-        <div>
-          <dt>Working directory</dt>
-          <dd>{review.cwd}</dd>
-        </div>
-        <div>
-          <dt>Permission mode</dt>
-          <dd>{review.permissionMode}</dd>
-        </div>
-        {review.riskHint && (
-          <div>
-            <dt>Risk hint</dt>
-            <dd>{review.riskHint}</dd>
-          </div>
-        )}
-      </dl>
-      <div className="review-card-footer">
-        <p className="review-limitation">{review.limitation}</p>
-        <button type="button" onClick={() => copyReviewText(review)}>Copy review</button>
-        {review.activity && onOpenActivity && (
-          <button type="button" onClick={onOpenActivity}>Open activity</button>
-        )}
-      </div>
-    </section>
-  );
-}
-
-function AttentionSurface({ review, onOpenActivity }: { review: ReviewSurface; onOpenActivity: (review: ReviewSurface) => void }) {
-  return (
-    <section className={`attention-surface ${reviewTone(review)}`} aria-label="Claude needs attention">
-      <div className="attention-orb" aria-hidden="true">
-        <span />
-      </div>
-      <div className="attention-copy">
-        <span className="attention-eyebrow">Claude needs attention</span>
-        <strong>{review.title}</strong>
-        <p>{review.message}</p>
-      </div>
-      <div className="attention-meta" aria-label="Review details">
-        <span>{reviewStatusLabel(review)}</span>
-        {review.actionName && <span>{review.actionName}</span>}
-        <span>{review.permissionMode}</span>
-      </div>
-      <button type="button" onClick={() => onOpenActivity(review)}>
-        Review
-      </button>
-    </section>
-  );
-}
-
-export { ReviewCard };
 export default function ConversationWorkspace({
   activeBlocks,
   activeSession,
@@ -434,41 +334,39 @@ export default function ConversationWorkspace({
       ) : activeSession ? (
         <>
           <header className="conversation-header">
-            <div>
-              <span className="eyebrow">{listMode === 'archived' ? 'Archived chat' : 'Claude chat'}</span>
+            <div className="conversation-title-group">
+              <span className="eyebrow">{listMode === 'archived' ? 'Archived' : 'Chat'}</span>
               <EditableSessionTitle session={activeSession} onRename={onRenameSession} />
-              <div className="conversation-header-meta">
-                <SessionContinuitySummary session={activeSession} listMode={listMode} />
-                <details className="session-context-popover">
-                  <summary>Chat details</summary>
-                  <dl>
-                    <div>
-                      <dt>Workspace</dt>
-                      <dd title={activeSession.cwd}>{activeSession.cwd}</dd>
-                    </div>
-                    <div>
-                      <dt>Permission</dt>
-                      <dd>{activeSession.permissionMode}</dd>
-                    </div>
-                    {activeSession.worktree && (
-                      <>
-                        <div>
-                          <dt>Worktree</dt>
-                          <dd title={activeSession.worktree.worktreeCwd}>{activeSession.worktree.worktreeCwd}</dd>
-                        </div>
-                        <div>
-                          <dt>Source</dt>
-                          <dd title={activeSession.worktree.sourceCwd}>{activeSession.worktree.sourceCwd}</dd>
-                        </div>
-                        <div>
-                          <dt>Branch</dt>
-                          <dd>{activeWorktreeStatus?.branch ?? activeSession.worktree.branch}</dd>
-                        </div>
-                      </>
-                    )}
-                  </dl>
-                </details>
-              </div>
+              <SessionContinuitySummary session={activeSession} listMode={listMode} />
+              <details className="session-context-popover">
+                <summary>Details</summary>
+                <dl>
+                  <div>
+                    <dt>Workspace</dt>
+                    <dd title={activeSession.cwd}>{activeSession.cwd}</dd>
+                  </div>
+                  <div>
+                    <dt>Permission</dt>
+                    <dd>{activeSession.permissionMode}</dd>
+                  </div>
+                  {activeSession.worktree && (
+                    <>
+                      <div>
+                        <dt>Worktree</dt>
+                        <dd title={activeSession.worktree.worktreeCwd}>{activeSession.worktree.worktreeCwd}</dd>
+                      </div>
+                      <div>
+                        <dt>Source</dt>
+                        <dd title={activeSession.worktree.sourceCwd}>{activeSession.worktree.sourceCwd}</dd>
+                      </div>
+                      <div>
+                        <dt>Branch</dt>
+                        <dd>{activeWorktreeStatus?.branch ?? activeSession.worktree.branch}</dd>
+                      </div>
+                    </>
+                  )}
+                </dl>
+              </details>
             </div>
             {actions}
           </header>
@@ -482,7 +380,6 @@ export default function ConversationWorkspace({
             isLoading={isWorktreeStatusLoading}
             onAddPathContextAttachment={onAddPathContextAttachment}
           />
-          {reviewSurface && <AttentionSurface review={reviewSurface} onOpenActivity={onOpenReviewActivity} />}
           <div className="events" ref={eventsRef}>
             <div className="conversation-content">
               {connectionLabel(eventConnectionState) && (
@@ -505,7 +402,6 @@ export default function ConversationWorkspace({
               {(eventConnectionState === 'connecting' || eventConnectionState === 'reconnecting') && activeBlocks.length === 0 && hiddenEventCount === 0 && (
                 <LoadingConversation />
               )}
-              {reviewSurface && <ReviewCard review={reviewSurface} onOpenActivity={reviewSurface.activity ? () => onOpenReviewActivity(reviewSurface) : undefined} />}
               {hiddenEventCount > 0 && (
                 <div className="event-limit-note">
                   <span>Showing latest {eventRenderLimit} events. {hiddenEventCount} older events hidden.</span>

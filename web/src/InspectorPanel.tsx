@@ -1,7 +1,6 @@
 import type { KeyboardEvent } from 'react';
 import ActivityPanel from './ActivityPanel';
 import type { ActivityItem, ReviewSurface } from './activityTimeline';
-import { ReviewCard } from './ConversationWorkspace';
 import type { SessionPlan } from './sessionPlan';
 import TasksPanel from './TasksPanel';
 import type {
@@ -63,40 +62,42 @@ export default function InspectorPanel({
   onRefreshDiagnostics,
   onSelectActivity,
   onSelectTask,
-  onSetInspectorOpen,
   onSetInspectorTab,
   onToggleInspector
 }: Props) {
   return (
-    <aside className="inspector" aria-label="Session inspector">
-      <button
-        type="button"
-        className="inspector-edge-toggle"
-        aria-label={isInspectorOpen ? 'Hide inspector' : 'Show inspector'}
-        title={isInspectorOpen ? 'Hide inspector (⌘/Ctrl+I)' : 'Show inspector (⌘/Ctrl+I)'}
-        onClick={onToggleInspector}
-      >
-        {isInspectorOpen ? '›' : '‹'}
-      </button>
+    <>
+      {!isInspectorOpen && (
+        <button
+          type="button"
+          className="inspector-floating-toggle"
+          aria-label="Show inspector"
+          title="Show inspector (⌘/Ctrl+I)"
+          onClick={onToggleInspector}
+        >
+          ‹
+        </button>
+      )}
+      <aside className="inspector" aria-label="Session inspector">
+        {isInspectorOpen && (
+          <button
+            type="button"
+            className="inspector-edge-toggle"
+            aria-label="Hide inspector"
+            title="Hide inspector (⌘/Ctrl+I)"
+            onClick={onToggleInspector}
+          >
+            ›
+          </button>
+        )}
       <header className="inspector-header">
         <div>
           <h2>Inspector</h2>
           <p>{activeSession ? activeSession.name || activeSession.cwd : 'No session selected'}</p>
         </div>
-        <button type="button" title={isInspectorOpen ? 'Hide inspector (⌘/Ctrl+I)' : 'Show inspector (⌘/Ctrl+I)'} onClick={() => onSetInspectorOpen(!isInspectorOpen)}>
-          {isInspectorOpen ? 'Hide' : 'Show'}
-        </button>
       </header>
       {isInspectorOpen && (
         <>
-          {reviewSurface && (
-            <div className="inspector-review-card">
-              <ReviewCard
-                review={reviewSurface}
-                onOpenActivity={reviewSurface.activity ? () => onSelectActivity(reviewSurface.activity!) : undefined}
-              />
-            </div>
-          )}
           <div className="inspector-tabs" role="tablist" aria-label="Inspector sections">
             <button type="button" id="inspector-tab-activity" role="tab" aria-selected={inspectorTab === 'activity'} aria-controls="inspector-panel-activity" tabIndex={inspectorTab === 'activity' ? 0 : -1} onClick={() => onSetInspectorTab('activity')} onKeyDown={onInspectorTabKeyDown}>Activity</button>
             <button type="button" id="inspector-tab-session" role="tab" aria-selected={inspectorTab === 'session'} aria-controls="inspector-panel-session" tabIndex={inspectorTab === 'session' ? 0 : -1} onClick={() => onSetInspectorTab('session')} onKeyDown={onInspectorTabKeyDown}>Session tasks</button>
@@ -147,7 +148,8 @@ export default function InspectorPanel({
           </section>
         </>
       )}
-    </aside>
+      </aside>
+    </>
   );
 }
 
