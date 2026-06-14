@@ -3284,6 +3284,11 @@ button.danger:hover {
   background: var(--surface-hover);
 }
 
+.inspector-edge-toggle:active,
+.inspector-floating-toggle:active {
+  transform: translateY(-50%);
+}
+
 .inspector-header {
   display: grid;
   min-width: 0;
@@ -4352,13 +4357,22 @@ button.danger:hover {
   }
 
   .inspector-edge-toggle,
-  .app-shell.inspector-closed .inspector-edge-toggle {
+  .inspector-floating-toggle {
     top: 8px;
     right: 10px;
     left: auto;
     width: 40px;
     height: 40px;
     transform: none;
+  }
+
+  .inspector-floating-toggle {
+    position: fixed;
+  }
+
+  .inspector-edge-toggle:active,
+  .inspector-floating-toggle:active {
+    transform: translateY(1px);
   }
 
   .inspector-header {
