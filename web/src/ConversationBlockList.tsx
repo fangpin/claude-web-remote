@@ -267,10 +267,8 @@ function MessageBlockView({ block }: { block: MessageBlock }) {
           <span className="message-avatar" aria-hidden="true">{block.role === 'assistant' ? 'C' : block.role === 'user' ? 'Y' : 'S'}</span>
           <span>{roleLabel(block.role)}</span>
         </span>
-        <span>{block.eventIds.length === 1 ? '1 event' : `${block.eventIds.length} events`}</span>
       </header>
       <MessageMarkdown text={block.text} />
-      <RawEventDetails rawEvents={block.rawEvents} />
     </article>
   );
 }
@@ -324,6 +322,10 @@ function toolResultTitle(block: ToolBlock): string {
 }
 
 function ToolBlockView({ block }: { block: ToolBlock }) {
+  const hasVisibleResult = block.resultSummary.trim() && block.resultDisplay !== 'hidden';
+  const showInlineResult = hasVisibleResult && block.resultDisplay === 'visible';
+  const showCollapsedResult = hasVisibleResult && block.resultDisplay === 'collapsed';
+
   return (
     <article id={blockElementId(block)} className={`conversation-block tool-block ${block.status} result-${block.resultKind}${block.density === 'compact' ? ' compact' : ''}`}>
       <header className="block-header tool-activity-header">
@@ -337,16 +339,19 @@ function ToolBlockView({ block }: { block: ToolBlock }) {
         {block.inputSummary.trim() && <p className="tool-input-summary">{block.inputSummary}</p>}
         {block.resultLabel && <p className="tool-result-label">{block.resultLabel}</p>}
       </div>
-      {(block.resultSummary.trim() || block.rawEvents.length > 0) && (
+      {showInlineResult && (
+        <section className="block-section tool-result visible-result tool-result-detail">
+          <h4>{toolResultTitle(block)}</h4>
+          <ToolResultContent block={block} />
+        </section>
+      )}
+      {showCollapsedResult && (
         <details className="block-section tool-result collapsed-result tool-details">
-          <summary>{block.status === 'running' ? 'Details' : block.resultLabel || 'Details'}</summary>
-          {block.resultSummary.trim() && block.resultDisplay !== 'hidden' && (
-            <section className="tool-result-detail">
-              <h4>{toolResultTitle(block)}</h4>
-              <ToolResultContent block={block} />
-            </section>
-          )}
-          <RawEventDetails rawEvents={block.rawEvents} />
+          <summary>{block.resultLabel || 'Details'}</summary>
+          <section className="tool-result-detail">
+            <h4>{toolResultTitle(block)}</h4>
+            <ToolResultContent block={block} />
+          </section>
         </details>
       )}
     </article>
@@ -391,7 +396,6 @@ function TaskBlockView({ block }: { block: TaskBlock }) {
           <code>{block.outputPath}</code>
         </section>
       )}
-      <RawEventDetails rawEvents={block.rawEvents} />
     </article>
   );
 }

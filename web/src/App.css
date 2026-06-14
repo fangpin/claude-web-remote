@@ -1942,7 +1942,7 @@ button.danger:hover {
 .conversation-blocks {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
 }
 
 .conversation-block {
@@ -2365,12 +2365,17 @@ button.danger:hover {
 .task-block.compact {
   border-color: rgb(111 94 75 / 0.1);
   background: rgb(255 250 242 / 0.42);
-  padding: 9px 12px;
+  padding: 7px 10px;
 }
 
 .tool-block.compact .tool-activity-header,
 .task-block.compact .task-header {
-  margin-bottom: 4px;
+  margin-bottom: 3px;
+}
+
+.tool-block.compact .tool-activity-body,
+.task-block.compact {
+  gap: 3px;
 }
 
 .tool-block.compact .tool-input-summary,
@@ -2378,12 +2383,7 @@ button.danger:hover {
 .task-block.compact .task-summary,
 .task-block.compact .task-result p {
   font-size: 12px;
-  line-height: 1.42;
-}
-
-.tool-block.compact .raw-event-details,
-.task-block.compact .raw-event-details {
-  margin-top: 6px;
+  line-height: 1.36;
 }
 
 .tool-block.running,

@@ -1174,7 +1174,7 @@ describe('App', () => {
     fireEvent.click(within(worktreeContext).getByText('Details'));
     expect(within(worktreeContext).getByText('pin/abc123')).toBeInTheDocument();
     expect(within(worktreeContext).getByText('/repo/one')).toBeInTheDocument();
-    expect(within(worktreeContext).getByText('/repo/one/.claude/worktrees/abc123')).toBeInTheDocument();
+    expect(within(worktreeContext).getAllByText('/repo/one/.claude/worktrees/abc123')).toHaveLength(2);
   });
 
   it('shows an empty conversation state and fills suggestions without sending', async () => {
@@ -1525,7 +1525,7 @@ describe('App', () => {
 
     const activeHeaderBeforeStop = screen.getByRole('heading', { name: 'Worktree Repo' }).closest('header');
     expect(activeHeaderBeforeStop).not.toBeNull();
-    expect(within(activeHeaderBeforeStop as HTMLElement).getByText('/repo/one')).toBeInTheDocument();
+    expect(within(activeHeaderBeforeStop as HTMLElement).getAllByText('/repo/one').length).toBeGreaterThan(0);
     expect(within(activeHeaderBeforeStop as HTMLElement).getByText('Isolated worktree')).toBeInTheDocument();
 
     const worktreeStatus = await screen.findByLabelText('Worktree status');
@@ -1543,7 +1543,7 @@ describe('App', () => {
     await waitFor(() => expect(screen.queryByText('pin/abc123')).not.toBeInTheDocument());
     const activeHeader = screen.getByRole('heading', { name: 'Worktree Repo' }).closest('header');
     expect(activeHeader).not.toBeNull();
-    expect(within(activeHeader as HTMLElement).getByText('/repo/one')).toBeInTheDocument();
+    expect(within(activeHeader as HTMLElement).getAllByText('/repo/one').length).toBeGreaterThan(0);
   });
 
   it('shows dirty worktree files and blocks destructive cleanup by default', async () => {
