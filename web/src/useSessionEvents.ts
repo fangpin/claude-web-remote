@@ -442,13 +442,14 @@ export function useSessionEvents({
   useEffect(() => {
     const eventsElement = eventsRef.current;
     if (!eventsElement) return;
+    const element = eventsElement;
     function onScroll() {
-      if (eventsElement.scrollTop <= 48 && canLoadOlderEvents) {
+      if (element.scrollTop <= 48 && canLoadOlderEvents) {
         void loadOlderEvents();
       }
     }
-    eventsElement.addEventListener('scroll', onScroll);
-    return () => eventsElement.removeEventListener('scroll', onScroll);
+    element.addEventListener('scroll', onScroll);
+    return () => element.removeEventListener('scroll', onScroll);
   }, [canLoadOlderEvents, loadOlderEvents]);
 
   useEffect(() => {
