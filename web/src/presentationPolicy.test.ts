@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { shouldProjectTaskTool, toolPresentation, toolResultSemantics } from './presentationPolicy';
+import {
+  rawEventPresentation,
+  taskToolPresentation,
+  shouldProjectTaskTool,
+  toolActivityPresentation,
+  toolPresentation,
+  toolResultSemantics
+} from './presentationPolicy';
 
 describe('presentationPolicy', () => {
   it('hides completed read-only inspection tools', () => {
@@ -62,5 +69,36 @@ describe('presentationPolicy', () => {
     });
     expect(toolResultSemantics('Bash', 'web/src/App.tsx\nweb/src/main.tsx')).toEqual({ kind: 'paths' });
     expect(toolResultSemantics('Read', 'Error: missing file', '/repo/web/src/App.tsx')).toEqual({ kind: 'text' });
+  });
+
+  it('hides successful raw metadata and stream-json user wrappers', () => {
+    expect(rawEventPresentation('raw', { type: 'result', subtype: 'success' })).toMatchObject({ visibility: 'anchor' });
+    expect(rawEventPresentation('user', { type: 'user', message: { content: [{ type: 'text', text: 'internal' }] } })).toMatchObject({ visibility: 'anchor' });
+  });
+
+  it('keeps permission and unknown raw events visible', () => {
+    expect(rawEventPresentation('raw', { type: 'permission_request', status: 'waiting', prompt: 'Allow command?' })).toMatchObject({
+      visibility: 'visible',
+      severity: 'permission'
+    });
+    expect(rawEventPresentation('raw', { type: 'future_event', subtype: 'delta_chunk' })).toMatchObject({
+      visibility: 'visible',
+      severity: 'warning',
+      label: 'Unknown event'
+    });
+  });
+
+  it('anchors routine task-management tools and compacts meaningful task activity', () => {
+    expect(taskToolPresentation('TaskList', 'completed', {}, '1 task')).toMatchObject({ visibility: 'anchor' });
+    expect(taskToolPresentation('TaskGet', 'completed', {}, 'Task #1')).toMatchObject({ visibility: 'anchor' });
+    expect(taskToolPresentation('TaskUpdate', 'completed', { status: 'completed' }, 'updated')).toMatchObject({ visibility: 'anchor' });
+    expect(taskToolPresentation('TaskUpdate', 'failed', { status: 'completed' }, 'failed')).toMatchObject({ visibility: 'visible', detail: 'expanded' });
+    expect(taskToolPresentation('TaskCreate', 'completed', { subject: 'Fix output rendering' }, 'Task #1 created')).toMatchObject({ visibility: 'compact' });
+  });
+
+  it('anchors low-value bash inspection and compacts important bash work', () => {
+    expect(toolActivityPresentation('Bash', 'completed', { command: 'ls web/src' }, 'App.tsx')).toMatchObject({ visibility: 'anchor' });
+    expect(toolActivityPresentation('Bash', 'completed', { command: 'npm --prefix web test' }, 'passed')).toMatchObject({ visibility: 'compact' });
+    expect(toolActivityPresentation('Bash', 'failed', { command: 'ls web/src' }, 'failed')).toMatchObject({ visibility: 'visible', detail: 'expanded' });
   });
 });

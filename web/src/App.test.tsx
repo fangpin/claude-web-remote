@@ -1,6 +1,7 @@
 import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
+import { streamJsonCorpus } from './__fixtures__/streamJsonCorpus';
 import type { SessionInfo, SessionStatus, UiEvent } from './types';
 
 const baseSession = {
@@ -512,6 +513,50 @@ describe('App', () => {
     expect(await screen.findByText('hello from claude')).toBeInTheDocument();
   });
 
+  it('renders streaming response chunks from WebSocket and transcript replay', async () => {
+    eventsBySession = { s1: [] };
+    render(<App />);
+
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBe(1));
+    const socket = FakeWebSocket.instances[0];
+    for (const event of streamJsonCorpus.streamingText) {
+      socket.emit({ ...event, sessionId: 's1' });
+    }
+
+    expect(await screen.findByText('Hello streamed world.')).toBeInTheDocument();
+
+    cleanup();
+    FakeWebSocket.instances = [];
+    eventsBySession = { s1: streamJsonCorpus.streamingText.map((event) => ({ ...event, sessionId: 's1' })) };
+    render(<App />);
+
+    expect(await screen.findByText('Hello streamed world.')).toBeInTheDocument();
+  });
+
+  it('clears awaiting state when streaming assistant progress arrives', async () => {
+    eventsBySession = { s1: [] };
+    render(<App />);
+
+    const messageInput = await screen.findByLabelText('Message');
+    fireEvent.change(messageInput, { target: { value: 'stream please' } });
+    fireEvent.click(screen.getByRole('button', { name: /Send/ }));
+
+    expect(await screen.findByText('stream please')).toBeInTheDocument();
+    expect(screen.getAllByText('Claude is working').length).toBeGreaterThan(0);
+
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBe(1));
+    FakeWebSocket.instances[0].emit({
+      id: 20,
+      sessionId: 's1',
+      time: '2026-06-11T00:00:00Z',
+      kind: 'raw',
+      payload: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Streaming now' } }
+    });
+
+    expect(await screen.findByText('Streaming now')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByText('Ready for your reply').length).toBeGreaterThan(0));
+  });
+
   it('filters sessions locally by name, cwd, status, and worktree branch', async () => {
     render(<App />);
 
@@ -622,7 +667,7 @@ describe('App', () => {
     });
 
     expect(await screen.findByText('visible error event')).toBeInTheDocument();
-    expect(screen.getByText('Raw')).toBeInTheDocument();
+    expect(screen.getByText('Unknown event')).toBeInTheDocument();
     expect(screen.queryByText('raw event should stay hidden')).not.toBeInTheDocument();
     expect(screen.queryByText('system event should stay hidden')).not.toBeInTheDocument();
     expect(screen.getAllByText('Raw events')).toHaveLength(2);
@@ -637,7 +682,7 @@ describe('App', () => {
     expect(screen.getByText('Advanced options').closest('details')).toHaveAttribute('open');
     fireEvent.change(await screen.findByLabelText('Workspace context'), { target: { value: '/repo/two' } });
     expect(screen.getByText('Skip prompts for trusted local repos.')).toBeInTheDocument();
-    fireEvent.click(screen.getByLabelText('Use git worktree'));
+    expect(screen.getByLabelText('Use git worktree')).toBeChecked();
     fireEvent.click(screen.getByText('Start chat'));
 
     expect(await screen.findByRole('heading', { name: 'two', level: 2 })).toBeInTheDocument();
@@ -692,7 +737,7 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Use /repo/stopped as working directory' }));
 
     expect(screen.getByLabelText('Workspace context')).toHaveValue('/repo/stopped');
-    expect(screen.getByText('Claude will start in /repo/stopped.')).toBeInTheDocument();
+    expect(screen.getByText('Claude will create an isolated worktree from /repo/stopped.')).toBeInTheDocument();
   });
 
   it('shows a calmer empty state for search misses', async () => {

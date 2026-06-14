@@ -2361,6 +2361,31 @@ button.danger:hover {
   background: rgb(255 253 250 / 0.72);
 }
 
+.tool-block.compact,
+.task-block.compact {
+  border-color: rgb(111 94 75 / 0.1);
+  background: rgb(255 250 242 / 0.42);
+  padding: 9px 12px;
+}
+
+.tool-block.compact .tool-activity-header,
+.task-block.compact .task-header {
+  margin-bottom: 4px;
+}
+
+.tool-block.compact .tool-input-summary,
+.tool-block.compact .tool-result-label,
+.task-block.compact .task-summary,
+.task-block.compact .task-result p {
+  font-size: 12px;
+  line-height: 1.42;
+}
+
+.tool-block.compact .raw-event-details,
+.task-block.compact .raw-event-details {
+  margin-top: 6px;
+}
+
 .tool-block.running,
 .task-block.running {
   border-color: #dcc28f;
@@ -2571,6 +2596,21 @@ button.danger:hover {
   color: var(--muted);
   background: rgb(255 253 250 / 0.38);
   opacity: 0.88;
+}
+
+.raw-block.permission,
+.raw-block.warning {
+  border-color: #e8d6b3;
+  color: var(--warning);
+  background: #fbf3df;
+  opacity: 1;
+}
+
+.raw-block.error {
+  border-color: #e2b4ab;
+  color: var(--danger);
+  background: #fff8f6;
+  opacity: 1;
 }
 
 .raw-event-details {

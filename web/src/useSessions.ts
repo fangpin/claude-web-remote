@@ -50,7 +50,7 @@ export function useSessions({
   const [isStartSurfaceOpen, setIsStartSurfaceOpen] = useState(false);
   const [cwd, setCwd] = useState('');
   const [permissionMode, setPermissionMode] = useState('bypassPermissions');
-  const [useWorktree, setUseWorktree] = useState(false);
+  const [useWorktree, setUseWorktree] = useState(true);
   const [isListLoading, setIsListLoading] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
   const [activeWorktreeStatus, setActiveWorktreeStatus] = useState<WorktreeStatus | null>(null);
@@ -265,7 +265,7 @@ export function useSessions({
       setActiveId(created.id);
       setIsStartSurfaceOpen(false);
       setCwd('');
-      setUseWorktree(false);
+      setUseWorktree(true);
       callbacksRef.current.onTasksChanged?.();
       callbacksRef.current.onSessionTasksChanged?.(created.id);
     } catch (err: unknown) {
