@@ -1,7 +1,20 @@
 import RawEventDetails from './RawEventDetails';
 import type { ConversationBlock, ErrorBlock, MessageBlock, RawBlock, TaskBlock, ToolBlock } from './conversationBlocks';
+import hljs from 'highlight.js/lib/core';
+import bash from 'highlight.js/lib/languages/bash';
+import css from 'highlight.js/lib/languages/css';
+import diff from 'highlight.js/lib/languages/diff';
+import javascript from 'highlight.js/lib/languages/javascript';
+import json from 'highlight.js/lib/languages/json';
+import markdown from 'highlight.js/lib/languages/markdown';
+import python from 'highlight.js/lib/languages/python';
+import rust from 'highlight.js/lib/languages/rust';
+import typescript from 'highlight.js/lib/languages/typescript';
+import xml from 'highlight.js/lib/languages/xml';
+import yaml from 'highlight.js/lib/languages/yaml';
 import ReactMarkdown, { type Components } from 'react-markdown';
-import React, { useState } from 'react';
+import remarkGfm from 'remark-gfm';
+import React, { useMemo, useState } from 'react';
 import './ConversationBlockList.css';
 
 function roleLabel(role: MessageBlock['role']): string {
@@ -26,8 +39,40 @@ function textFromReactNode(node: React.ReactNode): string {
   return '';
 }
 
+hljs.registerLanguage('bash', bash);
+hljs.registerLanguage('css', css);
+hljs.registerLanguage('diff', diff);
+hljs.registerLanguage('javascript', javascript);
+hljs.registerLanguage('json', json);
+hljs.registerLanguage('markdown', markdown);
+hljs.registerLanguage('python', python);
+hljs.registerLanguage('rust', rust);
+hljs.registerLanguage('typescript', typescript);
+hljs.registerLanguage('xml', xml);
+hljs.registerLanguage('yaml', yaml);
+
+const languageAliases: Record<string, string> = {
+  html: 'xml',
+  js: 'javascript',
+  jsx: 'javascript',
+  md: 'markdown',
+  py: 'python',
+  rs: 'rust',
+  sh: 'bash',
+  ts: 'typescript',
+  tsx: 'typescript',
+  yml: 'yaml'
+};
+
 function languageFromClassName(className?: string): string | undefined {
   return className?.match(/(?:^|\s)language-([^\s]+)/)?.[1];
+}
+
+function highlightLanguage(language?: string): string | undefined {
+  if (!language) return undefined;
+  const normalized = language.toLowerCase();
+  const alias = languageAliases[normalized] ?? normalized;
+  return hljs.getLanguage(alias) ? alias : undefined;
 }
 
 function prettyLanguage(language?: string): string {
@@ -91,14 +136,22 @@ function CodeFrame({
   language,
   children,
   className,
-  variant = 'message'
+  variant = 'message',
+  highlight = true
 }: {
   code: string;
   language?: string;
   children?: React.ReactNode;
   className?: string;
   variant?: 'message' | 'tool';
+  highlight?: boolean;
 }) {
+  const highlightedCode = useMemo(() => {
+    const highlightedLanguage = highlightLanguage(language);
+    if (!highlight || !highlightedLanguage) return undefined;
+    return hljs.highlight(code, { language: highlightedLanguage, ignoreIllegals: true }).value;
+  }, [code, highlight, language]);
+
   return (
     <div className={`code-frame ${variant}-code-frame`}>
       <div className="code-frame-header">
@@ -106,7 +159,16 @@ function CodeFrame({
         <CopyButton text={code} label="Copy code" />
       </div>
       <pre className={className}>
-        {children ?? <code className={language ? `language-${language}` : undefined}>{code}</code>}
+        {highlightedCode ? (
+          <code
+            className={`hljs ${language ? `language-${language}` : ''}`.trim()}
+            dangerouslySetInnerHTML={{ __html: highlightedCode }}
+          />
+        ) : children ? (
+          children
+        ) : (
+          <code className={language ? `language-${language}` : undefined}>{code}</code>
+        )}
       </pre>
     </div>
   );
@@ -147,7 +209,7 @@ function DiffResult({ code }: { code: string }) {
           {stats.files.length > 4 && <li>+ {stats.files.length - 4} more</li>}
         </ul>
       )}
-      <CodeFrame code={code} language="diff" className="tool-result-pre diff" variant="tool">
+      <CodeFrame code={code} language="diff" className="tool-result-pre diff" variant="tool" highlight={false}>
         <code className="language-diff">
           {code.split('\n').map((line, index) => {
           const kind =
@@ -190,7 +252,7 @@ const markdownComponents = {
 function MessageMarkdown({ text }: { text: string }) {
   return (
     <div className="message-text">
-      <ReactMarkdown components={markdownComponents} skipHtml>
+      <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]} skipHtml>
         {text}
       </ReactMarkdown>
     </div>

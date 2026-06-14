@@ -2319,7 +2319,8 @@ button.danger:hover {
 .message-text h6,
 .message-text p,
 .message-text ul,
-.message-text ol {
+.message-text ol,
+.message-text table {
   margin: 0 0 0.75em;
 }
 
@@ -2362,8 +2363,35 @@ button.danger:hover {
 .message-text p:last-child,
 .message-text ul:last-child,
 .message-text ol:last-child,
+.message-text table:last-child,
 .message-text .message-code:last-child {
   margin-bottom: 0;
+}
+
+.message-text table {
+  display: block;
+  max-width: 100%;
+  overflow: auto;
+  border-collapse: collapse;
+  font-size: 0.93em;
+}
+
+.message-text th,
+.message-text td {
+  border: 1px solid var(--border);
+  padding: 6px 9px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.message-text th {
+  color: var(--text);
+  background: var(--surface-3);
+  font-weight: 700;
+}
+
+.message-text td {
+  background: rgb(255 253 250 / 0.52);
 }
 
 .message-text code {
@@ -2386,6 +2414,57 @@ button.danger:hover {
   background: transparent;
   padding: 0;
   white-space: pre;
+}
+
+.code-frame .hljs {
+  color: #3a332c;
+  background: transparent;
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-title.function_ {
+  color: #8f4d36;
+  font-weight: 680;
+}
+
+.hljs-string,
+.hljs-attr,
+.hljs-symbol {
+  color: #47745b;
+}
+
+.hljs-number,
+.hljs-literal,
+.hljs-built_in,
+.hljs-type {
+  color: #9b642c;
+}
+
+.hljs-title,
+.hljs-name,
+.hljs-property,
+.hljs-attribute {
+  color: #3f6690;
+}
+
+.hljs-comment,
+.hljs-quote {
+  color: #8a8278;
+  font-style: italic;
+}
+
+.hljs-meta,
+.hljs-doctag,
+.hljs-tag {
+  color: #766f65;
+}
+
+.hljs-regexp,
+.hljs-link,
+.hljs-variable,
+.hljs-template-variable {
+  color: #9a4d63;
 }
 
 .message-text > *:first-child {
