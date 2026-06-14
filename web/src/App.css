@@ -137,7 +137,7 @@ label {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 72px minmax(260px, 320px) minmax(0, 1fr) minmax(280px, 360px);
+  grid-template-columns: 72px minmax(260px, 320px) minmax(0, 1fr) var(--inspector-width, 360px);
   height: 100vh;
   min-height: 0;
   color: var(--text);
@@ -145,7 +145,7 @@ label {
 }
 
 .app-shell.sidebar-closed {
-  grid-template-columns: 72px 0 minmax(0, 1fr) minmax(280px, 360px);
+  grid-template-columns: 72px 0 minmax(0, 1fr) var(--inspector-width, 360px);
 }
 
 .app-shell.inspector-closed {
@@ -3233,6 +3233,36 @@ button.danger:hover {
   background: var(--panel-bg);
 }
 
+.inspector-resize-handle {
+  position: absolute;
+  inset: 0 auto 0 -5px;
+  z-index: 80;
+  width: 10px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.inspector-resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 18px;
+  bottom: 18px;
+  left: 4px;
+  width: 2px;
+  border-radius: 999px;
+  background: transparent;
+  transition: background 0.16s ease;
+}
+
+.inspector-resize-handle:hover::after,
+.inspector-resize-handle:focus-visible::after {
+  background: var(--accent);
+}
+
 .inspector-edge-toggle,
 .inspector-floating-toggle {
   display: grid;
@@ -3252,7 +3282,7 @@ button.danger:hover {
   position: absolute;
   top: 50%;
   left: -20px;
-  z-index: 90;
+  z-index: 120;
   transform: translateY(-50%);
 }
 
@@ -3260,7 +3290,7 @@ button.danger:hover {
   position: fixed;
   top: 50%;
   right: 12px;
-  z-index: 90;
+  z-index: 120;
   transform: translateY(-50%);
 }
 
@@ -4125,7 +4155,7 @@ button.danger:hover {
     bottom: 0;
     z-index: 30;
     grid-column: auto;
-    width: min(360px, calc(100vw - 72px));
+    width: min(var(--inspector-width, 360px), calc(100vw - 72px));
     border-top: 0;
     border-left: 1px solid var(--border);
     box-shadow: var(--shadow-popover);
@@ -4337,6 +4367,10 @@ button.danger:hover {
     box-shadow: none;
   }
 
+  .inspector-resize-handle {
+    display: none;
+  }
+
   .inspector-edge-toggle,
   .app-shell.inspector-closed .inspector-edge-toggle {
     top: 8px;
@@ -4425,12 +4459,12 @@ body {
 }
 
 .app-shell {
-  grid-template-columns: 58px minmax(260px, 312px) minmax(0, 1fr) minmax(300px, 380px);
+  grid-template-columns: 58px minmax(260px, 312px) minmax(0, 1fr) var(--inspector-width, 360px);
   background: transparent;
 }
 
 .app-shell.sidebar-closed {
-  grid-template-columns: 58px 0 minmax(0, 1fr) minmax(300px, 380px);
+  grid-template-columns: 58px 0 minmax(0, 1fr) var(--inspector-width, 360px);
 }
 
 .app-shell.inspector-closed {

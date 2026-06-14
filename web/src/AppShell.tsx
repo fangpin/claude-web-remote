@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 
 export type SessionListMode = 'active' | 'archived';
 export type AppView = 'sessions' | 'config';
@@ -24,6 +24,7 @@ type Props = {
   sidebar: ReactNode;
   workspace: ReactNode;
   inspector: ReactNode;
+  inspectorWidth: number;
   onSetShortcutHelpOpen: (isOpen: boolean) => void;
   onShowActiveSessions: () => void;
   onShowArchivedSessions: () => void;
@@ -41,13 +42,16 @@ export default function AppShell({
   sidebar,
   workspace,
   inspector,
+  inspectorWidth,
   onSetShortcutHelpOpen,
   onShowActiveSessions,
   onShowArchivedSessions,
   onToggleSidebar
 }: Props) {
+  const shellStyle = { '--inspector-width': `${inspectorWidth}px` } as CSSProperties;
+
   return (
-    <div className={`app-shell view-${view} ${isInspectorOpen ? 'inspector-open' : 'inspector-closed'} ${isSidebarOpen ? 'sidebar-open' : 'sidebar-closed'}`}>
+    <div className={`app-shell view-${view} ${isInspectorOpen ? 'inspector-open' : 'inspector-closed'} ${isSidebarOpen ? 'sidebar-open' : 'sidebar-closed'}`} style={shellStyle}>
       <nav className="primary-rail" aria-label="Primary navigation">
         <div className={`rail-brand attention-${attentionState}`} aria-label={attentionLabel ? `Claude: ${attentionLabel}` : 'Claude'}>
           C

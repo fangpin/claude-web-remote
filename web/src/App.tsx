@@ -1,4 +1,4 @@
-import { FormEvent, KeyboardEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { FormEvent, KeyboardEvent, PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from 'react';
 import AppShell, { type AppView } from './AppShell';
 import { buildActivityTimeline, latestReviewActivity, reviewSurface, waitingCopy, type ActivityItem } from './activityTimeline';
 import ConversationWorkspace from './ConversationWorkspace';
@@ -16,6 +16,9 @@ import { useTasks } from './useTasks';
 import './App.css';
 
 const EVENT_RENDER_LIMIT = 80;
+const INSPECTOR_DEFAULT_WIDTH = 360;
+const INSPECTOR_MIN_WIDTH = 300;
+const INSPECTOR_MAX_WIDTH = 640;
 const EMPTY_STATE_PROMPTS = [
   'Summarize this repository',
   'Review my current changes',
@@ -40,6 +43,7 @@ type EventActions = {
 
 export default function App() {
   const [view, setView] = useState<AppView>('sessions');
+  const [inspectorWidth, setInspectorWidth] = useState(INSPECTOR_DEFAULT_WIDTH);
   const [isInspectorOpen, setIsInspectorOpen] = useState(false);
   const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
@@ -480,6 +484,27 @@ function focusFallbackAfterSidebarClose() {
     return () => window.removeEventListener('keydown', onGlobalKeyDown);
   });
 
+  function onResizeInspectorStart(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (!isInspectorOpen) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const pointerStartX = event.clientX;
+    const widthStart = inspectorWidth;
+
+    function onPointerMove(moveEvent: PointerEvent) {
+      const nextWidth = widthStart + pointerStartX - moveEvent.clientX;
+      setInspectorWidth(Math.min(INSPECTOR_MAX_WIDTH, Math.max(INSPECTOR_MIN_WIDTH, nextWidth)));
+    }
+
+    function onPointerUp() {
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+    }
+
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp, { once: true });
+  }
+
   function onInspectorTabKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
     const tabs: Array<typeof inspectorTab> = ['activity', 'session', 'global', 'plan', 'diagnostics'];
     const currentIndex = tabs.indexOf(inspectorTab);
@@ -592,6 +617,7 @@ function focusFallbackAfterSidebarClose() {
       view={view}
       listMode={sessionState.listMode}
       isInspectorOpen={isInspectorOpen}
+      inspectorWidth={inspectorWidth}
       isShortcutHelpOpen={isShortcutHelpOpen}
       isSidebarOpen={isSidebarOpen}
       attentionState={attentionState}
@@ -708,6 +734,7 @@ function focusFallbackAfterSidebarClose() {
           onRefreshDiagnostics={diagnosticsState.refreshDiagnostics}
           onSelectActivity={onSelectActivity}
           onSelectTask={onSelectTask}
+          onResizeInspectorStart={onResizeInspectorStart}
           onSetInspectorOpen={setIsInspectorOpen}
           onSetInspectorTab={setInspectorTab}
           onToggleInspector={() => setIsInspectorOpen((open) => !open)}

@@ -1,4 +1,4 @@
-import type { KeyboardEvent } from 'react';
+import type { KeyboardEvent, PointerEvent } from 'react';
 import ActivityPanel from './ActivityPanel';
 import type { ActivityItem, ReviewSurface } from './activityTimeline';
 import type { SessionPlan } from './sessionPlan';
@@ -36,6 +36,7 @@ type Props = {
   onRefreshDiagnostics: () => void;
   onSelectActivity: (activity: ActivityItem) => void;
   onSelectTask: (task: TaskInfo) => void;
+  onResizeInspectorStart: (event: PointerEvent<HTMLButtonElement>) => void;
   onSetInspectorOpen: (isOpen: boolean) => void;
   onSetInspectorTab: (tab: InspectorTab) => void;
   onToggleInspector: () => void;
@@ -62,6 +63,7 @@ export default function InspectorPanel({
   onRefreshDiagnostics,
   onSelectActivity,
   onSelectTask,
+  onResizeInspectorStart,
   onSetInspectorTab,
   onToggleInspector
 }: Props) {
@@ -79,6 +81,15 @@ export default function InspectorPanel({
         </button>
       )}
       <aside className="inspector" aria-label="Session inspector">
+        {isInspectorOpen && (
+          <button
+            type="button"
+            className="inspector-resize-handle"
+            aria-label="Resize inspector"
+            title="Drag to resize inspector"
+            onPointerDown={onResizeInspectorStart}
+          />
+        )}
         {isInspectorOpen && (
           <button
             type="button"
