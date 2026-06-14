@@ -214,7 +214,7 @@ The Web UI supports app-level shortcuts for keyboard-first navigation:
 
 `Cmd/Ctrl+L` is intentionally left to the browser address bar; use `Cmd/Ctrl+K` or `/` to return to Claude input.
 
-Enable **Use git worktree** to start Claude in an isolated checkout. Worktree sessions show the checkout path, source repo, branch, clean/dirty state, and changed files in the session header. Dirty worktrees expose a read-only **View diff** action. Worktree sessions can also copy delivery context for manual commit/PR handoff without executing git writes. `Stop only` keeps the worktree for review; `Stop and remove worktree` is only available for clean app-created worktrees and never force-removes dirty changes.
+Enable **Use git worktree** to start Claude in an isolated checkout. Worktree sessions show the checkout path, source repo, branch, clean/dirty state, and changed files in the worktree status panel below the session header. Dirty worktrees expose a read-only **View diff** action. Worktree sessions can also copy delivery context for manual commit/PR handoff without executing git writes. `Stop only` keeps the worktree for review; `Stop and remove worktree` is only available for clean app-created worktrees and never force-removes dirty changes.
 
 ## Session API
 

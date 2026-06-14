@@ -94,8 +94,16 @@ function worktreeStateLabel(status: WorktreeStatus | null, isLoading: boolean, e
   return `${status.changedFileCount} changed ${status.changedFileCount === 1 ? 'file' : 'files'}`;
 }
 
+function workspacePathForSession(session: SessionInfo): string {
+  return session.worktree?.sourceCwd ?? session.cwd;
+}
+
+function workspaceBadgeForSession(session: SessionInfo): string | null {
+  return session.worktree ? 'Isolated worktree' : null;
+}
+
 function shortWorkspaceName(session: SessionInfo): string {
-  const path = session.worktree?.sourceCwd ?? session.cwd;
+  const path = workspacePathForSession(session);
   const normalized = path.replace(/\/+$/, '');
   const parts = normalized.split('/').filter(Boolean);
   return parts.at(-1) ?? (normalized || 'Workspace');
@@ -335,38 +343,42 @@ export default function ConversationWorkspace({
         <>
           <header className="conversation-header">
             <div className="conversation-title-group">
-              <span className="eyebrow">{listMode === 'archived' ? 'Archived' : 'Chat'}</span>
-              <EditableSessionTitle session={activeSession} onRename={onRenameSession} />
-              <SessionContinuitySummary session={activeSession} listMode={listMode} />
-              <details className="session-context-popover">
-                <summary>Details</summary>
-                <dl>
-                  <div>
-                    <dt>Workspace</dt>
-                    <dd title={activeSession.cwd}>{activeSession.cwd}</dd>
-                  </div>
-                  <div>
-                    <dt>Permission</dt>
-                    <dd>{activeSession.permissionMode}</dd>
-                  </div>
-                  {activeSession.worktree && (
-                    <>
-                      <div>
-                        <dt>Worktree</dt>
-                        <dd title={activeSession.worktree.worktreeCwd}>{activeSession.worktree.worktreeCwd}</dd>
-                      </div>
-                      <div>
-                        <dt>Source</dt>
-                        <dd title={activeSession.worktree.sourceCwd}>{activeSession.worktree.sourceCwd}</dd>
-                      </div>
-                      <div>
-                        <dt>Branch</dt>
-                        <dd>{activeWorktreeStatus?.branch ?? activeSession.worktree.branch}</dd>
-                      </div>
-                    </>
-                  )}
-                </dl>
-              </details>
+              <div className="conversation-title-row">
+                <span className="eyebrow">{listMode === 'archived' ? 'Archived' : 'Chat'}</span>
+                <EditableSessionTitle session={activeSession} onRename={onRenameSession} />
+                <SessionContinuitySummary session={activeSession} listMode={listMode} />
+                {workspaceBadgeForSession(activeSession) && <span className="session-context-badge">{workspaceBadgeForSession(activeSession)}</span>}
+                <details className="session-context-popover">
+                  <summary>Details</summary>
+                  <dl>
+                    <div>
+                      <dt>Workspace</dt>
+                      <dd title={activeSession.cwd}>{activeSession.cwd}</dd>
+                    </div>
+                    <div>
+                      <dt>Permission</dt>
+                      <dd>{activeSession.permissionMode}</dd>
+                    </div>
+                    {activeSession.worktree && (
+                      <>
+                        <div>
+                          <dt>Worktree</dt>
+                          <dd title={activeSession.worktree.worktreeCwd}>{activeSession.worktree.worktreeCwd}</dd>
+                        </div>
+                        <div>
+                          <dt>Source</dt>
+                          <dd title={activeSession.worktree.sourceCwd}>{activeSession.worktree.sourceCwd}</dd>
+                        </div>
+                        <div>
+                          <dt>Branch</dt>
+                          <dd>{activeWorktreeStatus?.branch ?? activeSession.worktree.branch}</dd>
+                        </div>
+                      </>
+                    )}
+                  </dl>
+                </details>
+              </div>
+              <p title={workspacePathForSession(activeSession)}>{workspacePathForSession(activeSession)}</p>
             </div>
             {actions}
           </header>

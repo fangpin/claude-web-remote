@@ -1111,21 +1111,25 @@ describe('App', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/stop', expect.objectContaining({ method: 'POST' })));
   });
 
-  it('shows composer context hints for cwd, permission, status, and worktree metadata', async () => {
+  it('shows compact composer context with details for full session metadata', async () => {
     render(<App />);
 
     const context = await screen.findByLabelText('Composer context');
-    expect(context).toHaveTextContent('status: Waiting for you');
-    fireEvent.click(within(context).getByText('Context'));
+    expect(context).toHaveTextContent('Waiting for you');
+    expect(context).toHaveTextContent('Permission: acceptEdits');
+    expect(context).toHaveTextContent('Target: one');
+    fireEvent.click(within(context).getByText('Details'));
     expect(within(context).getByText('/repo/one')).toBeInTheDocument();
     expect(within(context).getByText('acceptEdits')).toBeInTheDocument();
 
     fireEvent.click(sessionButton('Worktree Repo'));
 
     const worktreeContext = await screen.findByLabelText('Composer context');
-    fireEvent.click(within(worktreeContext).getByText('Context'));
+    expect(worktreeContext).toHaveTextContent('Target: one · worktree');
+    fireEvent.click(within(worktreeContext).getByText('Details'));
     expect(within(worktreeContext).getByText('pin/abc123')).toBeInTheDocument();
     expect(within(worktreeContext).getByText('/repo/one')).toBeInTheDocument();
+    expect(within(worktreeContext).getByText('/repo/one/.claude/worktrees/abc123')).toBeInTheDocument();
   });
 
   it('shows an empty conversation state and fills suggestions without sending', async () => {
@@ -1476,12 +1480,16 @@ describe('App', () => {
 
     const activeHeaderBeforeStop = screen.getByRole('heading', { name: 'Worktree Repo' }).closest('header');
     expect(activeHeaderBeforeStop).not.toBeNull();
-    fireEvent.click(within(activeHeaderBeforeStop as HTMLElement).getByText('Details'));
-    expect(within(activeHeaderBeforeStop as HTMLElement).getAllByText('/repo/one/.claude/worktrees/abc123').length).toBeGreaterThan(0);
     expect(within(activeHeaderBeforeStop as HTMLElement).getByText('/repo/one')).toBeInTheDocument();
-    expect(within(activeHeaderBeforeStop as HTMLElement).getByText('pin/abc123')).toBeInTheDocument();
-    expect(await screen.findByText('Clean')).toBeInTheDocument();
-    expect(screen.getByText('Base: HEAD')).toBeInTheDocument();
+    expect(within(activeHeaderBeforeStop as HTMLElement).getByText('Isolated worktree')).toBeInTheDocument();
+
+    const worktreeStatus = await screen.findByLabelText('Worktree status');
+    expect(within(worktreeStatus).getByText('Clean')).toBeInTheDocument();
+    expect(within(worktreeStatus).getByText('Branch: pin/abc123')).toBeInTheDocument();
+    expect(within(worktreeStatus).getByText('Base: HEAD')).toBeInTheDocument();
+    fireEvent.click(within(worktreeStatus).getByText('Paths'));
+    expect(within(worktreeStatus).getByText('/repo/one/.claude/worktrees/abc123')).toBeInTheDocument();
+    expect(within(worktreeStatus).getByText('/repo/one')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Copy delivery context' })).toBeInTheDocument();
     fireEvent.click(screen.getByText('More'));
     fireEvent.click(screen.getByText('Stop and remove worktree'));
