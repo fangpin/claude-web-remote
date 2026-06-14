@@ -3186,21 +3186,22 @@ button.danger:hover {
 .inspector-floating-toggle {
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 64px;
+  width: 40px;
+  height: 72px;
   border-color: var(--border);
   border-radius: 999px;
   color: var(--muted);
   background: var(--surface);
   padding: 0;
   box-shadow: 0 4px 14px rgb(45 42 38 / 0.12);
+  touch-action: manipulation;
 }
 
 .inspector-edge-toggle {
   position: absolute;
   top: 50%;
-  left: -14px;
-  z-index: 2;
+  left: -20px;
+  z-index: 90;
   transform: translateY(-50%);
 }
 
@@ -4290,8 +4291,8 @@ button.danger:hover {
     top: 8px;
     right: 10px;
     left: auto;
-    width: 34px;
-    height: 34px;
+    width: 40px;
+    height: 40px;
     transform: none;
   }
 

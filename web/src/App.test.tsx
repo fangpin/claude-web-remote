@@ -886,6 +886,20 @@ describe('App', () => {
     expect(screen.getByRole('heading', { name: 'Stopped Repo' })).toBeInTheDocument();
   });
 
+  it('toggles the inspector from the visible edge controls on the first click', async () => {
+    render(<App />);
+
+    await screen.findByRole('complementary', { name: 'Session inspector' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show inspector' }));
+    expect(screen.getByRole('button', { name: 'Hide inspector' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Show inspector' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hide inspector' }));
+    expect(screen.getByRole('button', { name: 'Show inspector' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Hide inspector' })).not.toBeInTheDocument();
+  });
+
   it('closes app popovers with Escape and focuses composer after creating a session', async () => {
     render(<App />);
 
