@@ -10,7 +10,7 @@ use axum::{
     },
     http::StatusCode,
     response::IntoResponse,
-    routing::{get, post, put},
+    routing::{get, patch, post, put},
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -47,7 +47,31 @@ pub struct DeleteSessionQuery {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateSessionRequest {
+    #[serde(default, deserialize_with = "deserialize_optional_field")]
+    pub name: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_optional_field")]
+    pub group_id: Option<Option<Uuid>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateSessionGroupRequest {
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateSessionGroupRequest {
     pub name: Option<String>,
+    pub sort_order: Option<i64>,
+}
+
+fn deserialize_optional_field<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
 }
 
 #[derive(Debug, Deserialize)]
@@ -61,6 +85,14 @@ pub struct EventsQuery {
 pub fn build_router(state: AppState, web_dir: Option<PathBuf>) -> Router {
     let api = Router::new()
         .route("/tasks", get(list_tasks))
+        .route(
+            "/session-groups",
+            get(list_session_groups).post(create_session_group),
+        )
+        .route(
+            "/session-groups/{id}",
+            patch(update_session_group).delete(delete_session_group),
+        )
         .route("/sessions", get(list_sessions).post(create_session))
         .route(
             "/sessions/{id}",
@@ -140,8 +172,45 @@ async fn update_session(
     Json(request): Json<UpdateSessionRequest>,
 ) -> AppResult<Json<serde_json::Value>> {
     Ok(Json(json!(
-        state.manager.update_session_name(id, request.name).await?
+        state
+            .manager
+            .update_session_metadata(id, request.name, request.group_id)
+            .await?
     )))
+}
+
+async fn list_session_groups(State(state): State<AppState>) -> AppResult<Json<serde_json::Value>> {
+    Ok(Json(
+        json!({ "groups": state.manager.list_groups().await? }),
+    ))
+}
+
+async fn create_session_group(
+    State(state): State<AppState>,
+    Json(request): Json<CreateSessionGroupRequest>,
+) -> AppResult<Json<serde_json::Value>> {
+    Ok(Json(json!(state.manager.create_group(request.name).await?)))
+}
+
+async fn update_session_group(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(request): Json<UpdateSessionGroupRequest>,
+) -> AppResult<Json<serde_json::Value>> {
+    Ok(Json(json!(
+        state
+            .manager
+            .update_group(id, request.name, request.sort_order)
+            .await?
+    )))
+}
+
+async fn delete_session_group(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<serde_json::Value>> {
+    state.manager.delete_group(id).await?;
+    Ok(Json(json!({ "ok": true })))
 }
 
 async fn list_tasks(State(state): State<AppState>) -> AppResult<Json<serde_json::Value>> {
@@ -511,6 +580,129 @@ done
         assert_eq!(body["status"], "warning");
         assert_eq!(body["recentStderr"][0], "failed with token=<redacted>");
         assert!(!body.to_string().contains("super-secret"));
+    }
+
+    #[tokio::test]
+    async fn group_routes_create_list_rename_delete_and_assign_sessions() {
+        let temp = tempfile::tempdir().unwrap();
+        let state = test_state(&temp).await;
+        let session = state
+            .manager
+            .create_session(CreateSessionRequest {
+                cwd: temp.path().to_path_buf(),
+                name: Some("group me".to_string()),
+                permission_mode: None,
+                worktree: None,
+            })
+            .await
+            .unwrap();
+        let app = build_router(state, None);
+
+        let create_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/session-groups")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"name":" Work "}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(create_response.status(), StatusCode::OK);
+        let created: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(create_response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        let group_id = created["id"].as_str().unwrap();
+        assert_eq!(created["name"], "Work");
+
+        let assign_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!("/api/sessions/{}", session.id))
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(r#"{{"groupId":"{group_id}"}}"#)))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(assign_response.status(), StatusCode::OK);
+        let assigned: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(assign_response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(assigned["groupId"], group_id);
+
+        let rename_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!("/api/session-groups/{group_id}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"name":"Renamed","sortOrder":4}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(rename_response.status(), StatusCode::OK);
+
+        let list_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/session-groups")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let listed: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(list_response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(listed["groups"][0]["name"], "Renamed");
+        assert_eq!(listed["groups"][0]["sortOrder"], 4);
+
+        let delete_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!("/api/session-groups/{group_id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(delete_response.status(), StatusCode::OK);
+
+        let session_response = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/sessions/{}", session.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let ungrouped: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(session_response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(ungrouped["groupId"].is_null());
     }
 
     #[tokio::test]

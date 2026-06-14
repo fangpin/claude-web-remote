@@ -2,7 +2,7 @@ import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within }
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import { streamJsonCorpus } from './__fixtures__/streamJsonCorpus';
-import type { SessionInfo, SessionStatus, UiEvent } from './types';
+import type { SessionGroup, SessionInfo, SessionStatus, UiEvent } from './types';
 
 const baseSession = {
   permissionMode: 'acceptEdits',
@@ -120,6 +120,7 @@ const defaultEventsBySession: Record<string, UiEvent[]> = {};
 
 let sessions: SessionInfo[] = defaultSessions;
 let deletedSessions: SessionInfo[] = defaultDeletedSessions;
+let sessionGroups: SessionGroup[] = [];
 let eventsBySession: Record<string, UiEvent[]> = defaultEventsBySession;
 let dirtyWorktreeStatus = false;
 let fetchMock: ReturnType<typeof vi.fn>;
@@ -297,6 +298,7 @@ beforeEach(() => {
   window.localStorage.clear();
   sessions = defaultSessions;
   deletedSessions = defaultDeletedSessions;
+  sessionGroups = [];
   eventsBySession = defaultEventsBySession;
   dirtyWorktreeStatus = false;
   FakeWebSocket.instances = [];
@@ -323,6 +325,35 @@ beforeEach(() => {
     const worktreeDiffMatch = url.match(/^\/api\/sessions\/([^/?]+)\/worktree-diff$/);
     if (worktreeDiffMatch && !init) {
       return jsonResponse({ diff: 'diff --git a/web/src/App.tsx b/web/src/App.tsx\n+changed' });
+    }
+    if (url === '/api/session-groups' && !init) {
+      return jsonResponse({ groups: sessionGroups });
+    }
+    if (url === '/api/session-groups' && init?.method === 'POST') {
+      const body = JSON.parse(String(init.body));
+      const group = {
+        id: `g${sessionGroups.length + 1}`,
+        name: body.name,
+        sortOrder: sessionGroups.length,
+        createdAt: '2026-06-12T00:00:00Z',
+        updatedAt: '2026-06-12T00:00:00Z'
+      };
+      sessionGroups = [...sessionGroups, group];
+      return jsonResponse(group);
+    }
+    const sessionGroupMatch = url.match(/^\/api\/session-groups\/([^/?]+)$/);
+    if (sessionGroupMatch && init?.method === 'PATCH') {
+      const body = JSON.parse(String(init.body));
+      const group = sessionGroups.find((item) => item.id === sessionGroupMatch[1]) ?? sessionGroups[0];
+      const updated = { ...group, ...body, updatedAt: '2026-06-12T00:00:00Z' };
+      sessionGroups = sessionGroups.map((item) => item.id === updated.id ? updated : item);
+      return jsonResponse(updated);
+    }
+    if (sessionGroupMatch && init?.method === 'DELETE') {
+      const groupId = sessionGroupMatch[1];
+      sessionGroups = sessionGroups.filter((item) => item.id !== groupId);
+      sessions = sessions.map((session) => session.groupId === groupId ? { ...session, groupId: null } : session);
+      return jsonResponse({ ok: true });
     }
     if (url === '/api/sessions' && !init) {
       return jsonResponse({ sessions });
@@ -356,7 +387,14 @@ beforeEach(() => {
     if (patchSessionMatch && init?.method === 'PATCH') {
       const body = JSON.parse(String(init.body));
       const session = sessions.find((item) => item.id === patchSessionMatch[1]) ?? sessions[0];
-      return jsonResponse({ ...session, name: body.name, updatedAt: '2026-06-12T00:00:00Z' });
+      const updated = {
+        ...session,
+        ...(Object.prototype.hasOwnProperty.call(body, 'name') ? { name: body.name } : {}),
+        ...(Object.prototype.hasOwnProperty.call(body, 'groupId') ? { groupId: body.groupId } : {}),
+        updatedAt: '2026-06-12T00:00:00Z'
+      };
+      sessions = sessions.map((item) => item.id === updated.id ? updated : item);
+      return jsonResponse(updated);
     }
     if (url === '/api/tasks') {
       return jsonResponse(taskGroups);
@@ -601,6 +639,60 @@ describe('App', () => {
 
     expect(await screen.findByRole('heading', { name: 'Pinned' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Unpin Stopped Repo' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('creates custom groups and moves sessions with the accessible move control', async () => {
+    sessionGroups = [{ id: 'g1', name: 'Launch work', sortOrder: 0, createdAt: '2026-06-11T00:00:00Z', updatedAt: '2026-06-11T00:00:00Z' }];
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'Launch work' })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Move Stopped Repo to group'), { target: { value: 'g1' } });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s2', expect.objectContaining({ method: 'PATCH' })));
+    const moveCall = fetchMock.mock.calls.find(([url, init]) => url === '/api/sessions/s2' && init?.method === 'PATCH');
+    expect(JSON.parse(String(moveCall?.[1]?.body))).toEqual({ groupId: 'g1' });
+    const groupSection = screen.getByRole('heading', { name: 'Launch work' }).closest('.session-section');
+    expect(groupSection).not.toBeNull();
+    expect(within(groupSection as HTMLElement).getByText('Stopped Repo')).toBeInTheDocument();
+  });
+
+  it('creates and renames custom groups from the sidebar', async () => {
+    vi.mocked(window.prompt).mockReturnValueOnce('Focus').mockReturnValueOnce('Focus renamed');
+    render(<App />);
+
+    await screen.findAllByText('Repo One');
+    fireEvent.click(screen.getByRole('button', { name: 'New group' }));
+
+    expect(await screen.findByRole('heading', { name: 'Focus' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
+
+    expect(await screen.findByRole('heading', { name: 'Focus renamed' })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith('/api/session-groups', expect.objectContaining({ method: 'POST' }));
+    expect(fetchMock).toHaveBeenCalledWith('/api/session-groups/g1', expect.objectContaining({ method: 'PATCH' }));
+  });
+
+  it('rolls back a failed session group move', async () => {
+    sessionGroups = [{ id: 'g1', name: 'Launch work', sortOrder: 0, createdAt: '2026-06-11T00:00:00Z', updatedAt: '2026-06-11T00:00:00Z' }];
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const eventResponse = init?.method === undefined ? eventsResponse(url) : null;
+      if (eventResponse) return eventResponse;
+      if (url === '/api/session-groups' && !init) return jsonResponse({ groups: sessionGroups });
+      if (url === '/api/sessions' && !init) return jsonResponse({ sessions });
+      if (url === '/api/sessions/s2' && init?.method === 'PATCH') return jsonResponse({ error: 'move failed' }, 500);
+      if (url === '/api/tasks' || url.endsWith('/tasks')) return jsonResponse(emptyTaskGroups);
+      if (url.endsWith('/transcript') || url.includes('/transcript?')) return jsonResponse({ events: [] });
+      return jsonResponse({ ok: true });
+    });
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'Launch work' })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Move Stopped Repo to group'), { target: { value: 'g1' } });
+
+    expect(await screen.findByText('move failed')).toBeInTheDocument();
+    const groupSection = screen.getByRole('heading', { name: 'Launch work' }).closest('.session-section');
+    expect(groupSection).not.toBeNull();
+    expect(within(groupSection as HTMLElement).queryByText('Stopped Repo')).not.toBeInTheDocument();
   });
 
   it('surfaces destructive command review without flagging ordinary tool activity', async () => {

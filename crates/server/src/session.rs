@@ -1,7 +1,7 @@
 use crate::{
     AppError, AppResult, ClaudeProcess, ClaudeProcessConfig, EventKind, EventStore, ProcessEvent,
-    SessionMeta, SessionStatus, TaskGroups, UiEvent, WorktreeConfig, WorktreeManager, WorktreeMeta,
-    WorktreeStatus, extract_claude_session_id, group_tasks, has_unfinished_tool_use,
+    SessionGroup, SessionMeta, SessionStatus, TaskGroups, UiEvent, WorktreeConfig, WorktreeManager,
+    WorktreeMeta, WorktreeStatus, extract_claude_session_id, group_tasks, has_unfinished_tool_use,
     project_session_tasks, store::SessionListFilter,
 };
 use chrono::Utc;
@@ -52,6 +52,7 @@ pub struct SessionInfo {
     pub status: SessionStatus,
     pub runtime_status: SessionRuntimeStatus,
     pub claude_session_id: Option<String>,
+    pub group_id: Option<Uuid>,
     pub worktree: Option<WorktreeMeta>,
     pub deleted_at: Option<chrono::DateTime<Utc>>,
     pub created_at: chrono::DateTime<Utc>,
@@ -136,6 +137,7 @@ impl SessionManager {
                 .unwrap_or_else(|| self.default_permission_mode.clone()),
             status: SessionStatus::Starting,
             claude_session_id: None,
+            group_id: None,
             worktree,
             deleted_at: None,
             created_at: now,
@@ -191,23 +193,71 @@ impl SessionManager {
         self.session_info(meta).await
     }
 
-    pub async fn update_session_name(
+    pub async fn update_session_metadata(
         &self,
         session_id: Uuid,
-        name: Option<String>,
+        name: Option<Option<String>>,
+        group_id: Option<Option<Uuid>>,
     ) -> AppResult<SessionInfo> {
-        let trimmed = name
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty());
+        if let Some(Some(group_id)) = group_id
+            && !self.store.group_exists(group_id).await?
+        {
+            return Err(AppError::InvalidRequest(format!(
+                "session group {group_id} does not exist"
+            )));
+        }
+
+        let trimmed = name.map(|name| {
+            name.map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        });
         let meta = self
             .store
             .update_meta(session_id, |meta| {
-                meta.name = trimmed;
+                if let Some(name) = trimmed {
+                    meta.name = name;
+                }
+                if let Some(group_id) = group_id {
+                    meta.group_id = group_id;
+                }
                 meta.updated_at = Utc::now();
                 Ok(())
             })
             .await?;
         self.session_info(meta).await
+    }
+
+    pub async fn list_groups(&self) -> AppResult<Vec<SessionGroup>> {
+        self.store.list_groups().await
+    }
+
+    pub async fn create_group(&self, name: String) -> AppResult<SessionGroup> {
+        self.store.create_group(normalize_group_name(name)?).await
+    }
+
+    pub async fn update_group(
+        &self,
+        group_id: Uuid,
+        name: Option<String>,
+        sort_order: Option<i64>,
+    ) -> AppResult<SessionGroup> {
+        let normalized = name.map(normalize_group_name).transpose()?;
+        self.store
+            .update_group(group_id, |group| {
+                if let Some(name) = normalized {
+                    group.name = name;
+                }
+                if let Some(sort_order) = sort_order {
+                    group.sort_order = sort_order;
+                }
+                group.updated_at = Utc::now();
+                Ok(())
+            })
+            .await
+    }
+
+    pub async fn delete_group(&self, group_id: Uuid) -> AppResult<()> {
+        self.store.delete_group(group_id).await
     }
 
     pub async fn list_tasks(&self) -> AppResult<TaskGroups> {
@@ -732,6 +782,21 @@ async fn worktree_session_cwd(
     Ok(worktree.worktree_cwd.join(relative_cwd))
 }
 
+fn normalize_group_name(name: String) -> AppResult<String> {
+    let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
+    if name.is_empty() {
+        return Err(AppError::InvalidRequest(
+            "session group name is empty".to_string(),
+        ));
+    }
+    if name.chars().count() > 80 {
+        return Err(AppError::InvalidRequest(
+            "session group name must be 80 characters or fewer".to_string(),
+        ));
+    }
+    Ok(name)
+}
+
 fn expand_home(path: PathBuf) -> PathBuf {
     let Some(path_str) = path.to_str() else {
         return path;
@@ -757,6 +822,7 @@ impl SessionInfo {
             status: meta.status,
             runtime_status,
             claude_session_id: meta.claude_session_id,
+            group_id: meta.group_id,
             worktree: meta.worktree,
             deleted_at: meta.deleted_at,
             created_at: meta.created_at,
@@ -964,6 +1030,7 @@ done
                 permission_mode: "acceptEdits".to_string(),
                 status,
                 claude_session_id: claude_session_id.map(str::to_string),
+                group_id: None,
                 worktree: None,
                 deleted_at: None,
                 created_at: now,
@@ -1118,6 +1185,7 @@ done
             permission_mode: "acceptEdits".to_string(),
             status: SessionStatus::Exited,
             claude_session_id: None,
+            group_id: None,
             worktree: None,
             deleted_at: None,
             created_at: now,
@@ -1139,6 +1207,7 @@ done
             permission_mode: "acceptEdits".to_string(),
             status: SessionStatus::Running,
             claude_session_id: None,
+            group_id: None,
             worktree: None,
             deleted_at: None,
             created_at: now,
@@ -1169,6 +1238,7 @@ done
             permission_mode: "acceptEdits".to_string(),
             status: SessionStatus::Running,
             claude_session_id: None,
+            group_id: None,
             worktree: None,
             deleted_at: None,
             created_at: now,
@@ -1199,6 +1269,7 @@ done
             permission_mode: "acceptEdits".to_string(),
             status: SessionStatus::Running,
             claude_session_id: None,
+            group_id: None,
             worktree: None,
             deleted_at: None,
             created_at: now,
@@ -1482,6 +1553,7 @@ done
             permission_mode: "acceptEdits".to_string(),
             status: SessionStatus::Starting,
             claude_session_id: None,
+            group_id: None,
             worktree: None,
             deleted_at: None,
             created_at: now,
@@ -1586,6 +1658,46 @@ done
 
         let home = std::env::var_os("HOME").map(PathBuf::from).unwrap();
         assert_eq!(created.cwd, home);
+    }
+
+    #[tokio::test]
+    async fn assigns_and_clears_session_group() {
+        let temp = tempfile::tempdir().unwrap();
+        let bin = fake_claude(temp.path());
+        let store = EventStore::new(temp.path().join("data")).await.unwrap();
+        let manager = SessionManager::new(
+            store,
+            vec![bin.to_string_lossy().to_string()],
+            "acceptEdits".to_string(),
+            worktree_config(),
+        );
+        let session = manager
+            .create_session(CreateSessionRequest {
+                cwd: temp.path().to_path_buf(),
+                name: Some("demo".to_string()),
+                permission_mode: None,
+                worktree: None,
+            })
+            .await
+            .unwrap();
+        let group = manager.create_group("Important".to_string()).await.unwrap();
+
+        let grouped = manager
+            .update_session_metadata(session.id, None, Some(Some(group.id)))
+            .await
+            .unwrap();
+        let cleared = manager
+            .update_session_metadata(session.id, None, Some(None))
+            .await
+            .unwrap();
+        let missing = manager
+            .update_session_metadata(session.id, None, Some(Some(Uuid::new_v4())))
+            .await;
+
+        assert_eq!(grouped.group_id, Some(group.id));
+        assert_eq!(cleared.group_id, None);
+        assert!(matches!(missing, Err(AppError::InvalidRequest(_))));
+        manager.stop_session(session.id).await.unwrap();
     }
 
     #[tokio::test]
@@ -2306,6 +2418,7 @@ done
             permission_mode: "acceptEdits".to_string(),
             status: SessionStatus::Starting,
             claude_session_id: Some("resume-me".to_string()),
+            group_id: None,
             worktree: None,
             deleted_at: None,
             created_at: now,
@@ -2346,6 +2459,7 @@ done
             permission_mode: "acceptEdits".to_string(),
             status: SessionStatus::Starting,
             claude_session_id: Some("resume-me".to_string()),
+            group_id: None,
             worktree: None,
             deleted_at: None,
             created_at: now,

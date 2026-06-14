@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type DragEvent, type ReactNode } from 'react';
 import { runtimeStatusLabels, type SessionListMode } from './AppShell';
 import { getContinuityLabel, getRuntimeStatus } from './sessionContinuity';
-import type { SessionInfo } from './types';
+import type { SessionGroup, SessionInfo } from './types';
 
 type RuntimeStatusKey = keyof typeof runtimeStatusLabels;
 
@@ -14,6 +14,8 @@ type SessionSection = {
   description: string;
   sessions: SessionInfo[];
   projectPath?: string;
+  groupId?: string;
+  isCustomGroup?: boolean;
 };
 
 type Props = {
@@ -23,9 +25,14 @@ type Props = {
   listMode: SessionListMode;
   sessionSearch: string;
   sessions: SessionInfo[];
+  sessionGroups: SessionGroup[];
   visibleSessions: SessionInfo[];
   sessionActions: ReactNode;
+  onCreateGroup: (name: string) => void;
+  onDeleteGroup: (groupId: string) => void;
+  onMoveSessionToGroup: (sessionId: string, groupId: string | null) => void;
   onNewChat: () => void;
+  onRenameGroup: (groupId: string, name: string) => void;
   onSelectSession: (sessionId: string) => void;
   onSetListMode: (mode: SessionListMode) => void;
   onSetSessionSearch: (search: string) => void;
@@ -80,7 +87,12 @@ function sectionKeyForProject(projectPath: string): string {
   return `project:${projectPath}`;
 }
 
-function buildSessionSections(sessions: SessionInfo[], listMode: SessionListMode, pinnedSessionIds: Set<string>): SessionSection[] {
+function buildSessionSections(
+  sessions: SessionInfo[],
+  sessionGroups: SessionGroup[],
+  listMode: SessionListMode,
+  pinnedSessionIds: Set<string>
+): SessionSection[] {
   const now = new Date();
   const sortedSessions = [...sessions].sort(compareSessionsByUpdatedAt);
   const sections: SessionSection[] = [];
@@ -96,23 +108,42 @@ function buildSessionSections(sessions: SessionInfo[], listMode: SessionListMode
     });
   }
 
-  const projects = new Map<string, SessionSection>();
-  unpinnedSessions.forEach((session) => {
-    const projectPath = projectPathForSession(session);
-    const key = sectionKeyForProject(projectPath);
-    const existing = projects.get(key);
-    if (existing) {
-      existing.sessions.push(session);
-      return;
-    }
-    projects.set(key, {
-      key,
-      title: pathBasename(projectPath),
-      description: `${parentPath(projectPath)} · ${timeHintForSession(session, now)}`,
-      sessions: [session],
-      projectPath
+  const groupedSessionIds = new Set<string>();
+  sessionGroups
+    .slice()
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .forEach((group) => {
+      const groupSessions = unpinnedSessions.filter((session) => session.groupId === group.id);
+      groupSessions.forEach((session) => groupedSessionIds.add(session.id));
+      sections.push({
+        key: `group:${group.id}`,
+        title: group.name,
+        description: groupSessions.length > 0 ? 'Custom group' : 'Drop chats here',
+        sessions: groupSessions,
+        groupId: group.id,
+        isCustomGroup: true
+      });
     });
-  });
+
+  const projects = new Map<string, SessionSection>();
+  unpinnedSessions
+    .filter((session) => !groupedSessionIds.has(session.id))
+    .forEach((session) => {
+      const projectPath = projectPathForSession(session);
+      const key = sectionKeyForProject(projectPath);
+      const existing = projects.get(key);
+      if (existing) {
+        existing.sessions.push(session);
+        return;
+      }
+      projects.set(key, {
+        key,
+        title: pathBasename(projectPath),
+        description: `${parentPath(projectPath)} · ${timeHintForSession(session, now)}`,
+        sessions: [session],
+        projectPath
+      });
+    });
 
   return [
     ...sections,
@@ -199,19 +230,25 @@ export default function SessionSidebar({
   listMode,
   sessionSearch,
   sessions,
+  sessionGroups,
   visibleSessions,
   sessionActions,
+  onCreateGroup,
+  onDeleteGroup,
+  onMoveSessionToGroup,
   onNewChat,
+  onRenameGroup,
   onSelectSession,
   onSetListMode,
   onSetSessionSearch,
   onRetryList
 }: Props) {
   const [pinnedSessionIds, setPinnedSessionIds] = useState(readPinnedSessionIds);
+  const [dragOverGroupId, setDragOverGroupId] = useState<string | null>(null);
   const searchQuery = sessionSearch.trim();
   const sections = useMemo(
-    () => buildSessionSections(visibleSessions, listMode, pinnedSessionIds),
-    [visibleSessions, listMode, pinnedSessionIds]
+    () => buildSessionSections(visibleSessions, sessionGroups, listMode, pinnedSessionIds),
+    [visibleSessions, sessionGroups, listMode, pinnedSessionIds]
   );
 
   useEffect(() => {
@@ -228,6 +265,38 @@ export default function SessionSidebar({
       }
       return next;
     });
+  }
+
+  function onAddGroup() {
+    const name = window.prompt('Name this chat group');
+    if (!name?.trim()) return;
+    onCreateGroup(name);
+  }
+
+  function onEditGroup(group: SessionSection) {
+    if (!group.groupId) return;
+    const name = window.prompt('Rename chat group', group.title);
+    if (!name?.trim() || name.trim() === group.title) return;
+    onRenameGroup(group.groupId, name);
+  }
+
+  function onSessionDragStart(event: DragEvent<HTMLDivElement>, sessionId: string) {
+    event.dataTransfer.setData('text/plain', sessionId);
+    event.dataTransfer.effectAllowed = 'move';
+  }
+
+  function onGroupDragOver(event: DragEvent<HTMLElement>, groupId: string | null) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    setDragOverGroupId(groupId ?? 'ungrouped');
+  }
+
+  function onGroupDrop(event: DragEvent<HTMLElement>, groupId: string | null) {
+    event.preventDefault();
+    const sessionId = event.dataTransfer.getData('text/plain');
+    setDragOverGroupId(null);
+    if (!sessionId) return;
+    onMoveSessionToGroup(sessionId, groupId);
   }
 
   return (
@@ -274,9 +343,12 @@ export default function SessionSidebar({
             <h2>{searchQuery ? 'Search results' : listMode === 'archived' ? 'Archived chats' : 'Recent chats'}</h2>
             <p>{toolbarSummary(sessionSearch, sessions, visibleSessions)}</p>
           </div>
-          {sessionSearch && (
-            <button type="button" onClick={() => onSetSessionSearch('')}>Clear</button>
-          )}
+          <div className="session-list-toolbar-actions">
+            <button type="button" onClick={onAddGroup}>New group</button>
+            {sessionSearch && (
+              <button type="button" onClick={() => onSetSessionSearch('')}>Clear</button>
+            )}
+          </div>
         </div>
         <label className="session-search">
           <span className="sr-only">Search sessions</span>
@@ -324,15 +396,36 @@ export default function SessionSidebar({
         {!isListLoading && !listError && visibleSessions.length > 0 && (
           <div className="session-sections">
             {sections.map((section) => (
-              <div className={`session-section session-section-${section.key}`} key={section.key}>
-                <div className="session-section-heading">
+              <div
+                className={`${section.key === `group:${dragOverGroupId}` || (!section.isCustomGroup && dragOverGroupId === 'ungrouped') ? 'session-section drag-over' : 'session-section'} session-section-${section.key.replace(/[^a-z0-9_-]/gi, '-')}`}
+                key={section.key}
+                onDragLeave={() => setDragOverGroupId(null)}
+              >
+                <div
+                  className={section.isCustomGroup ? 'session-section-heading custom-group-heading' : 'session-section-heading'}
+                  onDragOver={(event) => section.isCustomGroup && section.groupId ? onGroupDragOver(event, section.groupId) : onGroupDragOver(event, null)}
+                  onDrop={(event) => section.isCustomGroup && section.groupId ? onGroupDrop(event, section.groupId) : onGroupDrop(event, null)}
+                >
                   <div>
                     <h3>{section.title}</h3>
                     <p title={section.projectPath ?? undefined}>{section.description}</p>
                   </div>
-                  <span>{countLabel(section.sessions.length)}</span>
+                  <div className="session-section-heading-actions">
+                    <span>{countLabel(section.sessions.length)}</span>
+                    {section.isCustomGroup && section.groupId && (
+                      <>
+                        <button type="button" onClick={() => onEditGroup(section)}>Rename</button>
+                        <button type="button" onClick={() => onDeleteGroup(section.groupId!)}>Delete</button>
+                      </>
+                    )}
+                  </div>
                 </div>
-                <div className="session-section-list">
+                <div
+                  className="session-section-list"
+                  onDragOver={(event) => section.isCustomGroup && section.groupId ? onGroupDragOver(event, section.groupId) : onGroupDragOver(event, null)}
+                  onDrop={(event) => section.isCustomGroup && section.groupId ? onGroupDrop(event, section.groupId) : onGroupDrop(event, null)}
+                >
+                  {section.isCustomGroup && section.sessions.length === 0 && <p className="session-group-empty">Drop a chat here or use Move.</p>}
                   {section.sessions.map((session) => {
                     const runtimeStatus = getSidebarRuntimeStatus(session);
                     const statusClass = listMode === 'archived' ? 'archived' : runtimeStatus;
@@ -346,7 +439,12 @@ export default function SessionSidebar({
                     const branch = branchLabel(session);
 
                     return (
-                      <div className={session.id === activeId ? 'session-row active' : 'session-row'} key={session.id}>
+                      <div
+                        className={session.id === activeId ? 'session-row active' : 'session-row'}
+                        key={session.id}
+                        draggable
+                        onDragStart={(event) => onSessionDragStart(event, session.id)}
+                      >
                         <button
                           className={session.id === activeId ? 'session active' : 'session'}
                           aria-current={session.id === activeId ? 'page' : undefined}
@@ -371,6 +469,16 @@ export default function SessionSidebar({
                             <span>{formatRelativeUpdatedAt(session.updatedAt)}</span>
                           </span>
                         </button>
+                        <select
+                          className="session-move-select"
+                          aria-label={`Move ${sessionTitle} to group`}
+                          value={session.groupId ?? ''}
+                          onChange={(event) => onMoveSessionToGroup(session.id, event.target.value || null)}
+                          title="Move conversation to group"
+                        >
+                          <option value="">Ungrouped</option>
+                          {sessionGroups.map((group) => <option value={group.id} key={group.id}>{group.name}</option>)}
+                        </select>
                         <button
                           type="button"
                           className={isPinned ? 'session-pin-button pinned' : 'session-pin-button'}

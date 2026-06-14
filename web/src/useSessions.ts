@@ -2,18 +2,22 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 're
 import {
   archiveSession,
   createSession,
+  createSessionGroup,
   deleteSession,
+  deleteSessionGroup,
   getWorktreeStatus,
+  listSessionGroups,
   listSessions,
   restartSession,
   resumeSession,
   stopAndRemoveWorktree,
   stopSession,
   unarchiveSession,
-  updateSession
+  updateSession,
+  updateSessionGroup
 } from './api';
 import { runtimeStatusLabels, type SessionListMode } from './AppShell';
-import type { SessionInfo, WorktreeStatus } from './types';
+import type { SessionGroup, SessionInfo, WorktreeStatus } from './types';
 
 type UseSessionsOptions = {
   setError: (error: string | null) => void;
@@ -44,6 +48,7 @@ export function useSessions({
   onDeleteSessionEvents
 }: UseSessionsOptions) {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [sessionGroups, setSessionGroups] = useState<SessionGroup[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [listModeState, setListModeState] = useState<SessionListMode>('active');
   const [sessionSearch, setSessionSearch] = useState('');
@@ -136,9 +141,11 @@ export function useSessions({
     }
     try {
       const loaded = await listSessions({ archivedOnly: mode === 'archived' });
+      const loadedGroups = await listSessionGroups().catch(() => []);
       if (refreshId !== listRefreshIdRef.current) return;
       setListError(null);
       setSessions(loaded);
+      setSessionGroups(loadedGroups);
       if (options.reset) {
         if (isStartSurfaceOpenRef.current) {
           setActiveId(null);
@@ -311,6 +318,51 @@ export function useSessions({
     }
   }
 
+  async function onCreateGroup(name: string) {
+    setError(null);
+    try {
+      const group = await createSessionGroup({ name });
+      setSessionGroups((current) => [...current, group].sort((a, b) => a.sortOrder - b.sortOrder));
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function onRenameGroup(groupId: string, name: string) {
+    setError(null);
+    try {
+      const updated = await updateSessionGroup(groupId, { name });
+      setSessionGroups((current) => current.map((group) => group.id === groupId ? updated : group));
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function onDeleteGroup(groupId: string) {
+    if (!confirm('Delete this group? Chats in the group will stay available as ungrouped chats.')) return;
+    setError(null);
+    try {
+      await deleteSessionGroup(groupId);
+      setSessionGroups((current) => current.filter((group) => group.id !== groupId));
+      setSessions((current) => current.map((session) => session.groupId === groupId ? { ...session, groupId: null } : session));
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function onMoveSessionToGroup(sessionId: string, groupId: string | null) {
+    setError(null);
+    const previousSessions = sessions;
+    setSessions((current) => current.map((session) => session.id === sessionId ? { ...session, groupId } : session));
+    try {
+      const updated = await updateSession(sessionId, { groupId });
+      setSessions((current) => current.map((session) => session.id === sessionId ? updated : session));
+    } catch (err: unknown) {
+      setSessions(previousSessions);
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   async function onRestart() {
     if (!activeId) return;
     const sessionId = activeId;
@@ -385,6 +437,7 @@ export function useSessions({
 
   return {
     sessions,
+    sessionGroups,
     setSessions,
     activeId,
     activeSession,
@@ -405,8 +458,12 @@ export function useSessions({
     visibleSessions,
     onArchive,
     onCreateSession,
+    onCreateGroup,
     onDelete,
+    onDeleteGroup,
+    onMoveSessionToGroup,
     onRename,
+    onRenameGroup,
     onRestart,
     onResume,
     onStop,

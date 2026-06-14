@@ -527,6 +527,7 @@ mod tests {
             permission_mode: "acceptEdits".to_string(),
             status,
             claude_session_id: Some("claude-session".to_string()),
+            group_id: None,
             worktree: None,
             deleted_at: None,
             created_at: now,

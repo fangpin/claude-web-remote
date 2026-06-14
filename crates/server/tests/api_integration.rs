@@ -199,6 +199,7 @@ async fn seed_task_session(store: &EventStore, name: &str) -> Uuid {
         permission_mode: "acceptEdits".to_string(),
         status: SessionStatus::Running,
         claude_session_id: Some(format!("claude-{name}")),
+        group_id: None,
         worktree: None,
         deleted_at: None,
         created_at: now,
