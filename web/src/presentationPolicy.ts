@@ -3,6 +3,7 @@ export type ToolVisibility = 'hidden' | 'visible';
 export type ToolDetail = 'hidden' | 'collapsed' | 'expanded';
 export type ActivityVisibility = 'hidden' | 'anchor' | 'compact' | 'visible';
 export type RawSeverity = 'info' | 'warning' | 'error' | 'permission';
+export type ConversationDisplayMode = 'chat' | 'debug';
 
 type ObjectPayload = Record<string, unknown>;
 
@@ -98,9 +99,15 @@ function isErrorLikeRawPayload(payload: unknown): boolean {
   return /error|failed|failure|exception|stderr|fatal|critical/i.test(payloadText(payload));
 }
 
-export function rawEventPresentation(kind: string, payload: unknown): RawEventPresentation {
+export function rawEventPresentation(kind: string, payload: unknown, displayMode: ConversationDisplayMode = 'chat'): RawEventPresentation {
   if (isPermissionOrRiskPayload(payload)) return { visibility: 'visible', severity: 'permission', label: 'Permission event' };
   if (isErrorLikeRawPayload(payload)) return { visibility: 'visible', severity: 'error', label: 'Error event' };
+
+  if (displayMode === 'debug') {
+    if (kind === 'system') return { visibility: 'visible', severity: 'info', label: 'System event' };
+    return { visibility: 'visible', severity: 'info', label: 'Raw event' };
+  }
+
   if (isSuccessfulMetadataPayload(payload)) return { visibility: 'anchor', severity: 'info' };
   if (isObject(payload) && payload.type === 'user') return { visibility: 'anchor', severity: 'info' };
   if (kind === 'system') return { visibility: 'hidden', severity: 'info' };
@@ -144,7 +151,7 @@ export function taskToolPresentation(name: string, status: ToolStatus, input: un
   return { visibility: 'compact', detail: result.trim() ? 'collapsed' : 'hidden' };
 }
 
-export function toolPresentation(name: string, status: ToolStatus, result: string): ToolPresentation {
+export function toolPresentation(name: string, status: ToolStatus, result: string, _displayMode: ConversationDisplayMode = 'chat'): ToolPresentation {
   if (status === 'failed') return { visibility: 'visible', detail: 'expanded' };
   if (status === 'running') return { visibility: 'visible', detail: 'expanded' };
   if (isReadOnlyInspectionTool(name)) return { visibility: 'hidden', detail: 'hidden' };

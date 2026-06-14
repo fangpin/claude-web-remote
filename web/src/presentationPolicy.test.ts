@@ -88,6 +88,51 @@ describe('presentationPolicy', () => {
     });
   });
 
+  it('hides routine raw/system events in chat mode and exposes them in debug mode', () => {
+    expect(rawEventPresentation('system', { message: 'session detail' }, 'chat')).toMatchObject({
+      visibility: 'hidden',
+      severity: 'info'
+    });
+    expect(rawEventPresentation('system', { message: 'session detail' }, 'debug')).toMatchObject({
+      visibility: 'visible',
+      severity: 'info',
+      label: 'System event'
+    });
+    expect(rawEventPresentation('raw', { type: 'result', subtype: 'success' }, 'chat')).toMatchObject({
+      visibility: 'anchor',
+      severity: 'info'
+    });
+    expect(rawEventPresentation('raw', { type: 'result', subtype: 'success' }, 'debug')).toMatchObject({
+      visibility: 'visible',
+      severity: 'info',
+      label: 'Raw event'
+    });
+  });
+
+  it('keeps permission and error raw events visible in chat mode', () => {
+    expect(rawEventPresentation('raw', { type: 'permission_request', prompt: 'Allow command?' }, 'chat')).toMatchObject({
+      visibility: 'visible',
+      severity: 'permission',
+      label: 'Permission event'
+    });
+    expect(rawEventPresentation('raw', { type: 'result', subtype: 'error', error: 'command failed' }, 'chat')).toMatchObject({
+      visibility: 'visible',
+      severity: 'error',
+      label: 'Error event'
+    });
+  });
+
+  it('keeps failed tool details expanded in chat and debug modes', () => {
+    expect(toolPresentation('Bash', 'failed', 'Command failed with exit code 1', 'chat')).toEqual({
+      visibility: 'visible',
+      detail: 'expanded'
+    });
+    expect(toolPresentation('Bash', 'failed', 'Command failed with exit code 1', 'debug')).toEqual({
+      visibility: 'visible',
+      detail: 'expanded'
+    });
+  });
+
   it('anchors routine task-management tools and compacts meaningful task activity', () => {
     expect(taskToolPresentation('TaskList', 'completed', {}, '1 task')).toMatchObject({ visibility: 'anchor' });
     expect(taskToolPresentation('TaskGet', 'completed', {}, 'Task #1')).toMatchObject({ visibility: 'anchor' });
