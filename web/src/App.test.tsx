@@ -1150,12 +1150,12 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: /Send/ })).toBeDisabled();
   });
 
-  it('keeps end session in the header overflow instead of the composer', async () => {
+  it('keeps end session in the sidebar actions instead of the composer', async () => {
     render(<App />);
 
     expect(screen.queryByRole('button', { name: 'Stop session' })).not.toBeInTheDocument();
-    fireEvent.click(await screen.findByText('More'));
-    fireEvent.click(screen.getByRole('button', { name: 'End session' }));
+    const sidebar = await screen.findByRole('complementary', { name: 'Session navigation' });
+    fireEvent.click(within(sidebar).getByRole('button', { name: 'End session' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/stop', expect.objectContaining({ method: 'POST' })));
   });
@@ -1268,10 +1268,11 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByRole('heading', { name: 'Repo One' })).toBeInTheDocument();
-    fireEvent.click(screen.getByText('More'));
-    expect(screen.getByRole('button', { name: 'End session' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Restart' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Archive' })).toBeInTheDocument();
+    const sidebar = screen.getByRole('complementary', { name: 'Session navigation' });
+    const selectedActions = within(sidebar).getByLabelText('Selected session actions');
+    expect(within(selectedActions).getByRole('button', { name: 'End session' })).toBeInTheDocument();
+    expect(within(selectedActions).getByRole('button', { name: 'Restart' })).toBeInTheDocument();
+    expect(within(selectedActions).getByRole('button', { name: 'Archive' })).toBeInTheDocument();
     expect(within(screen.getByLabelText('Session continuity')).getByText('Waiting for you')).toBeInTheDocument();
 
     fireEvent.click(sessionButton('Stopped Repo'));
@@ -1287,8 +1288,7 @@ describe('App', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s2/resume', expect.objectContaining({ method: 'POST' })));
     await waitFor(() => expect(FakeWebSocket.instances.length).toBe(socketsBeforeResume + 1));
     expect(FakeWebSocket.instances.at(-1)?.url).toContain('/api/sessions/s2/events?afterId=0');
-    fireEvent.click(screen.getByText('More'));
-    expect(screen.getByRole('button', { name: 'End session' })).toBeInTheDocument();
+    expect(within(selectedActions).getByRole('button', { name: 'End session' })).toBeInTheDocument();
   });
 
   it.each<SessionStatus>(['stopped', 'exited', 'failed'])('explains fresh-start continuation for %s sessions without Claude context', async (status) => {
@@ -1310,7 +1310,6 @@ describe('App', () => {
     expect(within(screen.getByLabelText('Session continuity')).getByText('Will start fresh')).toBeInTheDocument();
     expect(screen.getByText('This session cannot resume its Claude context. Start fresh from this workspace to continue.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Start fresh from this workspace' })).toBeInTheDocument();
-    fireEvent.click(screen.getByText('More'));
     expect(screen.getByRole('button', { name: 'Archive' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Start fresh from this workspace' }));
@@ -1333,7 +1332,6 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByRole('heading', { name: 'Starting Repo' })).toBeInTheDocument();
-    fireEvent.click(screen.getByText('More'));
     expect(screen.getByRole('button', { name: 'End session' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Archive' })).toBeInTheDocument();
     expect(screen.getByLabelText('Message')).toBeDisabled();
@@ -1361,7 +1359,6 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { name })).toBeInTheDocument();
     expect(within(screen.getByLabelText('Session continuity')).getByText('Can resume')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Resume conversation' })).toBeInTheDocument();
-    fireEvent.click(screen.getByText('More'));
     expect(screen.getByRole('button', { name: 'Archive' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'End session' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Restart' })).not.toBeInTheDocument();
@@ -1371,7 +1368,6 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByRole('heading', { name: 'Repo One' })).toBeInTheDocument();
-    fireEvent.click(screen.getByText('More'));
     fireEvent.click(screen.getByRole('button', { name: 'Archive' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/archive', expect.objectContaining({ method: 'POST' })));
@@ -1535,7 +1531,6 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByRole('heading', { name: 'Repo One' })).toBeInTheDocument();
-    fireEvent.click(screen.getByText('More'));
     fireEvent.click(screen.getByRole('button', { name: 'Archive' }));
     fireEvent.click(sessionButton('Newest Repo'));
 
@@ -1566,7 +1561,6 @@ describe('App', () => {
     expect(within(worktreeStatus).getByText('/repo/one/.claude/worktrees/abc123')).toBeInTheDocument();
     expect(within(worktreeStatus).getByText('/repo/one')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Copy delivery context' })).toBeInTheDocument();
-    fireEvent.click(screen.getByText('More'));
     fireEvent.click(screen.getByText('Stop and remove worktree'));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s4/stop-and-remove-worktree', expect.objectContaining({ method: 'POST' })));
@@ -1612,7 +1606,6 @@ describe('App', () => {
 
     fireEvent.click(await screen.findByText('External Worktree Repo'));
 
-    fireEvent.click(screen.getByText('More'));
     expect(screen.queryByText('Stop and remove worktree')).not.toBeInTheDocument();
     expect(screen.getByText('Stop only')).toBeInTheDocument();
   });

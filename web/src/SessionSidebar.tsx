@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { runtimeStatusLabels, type SessionListMode } from './AppShell';
 import { getContinuityLabel, getRuntimeStatus } from './sessionContinuity';
 import type { SessionInfo } from './types';
@@ -24,6 +24,7 @@ type Props = {
   sessionSearch: string;
   sessions: SessionInfo[];
   visibleSessions: SessionInfo[];
+  sessionActions: ReactNode;
   onNewChat: () => void;
   onSelectSession: (sessionId: string) => void;
   onSetListMode: (mode: SessionListMode) => void;
@@ -199,6 +200,7 @@ export default function SessionSidebar({
   sessionSearch,
   sessions,
   visibleSessions,
+  sessionActions,
   onNewChat,
   onSelectSession,
   onSetListMode,
@@ -258,6 +260,13 @@ export default function SessionSidebar({
           Archived
         </button>
       </div>
+
+      {sessionActions && (
+        <section className="session-management-actions" aria-label="Selected session actions">
+          <span className="state-kicker">Selected chat</span>
+          {sessionActions}
+        </section>
+      )}
 
       <section className="sessions" aria-label={listMode === 'archived' ? 'Archived sessions' : 'Active sessions'}>
         <div className="session-list-toolbar">

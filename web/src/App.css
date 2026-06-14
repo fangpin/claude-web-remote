@@ -688,6 +688,26 @@ label {
   box-shadow: 0 1px 2px rgb(45 42 38 / 0.05);
 }
 
+.session-management-actions {
+  display: grid;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, rgb(255 253 250 / 0.72), rgb(242 236 228 / 0.72));
+  padding: 11px 16px 12px;
+}
+
+.session-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  justify-content: stretch;
+  gap: 6px;
+}
+
+.session-actions button {
+  width: 100%;
+  justify-content: center;
+}
+
 button.danger {
   border-color: #e2b8ae;
   color: var(--danger);
@@ -1172,7 +1192,6 @@ button.danger:hover {
 
 .conversation-header {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
   min-height: 50px;
@@ -1925,10 +1944,6 @@ button.danger:hover {
   .conversation-title-row,
   .worktree-status-heading {
     flex-wrap: wrap;
-  }
-
-  .actions {
-    justify-content: flex-start;
   }
 
   .project-card-grid,
