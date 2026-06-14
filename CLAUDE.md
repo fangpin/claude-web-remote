@@ -47,6 +47,12 @@ npm --prefix web test
 npm --prefix web run build
 ```
 
+In a fresh git worktree, install frontend dependencies before running frontend checks if `web/node_modules` is missing:
+
+```bash
+npm --prefix web install
+```
+
 Build frontend assets:
 
 ```bash

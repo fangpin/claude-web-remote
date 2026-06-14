@@ -196,7 +196,7 @@ Permission mode and git worktree creation live under **Advanced options**. The d
 
 Use the composer `+` button to attach context references before sending:
 
-- Repo path references are sent as `@path/to/file` in the prompt, so Claude Code can read the file from the session working directory. Use paths relative to the session cwd. Dirty worktree changed files can be attached directly from the worktree panel. The Web UI does not read the file contents or browse arbitrary devbox paths.
+- Repo path references are sent as `@path/to/file` in the prompt, so Claude Code can read the file from the session working directory. Use paths relative to the session cwd. The Web UI does not read the file contents or browse arbitrary devbox paths.
 - Pasted text context appears as a collapsible snippet card with line/character counts, then is sent as a named fenced text block with the prompt.
 
 Attachment chips and snippet cards can be removed before sending. Attachments are cleared after a successful send.
