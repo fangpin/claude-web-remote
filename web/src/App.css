@@ -4444,3 +4444,630 @@ button.danger:hover {
     font-size: 12px;
   }
 }
+
+:root {
+  font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif;
+  --app-bg: #f3eee6;
+  --panel-bg: #eee7dc;
+  --panel-bg-2: #e8dfd1;
+  --surface: #fffaf2;
+  --surface-2: #fbf4ea;
+  --surface-3: #f0e7d9;
+  --surface-hover: #f4eadc;
+  --text: #2b261f;
+  --text-soft: #514940;
+  --muted: #7c7164;
+  --muted-soft: #a09486;
+  --border: #ded4c5;
+  --border-strong: #cfc0ad;
+  --accent: #c36a47;
+  --accent-strong: #9a4e34;
+  --accent-soft: #f4e1d4;
+  --focus-ring: 0 0 0 3px rgb(178 95 61 / 0.18);
+  --shadow-soft: 0 1px 1px rgb(43 38 31 / 0.03), 0 14px 38px rgb(43 38 31 / 0.07);
+  --shadow-popover: 0 24px 70px rgb(43 38 31 / 0.18);
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+}
+
+body {
+  background:
+    radial-gradient(circle at 18% 8%, rgb(255 250 241 / 0.92), transparent 34%),
+    radial-gradient(circle at 82% 14%, rgb(242 219 203 / 0.58), transparent 28%),
+    linear-gradient(180deg, #f7f1e8 0%, #efe7db 100%);
+}
+
+.app-shell {
+  grid-template-columns: 58px minmax(260px, 312px) minmax(0, 1fr) minmax(300px, 380px);
+  background: transparent;
+}
+
+.app-shell.sidebar-closed {
+  grid-template-columns: 58px 0 minmax(0, 1fr) minmax(300px, 380px);
+}
+
+.app-shell.inspector-closed {
+  grid-template-columns: 58px minmax(260px, 312px) minmax(0, 1fr) 52px;
+}
+
+.app-shell.sidebar-closed.inspector-closed {
+  grid-template-columns: 58px 0 minmax(0, 1fr) 52px;
+}
+
+.primary-rail {
+  gap: 6px;
+  border-right-color: rgb(111 94 75 / 0.14);
+  background: rgb(237 228 215 / 0.7);
+  padding: 11px 7px;
+  backdrop-filter: blur(18px);
+}
+
+.rail-brand {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  color: #fffaf2;
+  background: linear-gradient(145deg, #332b23, #211c17);
+  font-family: ui-serif, Georgia, Cambria, serif;
+  font-size: 15px;
+  font-weight: 760;
+}
+
+.primary-rail button {
+  border-radius: 12px;
+  color: #756a5e;
+  padding: 9px 5px;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.primary-rail button.active,
+.primary-rail button[aria-pressed='true'],
+.primary-rail button:hover {
+  color: var(--text);
+  background: rgb(255 250 242 / 0.82);
+  box-shadow: inset 0 0 0 1px rgb(43 38 31 / 0.04);
+}
+
+.session-sidebar {
+  border-right-color: rgb(111 94 75 / 0.16);
+  background: rgb(241 233 221 / 0.78);
+  backdrop-filter: blur(18px);
+}
+
+.sidebar-header {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  border-bottom-color: rgb(111 94 75 / 0.12);
+  padding: 14px 14px 12px;
+}
+
+.sidebar-header h1 {
+  font-family: ui-serif, Georgia, Cambria, serif;
+  font-size: 20px;
+  font-weight: 680;
+  letter-spacing: -0.035em;
+}
+
+.sidebar-header p {
+  color: #887b6b;
+  font-size: 12px;
+}
+
+.sidebar-header .primary-action {
+  border-color: #3a3229;
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 12px;
+}
+
+.session-modes {
+  border-bottom: 0;
+  padding: 8px 12px 6px;
+  background: transparent;
+}
+
+.session-modes button {
+  border-radius: 999px;
+  padding: 6px 9px;
+  font-size: 12px;
+}
+
+.session-modes button.selected {
+  border-color: rgb(111 94 75 / 0.14);
+  background: rgb(255 250 242 / 0.82);
+  box-shadow: none;
+}
+
+.sessions {
+  gap: 10px;
+  padding: 10px 10px 18px;
+}
+
+.session-list-toolbar {
+  padding: 0 4px;
+}
+
+.session-list-toolbar h2,
+.new-session-panel h2 {
+  color: #756a5e;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.session-search {
+  padding: 0 2px 4px;
+}
+
+.session-search input {
+  min-height: 36px;
+  border-color: transparent;
+  border-radius: 999px;
+  background: rgb(255 250 242 / 0.72);
+  padding-inline: 14px;
+  font-size: 13px;
+}
+
+.session-sections {
+  gap: 16px;
+}
+
+.session-section-heading {
+  border-top-color: rgb(43 38 31 / 0.06);
+  padding-inline: 4px;
+}
+
+.session-section-heading h3 {
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.session-section-heading > span {
+  border-color: transparent;
+  background: transparent;
+  padding-inline: 0;
+}
+
+.session-section-list {
+  gap: 1px;
+}
+
+.session-row {
+  border-radius: 12px;
+}
+
+.session-row:hover {
+  background: rgb(255 250 242 / 0.5);
+}
+
+.session-row.active {
+  border-color: rgb(111 94 75 / 0.14);
+  background: rgb(255 250 242 / 0.88);
+  box-shadow: none;
+}
+
+.session {
+  gap: 4px;
+  padding: 9px 34px 9px 10px;
+}
+
+.session strong {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.session-resume-cue,
+.session-path-row,
+.session-detail-row,
+.session em {
+  font-size: 11px;
+}
+
+.session-detail-row {
+  opacity: 0.82;
+}
+
+.status {
+  border-color: transparent;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.workspace {
+  background:
+    linear-gradient(90deg, rgb(255 250 242 / 0.3), transparent 16%, transparent 84%, rgb(255 250 242 / 0.28)),
+    transparent;
+}
+
+.conversation-workspace {
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+}
+
+.conversation-header {
+  align-items: flex-start;
+  border-bottom-color: rgb(111 94 75 / 0.12);
+  background: rgb(247 241 232 / 0.72);
+  padding: 13px 24px 11px;
+  backdrop-filter: blur(14px);
+}
+
+.conversation-header h2 {
+  font-family: ui-serif, Georgia, Cambria, serif;
+  font-size: 24px;
+  font-weight: 620;
+  letter-spacing: -0.045em;
+}
+
+.eyebrow,
+.empty-eyebrow,
+.state-kicker,
+.block-header > span:first-child,
+.block-section h4,
+.tool-name,
+.task-section h4 {
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  letter-spacing: 0.075em;
+}
+
+.editable-session-title button {
+  border-color: transparent;
+  border-radius: 999px;
+  background: rgb(255 250 242 / 0.72);
+}
+
+.session-continuity-summary {
+  margin-top: 7px;
+}
+
+.session-continuity-summary span,
+.composer-status-pill,
+.composer-context-menu summary,
+.worktree-status-heading span,
+.worktree-state {
+  border-color: rgb(111 94 75 / 0.12);
+  background: rgb(255 250 242 / 0.68);
+}
+
+.session-context-popover summary,
+.advanced-session-options summary {
+  border-radius: 999px;
+  color: var(--muted);
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  font-size: 12px;
+}
+
+.worktree-status-panel {
+  border-bottom-color: rgb(111 94 75 / 0.1);
+  background: rgb(255 250 242 / 0.42);
+  padding: 9px 24px;
+}
+
+.worktree-status-panel:not(.dirty) .worktree-paths,
+.worktree-status-panel:not(.dirty) .worktree-file-list {
+  display: none;
+}
+
+.events {
+  padding: 30px 24px 28px;
+}
+
+.conversation-content {
+  width: min(100%, 880px);
+}
+
+.conversation-blocks {
+  gap: 20px;
+}
+
+.conversation-block {
+  border-color: rgb(111 94 75 / 0.12);
+  border-radius: 18px;
+  background: rgb(255 250 242 / 0.64);
+  padding: 14px 16px;
+}
+
+.message-block {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.message-block.assistant {
+  max-width: 780px;
+  padding: 2px 0;
+}
+
+.message-block.user {
+  max-width: min(680px, 82%);
+  border: 1px solid rgb(111 94 75 / 0.12);
+  border-radius: 20px;
+  background: #fffaf2;
+  padding: 12px 15px;
+  box-shadow: 0 1px 1px rgb(43 38 31 / 0.03);
+}
+
+.message-header {
+  margin-bottom: 7px;
+  opacity: 0.72;
+}
+
+.message-block.assistant .message-header {
+  display: none;
+}
+
+.message-avatar {
+  border-radius: 8px;
+  font-family: ui-serif, Georgia, Cambria, serif;
+}
+
+.message-text {
+  color: #302a23;
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.message-block.assistant .message-text {
+  font-size: 15.5px;
+}
+
+.tool-block,
+.task-block,
+.raw-block,
+.error-block {
+  border-radius: 14px;
+  background: rgb(255 250 242 / 0.5);
+}
+
+.tool-block,
+.task-block {
+  box-shadow: none;
+}
+
+.project-home {
+  padding: 56px 24px 36px;
+}
+
+.project-home-inner {
+  width: min(100%, 820px);
+  gap: 24px;
+}
+
+.project-home-hero h2 {
+  font-family: ui-serif, Georgia, Cambria, serif;
+  font-size: clamp(34px, 6vw, 58px);
+  font-weight: 560;
+  letter-spacing: -0.06em;
+}
+
+.project-home-hero p {
+  max-width: 560px;
+}
+
+.project-launch-card {
+  border-color: rgb(111 94 75 / 0.14);
+  border-radius: 28px;
+  background:
+    linear-gradient(180deg, rgb(255 250 242 / 0.96), rgb(250 242 230 / 0.9));
+  padding: 20px;
+  box-shadow: 0 22px 60px rgb(43 38 31 / 0.08), inset 0 1px 0 rgb(255 255 255 / 0.72);
+}
+
+.project-cwd-row input {
+  min-height: 48px;
+  border-color: rgb(111 94 75 / 0.12);
+  border-radius: 16px;
+  background: rgb(255 253 248 / 0.9);
+}
+
+.project-card,
+.recent-session-card {
+  border-color: rgb(111 94 75 / 0.1);
+  border-radius: 16px;
+  background: rgb(255 250 242 / 0.58);
+}
+
+.project-card:hover,
+.recent-session-card:hover,
+.empty-prompts button:hover {
+  border-color: rgb(154 78 52 / 0.28);
+  background: #f7e9dc;
+}
+
+.composer {
+  gap: 9px;
+  width: min(calc(100% - 56px), 860px);
+  margin-bottom: 18px;
+  border-color: rgb(111 94 75 / 0.18);
+  border-radius: 26px;
+  background: rgb(255 250 242 / 0.96);
+  padding: 12px 14px 13px;
+  box-shadow: 0 18px 50px rgb(43 38 31 / 0.1), inset 0 1px 0 rgb(255 255 255 / 0.78);
+}
+
+.composer-context {
+  order: 3;
+  opacity: 0.82;
+}
+
+.context-attachment-chips {
+  order: 2;
+}
+
+.composer-input {
+  order: 1;
+}
+
+.composer-hints {
+  order: 4;
+}
+
+.composer-actions {
+  order: 5;
+}
+
+.composer-input textarea {
+  min-height: 42px;
+  padding: 8px 8px 4px;
+  color: var(--text);
+  font-size: 15px;
+}
+
+.composer-input textarea::placeholder {
+  color: #9b8e7f;
+}
+
+.composer-hints span {
+  background: transparent;
+  padding-inline: 0;
+}
+
+.composer-history-button,
+.composer-attach-button {
+  border-color: rgb(111 94 75 / 0.12);
+  background: rgb(244 234 220 / 0.64);
+}
+
+.send-button {
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+}
+
+.autocomplete,
+.context-attachment-popover,
+.prompt-history-popover,
+.composer-context-menu dl,
+.shortcut-help-popover,
+.action-menu > div {
+  border-color: rgb(111 94 75 / 0.16);
+  border-radius: 18px;
+  background: rgb(255 250 242 / 0.98);
+}
+
+.inspector {
+  border-left-color: rgb(111 94 75 / 0.12);
+  background: rgb(239 231 219 / 0.72);
+  backdrop-filter: blur(18px);
+}
+
+.inspector-edge-toggle {
+  left: -14px;
+  width: 28px;
+  height: 64px;
+  border-color: rgb(111 94 75 / 0.16);
+  background: rgb(255 250 242 / 0.92);
+}
+
+.inspector-header {
+  border-bottom-color: rgb(111 94 75 / 0.1);
+  padding: 14px 14px;
+}
+
+.inspector-header h2 {
+  font-family: ui-serif, Georgia, Cambria, serif;
+  font-size: 18px;
+  font-weight: 620;
+  letter-spacing: -0.035em;
+}
+
+.inspector-tabs {
+  border-bottom-color: rgb(111 94 75 / 0.1);
+}
+
+.inspector-tabs button {
+  border-radius: 999px;
+  font-size: 11px;
+}
+
+.inspector-tabs button[aria-selected='true'] {
+  border-color: rgb(111 94 75 / 0.14);
+  background: rgb(255 250 242 / 0.82);
+  box-shadow: none;
+}
+
+.app-shell.inspector-closed .inspector {
+  background: transparent;
+  border-left-color: transparent;
+}
+
+.app-shell.inspector-closed .inspector-header {
+  background: transparent;
+}
+
+.activity-card,
+.diagnostic-block,
+.diagnostic-grid,
+.task-card,
+.waiting-surface,
+.tasks-panel,
+.plan-content {
+  border-radius: 14px;
+}
+
+@media (max-width: 1100px) {
+  .app-shell,
+  .app-shell.inspector-closed {
+    grid-template-columns: 56px minmax(220px, 284px) minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 760px) {
+  .app-shell,
+  .app-shell.inspector-closed,
+  .app-shell.sidebar-closed,
+  .app-shell.sidebar-closed.inspector-closed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .primary-rail,
+  .session-sidebar,
+  .workspace,
+  .inspector {
+    grid-column: 1 / -1;
+  }
+
+  .primary-rail {
+    grid-template-columns: auto repeat(4, minmax(0, 1fr));
+    background: rgb(237 228 215 / 0.9);
+  }
+
+  .project-home {
+    padding: 34px 14px 24px;
+  }
+
+  .project-home-hero h2 {
+    font-size: clamp(30px, 11vw, 44px);
+  }
+
+  .conversation-header {
+    padding: 12px 14px;
+  }
+
+  .conversation-header h2 {
+    font-size: 22px;
+  }
+
+  .events {
+    padding: 18px 12px 20px;
+  }
+
+  .composer {
+    width: calc(100% - 18px);
+    border-radius: 22px;
+  }
+
+  .message-block.user {
+    max-width: 92%;
+  }
+}

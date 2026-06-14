@@ -73,8 +73,8 @@ export default function ProjectHome({
       <div className="project-home-inner">
         <header className="project-home-hero">
           <span className="empty-eyebrow">New chat</span>
-          <h2>What can I help with?</h2>
-          <p>Choose a workspace context, then ask Claude to inspect, change, explain, or ship code.</p>
+          <h2>Where should Claude work?</h2>
+          <p>Choose a devbox workspace, then start with the same calm chat flow as the Claude app.</p>
         </header>
 
         <form className="project-launch-card" onSubmit={onCreateSession} aria-label="Start a new Claude session">

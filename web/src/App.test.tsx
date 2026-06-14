@@ -265,6 +265,14 @@ function expectSessionStatus(name: string, status: string) {
   expect(within(sessionButton(name)).getByText(status)).toBeInTheDocument();
 }
 
+function openInspector(): HTMLElement {
+  const inspector = screen.getByRole('complementary', { name: 'Session inspector' });
+  if (!within(inspector).queryByRole('tab', { name: 'Session tasks' })) {
+    fireEvent.click(within(inspector).getAllByRole('button', { name: 'Show inspector' })[0]);
+  }
+  return inspector;
+}
+
 class FakeWebSocket {
   static instances: FakeWebSocket[] = [];
   onopen: (() => void) | null = null;
@@ -445,7 +453,7 @@ describe('App', () => {
 
     const primaryNavigation = await screen.findByRole('navigation', { name: 'Primary navigation' });
     expect(primaryNavigation).toBeInTheDocument();
-    expect(within(primaryNavigation).getByRole('button', { name: 'Sessions' })).toHaveAttribute('aria-current', 'page');
+    expect(within(primaryNavigation).getByRole('button', { name: 'Chats' })).toHaveAttribute('aria-current', 'page');
     expect(within(primaryNavigation).queryByRole('button', { name: 'Settings' })).not.toBeInTheDocument();
     expect(screen.getByRole('complementary', { name: 'Session navigation' })).toBeInTheDocument();
     expect(screen.getByRole('main', { name: 'Conversation workspace' })).toBeInTheDocument();
@@ -481,12 +489,12 @@ describe('App', () => {
     expect(screen.getByText('Claude chat')).toBeInTheDocument();
     expect(screen.getByLabelText('Claude: Claude is waiting')).toBeInTheDocument();
     expect(screen.getByLabelText('Claude attention notification')).toHaveTextContent('Claude is waiting');
-    expect(screen.getAllByLabelText('Claude needs your review')).toHaveLength(2);
-    expect(screen.getAllByRole('heading', { name: 'Claude is waiting' })).toHaveLength(2);
-    expect(screen.getAllByText('Web approval controls are not available in this build.')).toHaveLength(2);
+    expect(screen.getAllByLabelText('Claude needs your review')).toHaveLength(1);
+    expect(screen.getAllByRole('heading', { name: 'Claude is waiting' })).toHaveLength(1);
+    expect(screen.getAllByText('Web approval controls are not available in this build.')).toHaveLength(1);
     expect(screen.queryByRole('button', { name: 'Allow' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Deny' })).not.toBeInTheDocument();
-    const inspector = screen.getByRole('complementary', { name: 'Session inspector' });
+    const inspector = openInspector();
     expect(within(inspector).getByRole('tab', { name: 'Session tasks' })).toBeInTheDocument();
     fireEvent.click(within(inspector).getByRole('tab', { name: 'Session tasks' }));
     const sessionPanel = within(inspector).getByRole('tabpanel', { name: 'Session tasks' });
@@ -575,7 +583,7 @@ describe('App', () => {
 
     render(<App />);
 
-    expect(await screen.findAllByText('Claude requested an action that may be destructive or affect shared state.')).toHaveLength(4);
+    expect(await screen.findAllByText('Claude requested an action that may be destructive or affect shared state.')).toHaveLength(3);
     expect(screen.getAllByRole('button', { name: 'Review' }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole('button', { name: 'Copy review' }).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Bash').length).toBeGreaterThan(0);
@@ -625,8 +633,8 @@ describe('App', () => {
     render(<App />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'New chat' }));
-    expect(await screen.findByRole('heading', { name: 'What can I help with?' })).toBeInTheDocument();
-    expect(screen.getByText('Choose a workspace context, then ask Claude to inspect, change, explain, or ship code.')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Where should Claude work?' })).toBeInTheDocument();
+    expect(screen.getByText('Choose a devbox workspace, then start with the same calm chat flow as the Claude app.')).toBeInTheDocument();
     expect(screen.getByText('Advanced options').closest('details')).toHaveAttribute('open');
     fireEvent.change(await screen.findByLabelText('Workspace context'), { target: { value: '/repo/two' } });
     expect(screen.getByText('Skip prompts for trusted local repos.')).toBeInTheDocument();
@@ -717,7 +725,7 @@ describe('App', () => {
     const sidebar = await screen.findByRole('complementary', { name: 'Session navigation' });
     expect(within(sidebar).getByText('Could not load chats.')).toBeInTheDocument();
     expect(within(sidebar).getByText('Details')).toBeInTheDocument();
-    expect(screen.getByRole('main', { name: 'Conversation workspace' })).toHaveTextContent('What can I help with?');
+    expect(screen.getByRole('main', { name: 'Conversation workspace' })).toHaveTextContent('Where should Claude work?');
 
     shouldFail = false;
     fireEvent.click(within(sidebar).getByRole('button', { name: 'Retry' }));
@@ -826,7 +834,7 @@ describe('App', () => {
     expect(messageInput).toHaveValue('keep draft');
 
     fireEvent.keyDown(window, { key: 'n', ctrlKey: true });
-    expect(await screen.findByRole('heading', { name: 'What can I help with?' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Where should Claude work?' })).toBeInTheDocument();
 
     const search = screen.getByRole('searchbox', { name: 'Search sessions' });
     fireEvent.change(search, { target: { value: '/' } });
@@ -847,7 +855,7 @@ describe('App', () => {
     expect(palette).toHaveTextContent('Open slash commands');
     expect(palette).toHaveTextContent('Repo One');
     expect(palette).toHaveTextContent('Open settings');
-    expect(palette).toHaveTextContent('Hide inspector');
+    expect(palette).toHaveTextContent('Show inspector');
   });
 
   it('toggles panels and cycles sessions with app-level shortcuts', async () => {
@@ -863,10 +871,10 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: 'Hide sidebar' })).toHaveAttribute('aria-pressed', 'true');
 
     fireEvent.keyDown(window, { key: 'i', ctrlKey: true });
-    expect(screen.getByRole('button', { name: 'Show inspector' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Hide inspector' })).toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: 'i', ctrlKey: true });
-    expect(screen.getByRole('button', { name: 'Hide inspector' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show inspector' })).toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: 'ArrowDown', altKey: true });
     expect(await screen.findByRole('heading', { name: 'Stopped Repo' })).toBeInTheDocument();
@@ -886,9 +894,9 @@ describe('App', () => {
     expect(screen.queryByLabelText('Keyboard shortcuts')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
-    expect(await screen.findByRole('heading', { name: 'What can I help with?' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Where should Claude work?' })).toBeInTheDocument();
     fireEvent.keyDown(window, { key: 'Escape' });
-    expect(screen.getByRole('heading', { name: 'What can I help with?' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Where should Claude work?' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Show inspector' })).toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: 'i', ctrlKey: true });
@@ -1305,7 +1313,7 @@ describe('App', () => {
     expect(await screen.findByText('archived session history')).toBeInTheDocument();
     expect(screen.getByText('This session is archived and read-only. Unarchive it before resuming work or sending messages.')).toBeInTheDocument();
     expect(screen.getByLabelText('Message')).toBeDisabled();
-    const inspector = screen.getByRole('complementary', { name: 'Session inspector' });
+    const inspector = openInspector();
     fireEvent.click(within(inspector).getByRole('tab', { name: 'Session tasks' }));
     const sessionPanel = within(inspector).getByRole('tabpanel', { name: 'Session tasks' });
     expect(within(sessionPanel).queryByText('Agent: Review branch')).not.toBeInTheDocument();
@@ -1367,7 +1375,7 @@ describe('App', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Archived' }));
 
     expect(await screen.findByRole('heading', { name: 'No archived chat selected.' })).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'What can I help with?' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Where should Claude work?' })).not.toBeInTheDocument();
   });
 
   it('ignores stale active list responses after switching to archived mode', async () => {
@@ -1511,7 +1519,7 @@ describe('App', () => {
   it('shows session tasks in the inspector and can switch to all tasks and plan', async () => {
     render(<App />);
 
-    const inspector = await screen.findByRole('complementary', { name: 'Session inspector' });
+    const inspector = openInspector();
     fireEvent.click(within(inspector).getByRole('tab', { name: 'Session tasks' }));
     const sessionPanel = within(inspector).getByRole('tabpanel', { name: 'Session tasks' });
     expect(within(sessionPanel).getByRole('heading', { name: 'Session tasks' })).toBeInTheDocument();
@@ -1554,14 +1562,14 @@ describe('App', () => {
   it('shows runtime diagnostics in the inspector', async () => {
     render(<App />);
 
-    const inspector = await screen.findByRole('complementary', { name: 'Session inspector' });
+    const inspector = openInspector();
     fireEvent.click(within(inspector).getByRole('tab', { name: 'Diagnostics' }));
 
     const diagnosticsPanel = within(inspector).getByRole('tabpanel', { name: 'Diagnostics' });
     expect(await within(diagnosticsPanel).findByText('Daemon health checks are passing.')).toBeInTheDocument();
     expect(within(diagnosticsPanel).getByText('Data directory exists and is writable.')).toBeInTheDocument();
     expect(within(diagnosticsPanel).getByText('claude --input-format stream-json --output-format stream-json --permission-mode bypassPermissions --verbose')).toBeInTheDocument();
-    expect(within(diagnosticsPanel).getByText('No recent process errors recorded for this session.')).toBeInTheDocument();
+    expect(await within(diagnosticsPanel).findByText('No recent process errors recorded for this session.')).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith('/api/diagnostics', undefined);
     expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/diagnostics', undefined);
   });
@@ -1569,7 +1577,7 @@ describe('App', () => {
   it('selects the owning session and refreshes tasks when a task is clicked', async () => {
     render(<App />);
 
-    const inspector = await screen.findByRole('complementary', { name: 'Session inspector' });
+    const inspector = openInspector();
     fireEvent.click(within(inspector).getByRole('tab', { name: 'All tasks' }));
     const allTasksPanel = within(inspector).getByRole('tabpanel', { name: 'All tasks' });
     const task = await within(allTasksPanel).findByText('Agent: Check stopped repo');
@@ -1603,7 +1611,7 @@ describe('App', () => {
 
     render(<App />);
 
-    const inspector = await screen.findByRole('complementary', { name: 'Session inspector' });
+    const inspector = openInspector();
     fireEvent.click(within(inspector).getByRole('tab', { name: 'All tasks' }));
     const allTasksPanel = within(inspector).getByRole('tabpanel', { name: 'All tasks' });
 

@@ -57,10 +57,10 @@ export default function AppShell({
           type="button"
           aria-current={view === 'sessions' && listMode === 'active' ? 'page' : 'false'}
           className={view === 'sessions' && listMode === 'active' ? 'active' : ''}
-          title={attentionLabel ?? 'Show active sessions'}
+          title={attentionLabel ?? 'Show active chats'}
           onClick={onShowActiveSessions}
         >
-          Sessions
+          Chats
           {attentionState !== 'idle' && <span className={`rail-button-dot ${attentionState}`} aria-hidden="true" />}
         </button>
         <button
@@ -71,7 +71,7 @@ export default function AppShell({
           className={listMode === 'archived' && view === 'sessions' ? 'active' : ''}
           onClick={onShowArchivedSessions}
         >
-          Archived
+          Archive
         </button>
         <button
           type="button"
@@ -80,7 +80,7 @@ export default function AppShell({
           title={isSidebarOpen ? 'Hide sidebar (⌘/Ctrl+B)' : 'Show sidebar (⌘/Ctrl+B)'}
           onClick={onToggleSidebar}
         >
-          Sidebar
+          Side
         </button>
         <div className="shortcut-help">
           <button

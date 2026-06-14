@@ -40,7 +40,7 @@ type EventActions = {
 
 export default function App() {
   const [view, setView] = useState<AppView>('sessions');
-  const [isInspectorOpen, setIsInspectorOpen] = useState(true);
+  const [isInspectorOpen, setIsInspectorOpen] = useState(false);
   const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [dismissedAttentionKey, setDismissedAttentionKey] = useState<string | null>(null);

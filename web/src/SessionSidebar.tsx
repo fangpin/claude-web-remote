@@ -233,7 +233,7 @@ export default function SessionSidebar({
       <div className="sidebar-header">
         <div>
           <h1>Claude</h1>
-          <p>Recent conversations and resumable work</p>
+          <p>Chats and remote work</p>
         </div>
         <button type="button" className="primary-action" title="Start a new chat" onClick={onNewChat}>
           New chat
