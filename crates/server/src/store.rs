@@ -28,9 +28,21 @@ pub struct SessionMeta {
     pub status: SessionStatus,
     pub claude_session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree: Option<WorktreeMeta>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deleted_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionGroup {
+    pub id: Uuid,
+    pub name: String,
+    pub sort_order: i64,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -165,6 +177,70 @@ impl EventStore {
         Ok(())
     }
 
+    pub async fn list_groups(&self) -> AppResult<Vec<SessionGroup>> {
+        let _guard = self.write_lock.lock().await;
+        self.load_groups_unlocked().await
+    }
+
+    pub async fn create_group(&self, name: String) -> AppResult<SessionGroup> {
+        let _guard = self.write_lock.lock().await;
+        let mut groups = self.load_groups_unlocked().await?;
+        let now = Utc::now();
+        let sort_order = groups
+            .iter()
+            .map(|group| group.sort_order)
+            .max()
+            .unwrap_or(-1)
+            + 1;
+        let group = SessionGroup {
+            id: Uuid::new_v4(),
+            name,
+            sort_order,
+            created_at: now,
+            updated_at: now,
+        };
+        groups.push(group.clone());
+        self.save_groups_unlocked(&groups).await?;
+        Ok(group)
+    }
+
+    pub async fn update_group<F>(&self, group_id: Uuid, update: F) -> AppResult<SessionGroup>
+    where
+        F: FnOnce(&mut SessionGroup) -> AppResult<()>,
+    {
+        let _guard = self.write_lock.lock().await;
+        let mut groups = self.load_groups_unlocked().await?;
+        let group = groups
+            .iter_mut()
+            .find(|group| group.id == group_id)
+            .ok_or_else(|| AppError::NotFound(format!("session group {group_id}")))?;
+        update(group)?;
+        let updated = group.clone();
+        self.save_groups_unlocked(&groups).await?;
+        Ok(updated)
+    }
+
+    pub async fn delete_group(&self, group_id: Uuid) -> AppResult<()> {
+        let _guard = self.write_lock.lock().await;
+        let mut groups = self.load_groups_unlocked().await?;
+        let original_len = groups.len();
+        groups.retain(|group| group.id != group_id);
+        if groups.len() == original_len {
+            return Err(AppError::NotFound(format!("session group {group_id}")));
+        }
+        self.save_groups_unlocked(&groups).await?;
+        self.clear_group_from_sessions_unlocked(group_id).await
+    }
+
+    pub async fn group_exists(&self, group_id: Uuid) -> AppResult<bool> {
+        let _guard = self.write_lock.lock().await;
+        Ok(self
+            .load_groups_unlocked()
+            .await?
+            .iter()
+            .any(|group| group.id == group_id))
+    }
+
     pub async fn append_event(&self, event: &UiEvent) -> AppResult<()> {
         let line = serde_json::to_string(event)?;
         self.append_line(event.session_id, "events.jsonl", &line)
@@ -222,6 +298,45 @@ impl EventStore {
     async fn load_meta_unlocked(&self, session_id: Uuid) -> AppResult<SessionMeta> {
         let content = fs::read(self.session_dir(session_id).join("meta.json")).await?;
         Ok(serde_json::from_slice(&content)?)
+    }
+
+    async fn load_groups_unlocked(&self) -> AppResult<Vec<SessionGroup>> {
+        let path = self.groups_path();
+        if !fs::try_exists(&path).await? {
+            return Ok(Vec::new());
+        }
+        let content = fs::read(path).await?;
+        let mut groups: Vec<SessionGroup> = serde_json::from_slice(&content)?;
+        groups.sort_by(|a, b| {
+            a.sort_order
+                .cmp(&b.sort_order)
+                .then_with(|| a.created_at.cmp(&b.created_at))
+        });
+        Ok(groups)
+    }
+
+    async fn save_groups_unlocked(&self, groups: &[SessionGroup]) -> AppResult<()> {
+        let content = serde_json::to_vec_pretty(groups)?;
+        fs::write(self.groups_path(), content).await?;
+        Ok(())
+    }
+
+    async fn clear_group_from_sessions_unlocked(&self, group_id: Uuid) -> AppResult<()> {
+        let mut entries = fs::read_dir(self.root.join("sessions")).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            let meta_path = entry.path().join("meta.json");
+            if !fs::try_exists(&meta_path).await? {
+                continue;
+            }
+            let content = fs::read(&meta_path).await?;
+            let mut meta: SessionMeta = serde_json::from_slice(&content)?;
+            if meta.group_id == Some(group_id) {
+                meta.group_id = None;
+                meta.updated_at = Utc::now();
+                fs::write(meta_path, serde_json::to_vec_pretty(&meta)?).await?;
+            }
+        }
+        Ok(())
     }
 
     async fn next_event_id_unlocked(&self, session_id: Uuid) -> AppResult<u64> {
@@ -282,6 +397,10 @@ impl EventStore {
     fn session_dir(&self, session_id: Uuid) -> PathBuf {
         self.root.join("sessions").join(session_id.to_string())
     }
+
+    fn groups_path(&self) -> PathBuf {
+        self.root.join("session-groups.json")
+    }
 }
 
 #[cfg(test)]
@@ -299,6 +418,7 @@ mod tests {
             permission_mode: "acceptEdits".to_string(),
             status: SessionStatus::Stopped,
             claude_session_id: None,
+            group_id: None,
             worktree: None,
             deleted_at: None,
             created_at: updated_at,
@@ -318,6 +438,7 @@ mod tests {
             permission_mode: "acceptEdits".to_string(),
             status: SessionStatus::Running,
             claude_session_id: Some("claude-session".to_string()),
+            group_id: None,
             worktree: Some(crate::WorktreeMeta {
                 source_cwd: PathBuf::from("/tmp/source"),
                 worktree_cwd: PathBuf::from("/tmp/source/.claude/worktrees/abc123"),
@@ -369,8 +490,52 @@ mod tests {
 
         let loaded = store.load_meta(id).await.unwrap();
 
+        assert_eq!(loaded.group_id, None);
         assert_eq!(loaded.worktree, None);
         assert_eq!(loaded.deleted_at, None);
+    }
+
+    #[tokio::test]
+    async fn creates_updates_lists_and_deletes_groups() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = EventStore::new(temp.path()).await.unwrap();
+
+        let first = store.create_group("Alpha".to_string()).await.unwrap();
+        let second = store.create_group("Beta".to_string()).await.unwrap();
+        let updated = store
+            .update_group(second.id, |group| {
+                group.name = "Renamed".to_string();
+                group.sort_order = -1;
+                group.updated_at = Utc::now();
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert_eq!(updated.name, "Renamed");
+
+        let listed = store.list_groups().await.unwrap();
+        assert_eq!(
+            listed.iter().map(|group| group.id).collect::<Vec<_>>(),
+            vec![second.id, first.id]
+        );
+
+        store.delete_group(second.id).await.unwrap();
+        assert_eq!(store.list_groups().await.unwrap(), vec![first]);
+    }
+
+    #[tokio::test]
+    async fn deleting_group_clears_session_assignments() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = EventStore::new(temp.path()).await.unwrap();
+        let group = store.create_group("Group".to_string()).await.unwrap();
+        let id = Uuid::new_v4();
+        let mut meta = meta(id, "demo", Utc::now());
+        meta.group_id = Some(group.id);
+        store.save_meta(&meta).await.unwrap();
+
+        store.delete_group(group.id).await.unwrap();
+
+        assert_eq!(store.load_meta(id).await.unwrap().group_id, None);
     }
 
     #[tokio::test]

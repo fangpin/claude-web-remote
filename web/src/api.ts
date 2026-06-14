@@ -4,6 +4,7 @@ import type {
   DiagnosticsResponse,
   ManagedConfig,
   SessionDiagnosticsResponse,
+  SessionGroup,
   SessionInfo,
   TaskGroups,
   UiEvent,
@@ -42,6 +43,29 @@ export async function listSessions(options: { archivedOnly?: boolean; deletedOnl
 
 export async function listTasks(): Promise<TaskGroups> {
   return request<TaskGroups>('/api/tasks');
+}
+
+export async function listSessionGroups(): Promise<SessionGroup[]> {
+  const result = await request<{ groups?: SessionGroup[] }>('/api/session-groups');
+  return Array.isArray(result.groups) ? result.groups : [];
+}
+
+export async function createSessionGroup(input: { name: string }): Promise<SessionGroup> {
+  return request<SessionGroup>('/api/session-groups', {
+    method: 'POST',
+    body: JSON.stringify(input)
+  });
+}
+
+export async function updateSessionGroup(groupId: string, input: { name?: string; sortOrder?: number }): Promise<SessionGroup> {
+  return request<SessionGroup>(`/api/session-groups/${groupId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input)
+  });
+}
+
+export async function deleteSessionGroup(groupId: string): Promise<void> {
+  await request<{ ok: true }>(`/api/session-groups/${groupId}`, { method: 'DELETE' });
 }
 
 export async function listSessionTasks(sessionId: string): Promise<TaskGroups> {
@@ -84,7 +108,7 @@ export async function getSessionDiagnostics(sessionId: string): Promise<SessionD
   return request<SessionDiagnosticsResponse>(`/api/sessions/${sessionId}/diagnostics`);
 }
 
-export async function updateSession(sessionId: string, input: { name: string | null }): Promise<SessionInfo> {
+export async function updateSession(sessionId: string, input: { name?: string | null; groupId?: string | null }): Promise<SessionInfo> {
   return request<SessionInfo>(`/api/sessions/${sessionId}`, {
     method: 'PATCH',
     body: JSON.stringify(input)

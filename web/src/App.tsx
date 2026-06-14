@@ -608,8 +608,13 @@ function focusFallbackAfterSidebarClose() {
           listMode={sessionState.listMode}
           sessionSearch={sessionState.sessionSearch}
           sessions={sessionState.sessions}
+          sessionGroups={sessionState.sessionGroups}
           visibleSessions={sessionState.visibleSessions}
+          onCreateGroup={sessionState.onCreateGroup}
+          onDeleteGroup={sessionState.onDeleteGroup}
+          onMoveSessionToGroup={sessionState.onMoveSessionToGroup}
           onNewChat={() => sessionState.openStartSurface()}
+          onRenameGroup={sessionState.onRenameGroup}
           onSelectSession={sessionState.selectSession}
           onSetListMode={sessionState.setListMode}
           onSetSessionSearch={sessionState.setSessionSearch}

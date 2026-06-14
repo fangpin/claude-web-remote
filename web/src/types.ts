@@ -39,8 +39,17 @@ export type SessionInfo = {
   status: SessionStatus;
   runtimeStatus?: SessionRuntimeStatus;
   claudeSessionId?: string | null;
+  groupId?: string | null;
   worktree?: WorktreeInfo | null;
   deletedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type SessionGroup = {
+  id: string;
+  name: string;
+  sortOrder: number;
   createdAt: string;
   updatedAt: string;
 };

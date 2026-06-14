@@ -10,6 +10,7 @@ The code, files, git repositories, Claude CLI, and model gateway all stay on the
 - React Web UI for multi-session control
 - Chat-first session creation with workspace context selection
 - Session rename/update support
+- Custom session groups with drag-and-drop organization
 - Optional git worktree sessions with branch, dirty state, and changed-file visibility
 - Streaming event display from `claude --output-format stream-json`
 - User input forwarding to the remote Claude process
@@ -192,6 +193,8 @@ Workspace context: /path/to/remote/repo
 
 Permission mode and git worktree creation live under **Advanced options**. The daemon starts the configured launcher in the selected workspace context, streams events back to the browser, and names the session from the first user message. Chat titles can be renamed later from the conversation header.
 
+Use **New group** in the session sidebar to create custom chat groups. Drag chats onto a group heading/list, or use a chat row's **Move** control, to persist the session's group membership on the daemon.
+
 ## Add context to a prompt
 
 Use the composer `+` button to attach context references before sending:
@@ -228,14 +231,27 @@ GET /api/sessions/<session-id>/worktree-diff
 
 This returns `{ "diff": "..." }` for the current unstaged worktree diff.
 
-Session names can be updated without restarting Claude:
+Session groups can be managed without touching Claude processes:
+
+```text
+GET /api/session-groups
+POST /api/session-groups
+{ "name": "Launch work" }
+PATCH /api/session-groups/<group-id>
+{ "name": "Renamed", "sortOrder": 1 }
+DELETE /api/session-groups/<group-id>
+```
+
+Deleting a group keeps the sessions and clears their group assignment.
+
+Session names and group assignments can be updated without restarting Claude:
 
 ```text
 PATCH /api/sessions/<session-id>
-{ "name": "Renamed chat" }
+{ "name": "Renamed chat", "groupId": "<group-id>" }
 ```
 
-Send `null` or an empty string to clear the custom name and fall back to the workspace-derived title.
+Send `null` or an empty string as `name` to clear the custom name and fall back to the workspace-derived title. Send `"groupId": null` to move a session back to the ungrouped project sections.
 
 Session transcripts can be read without attaching to a running Claude process:
 
@@ -265,6 +281,7 @@ Default data directory:
 ```text
 ~/.claude-remote-web/
   config.toml
+  session-groups.json
   sessions/
     <session-id>/
       meta.json
