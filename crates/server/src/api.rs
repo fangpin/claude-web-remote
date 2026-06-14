@@ -460,7 +460,13 @@ done
         .unwrap();
         assert_eq!(body["status"], "healthy");
         assert_eq!(body["config"]["defaultPermissionMode"], "bypassPermissions");
-        assert_eq!(body["launcher"]["nativeArgsPreview"][0], "--input-format");
+        assert_eq!(body["launcher"]["nativeArgsPreview"][0], "--print");
+        assert!(
+            body["launcher"]["nativeArgsPreview"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("--include-partial-messages"))
+        );
         assert_eq!(body["dataDir"]["exists"], true);
     }
 

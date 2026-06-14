@@ -99,8 +99,10 @@ launcher = ["ttadk", "claude", "-m", "gpt-5.5", "--skip-check", "-a"]
 The daemon appends native Claude args after `launcher`:
 
 ```text
+--print
 --input-format stream-json
 --output-format stream-json
+--include-partial-messages
 --permission-mode <mode>
 --verbose
 --resume <id>    # when known

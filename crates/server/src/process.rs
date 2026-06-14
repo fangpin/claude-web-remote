@@ -52,10 +52,12 @@ impl ClaudeProcess {
         command.args(launcher_args);
         command
             .current_dir(&config.cwd)
+            .arg("--print")
             .arg("--input-format")
             .arg("stream-json")
             .arg("--output-format")
             .arg("stream-json")
+            .arg("--include-partial-messages")
             .arg("--permission-mode")
             .arg(&config.permission_mode)
             .arg("--verbose")
@@ -294,7 +296,10 @@ done
 
         let _ = rx.recv().await;
         let args = fs::read_to_string(args_log).unwrap();
-        assert!(args.contains("claude -m gpt-5.5 --skip-check -a --input-format stream-json"));
+        assert!(
+            args.contains("claude -m gpt-5.5 --skip-check -a --print --input-format stream-json")
+        );
+        assert!(args.contains("--include-partial-messages"));
         assert!(args.contains("--resume resume-id"));
     }
 

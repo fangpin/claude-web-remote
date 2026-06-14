@@ -125,8 +125,10 @@ default_permission_mode = "bypassPermissions"
 The daemon appends native Claude arguments after the launcher prefix:
 
 ```text
+--print
 --input-format stream-json
 --output-format stream-json
+--include-partial-messages
 --permission-mode <mode>
 --verbose
 --resume <id>    # only when a session id is known

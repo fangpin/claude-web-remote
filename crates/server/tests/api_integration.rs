@@ -707,7 +707,8 @@ async fn wrapper_launcher_receives_native_args_after_prefix() {
         .unwrap();
 
     let args = wait_for_args_log_entries(&args_log, 2).await;
-    assert!(args.contains("claude -m gpt-5.5 --skip-check -a --input-format stream-json"));
+    assert!(args.contains("claude -m gpt-5.5 --skip-check -a --print --input-format stream-json"));
+    assert!(args.contains("--include-partial-messages"));
     assert!(args.contains("--resume resume-session"));
 }
 

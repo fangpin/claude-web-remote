@@ -243,10 +243,12 @@ pub fn sanitize_argv(argv: &[String]) -> Vec<String> {
 
 pub fn native_args_preview(permission_mode: &str) -> Vec<String> {
     vec![
+        "--print".to_string(),
         "--input-format".to_string(),
         "stream-json".to_string(),
         "--output-format".to_string(),
         "stream-json".to_string(),
+        "--include-partial-messages".to_string(),
         "--permission-mode".to_string(),
         permission_mode.to_string(),
         "--verbose".to_string(),

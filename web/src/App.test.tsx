@@ -183,8 +183,8 @@ function diagnosticsResponse() {
     },
     launcher: {
       argv: ['claude'],
-      nativeArgsPreview: ['--input-format', 'stream-json', '--output-format', 'stream-json', '--permission-mode', 'bypassPermissions', '--verbose'],
-      fullArgvPreview: ['claude', '--input-format', 'stream-json', '--output-format', 'stream-json', '--permission-mode', 'bypassPermissions', '--verbose'],
+      nativeArgsPreview: ['--print', '--input-format', 'stream-json', '--output-format', 'stream-json', '--include-partial-messages', '--permission-mode', 'bypassPermissions', '--verbose'],
+      fullArgvPreview: ['claude', '--print', '--input-format', 'stream-json', '--output-format', 'stream-json', '--include-partial-messages', '--permission-mode', 'bypassPermissions', '--verbose'],
       status: 'healthy',
       issues: []
     },
@@ -1636,7 +1636,7 @@ describe('App', () => {
     const diagnosticsPanel = within(inspector).getByRole('tabpanel', { name: 'Diagnostics' });
     expect(await within(diagnosticsPanel).findByText('Daemon health checks are passing.')).toBeInTheDocument();
     expect(within(diagnosticsPanel).getByText('Data directory exists and is writable.')).toBeInTheDocument();
-    expect(within(diagnosticsPanel).getByText('claude --input-format stream-json --output-format stream-json --permission-mode bypassPermissions --verbose')).toBeInTheDocument();
+    expect(within(diagnosticsPanel).getByText('claude --print --input-format stream-json --output-format stream-json --include-partial-messages --permission-mode bypassPermissions --verbose')).toBeInTheDocument();
     expect(await within(diagnosticsPanel).findByText('No recent process errors recorded for this session.')).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith('/api/diagnostics', undefined);
     expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/diagnostics', undefined);
