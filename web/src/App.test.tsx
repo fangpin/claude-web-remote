@@ -1558,8 +1558,7 @@ describe('App', () => {
     expect(changedFiles).not.toHaveAttribute('open');
     fireEvent.click(screen.getByText('Changed files (1)'));
     expect(screen.getByText('web/src/App.tsx')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Attach' }));
-    expect(await screen.findByLabelText('Context attachments')).toHaveTextContent('@web/src/App.tsx');
+    expect(screen.queryByRole('button', { name: 'Attach' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'View diff' }));
     expect(await screen.findByText('Worktree diff')).toBeInTheDocument();
     expect(screen.getByText(/diff --git a\/web\/src\/App\.tsx/)).toBeInTheDocument();

@@ -1421,6 +1421,9 @@ button.danger:hover {
 }
 
 .worktree-files-details summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   width: fit-content;
   color: var(--accent-strong);
   font-size: 12px;
@@ -1428,32 +1431,56 @@ button.danger:hover {
   cursor: pointer;
 }
 
+.worktree-files-details summary small {
+  border: 1px solid rgb(111 94 75 / 0.12);
+  border-radius: 999px;
+  color: var(--muted);
+  background: rgb(255 250 242 / 0.68);
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 720;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
 .worktree-file-list {
   display: grid;
-  gap: 4px;
+  gap: 2px;
+  max-height: min(240px, 32vh);
+  overflow: auto;
   margin: 0;
-  padding: 0;
+  border: 1px solid rgb(111 94 75 / 0.1);
+  border-radius: 12px;
+  background: rgb(255 253 248 / 0.46);
+  padding: 5px;
   list-style: none;
 }
 
 .worktree-file-list li {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: 30px minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
+  gap: 7px;
+  min-height: 24px;
+  border-radius: 8px;
   color: var(--text-soft);
+  padding: 2px 6px 2px 4px;
   font-size: 12px;
 }
 
-.worktree-file-list button {
-  padding: 3px 8px;
-  border-radius: 999px;
-  font-size: 11px;
+.worktree-file-list li:nth-child(odd) {
+  background: rgb(255 250 242 / 0.56);
 }
 
 .worktree-file-list code {
+  justify-self: stretch;
+  border-radius: 6px;
   color: var(--warning);
+  background: #fbf3df;
+  padding: 2px 4px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  text-align: center;
 }
 
 .worktree-status-heading button {
@@ -1492,9 +1519,12 @@ button.danger:hover {
   white-space: pre-wrap;
 }
 
-.worktree-file-list span,
-.worktree-more {
-  overflow-wrap: anywhere;
+.worktree-file-list span {
+  overflow: hidden;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .composer-status-pill {

@@ -113,22 +113,19 @@ function WorktreeStatusPanel({
   session,
   status,
   error,
-  isLoading,
-  onAddPathContextAttachment
+  isLoading
 }: {
   session: SessionInfo;
   status: WorktreeStatus | null;
   error: string | null;
   isLoading: boolean;
-  onAddPathContextAttachment: (path: string) => void;
 }) {
   const [diff, setDiff] = useState<string | null>(null);
   const [diffError, setDiffError] = useState<string | null>(null);
   const [isDiffLoading, setIsDiffLoading] = useState(false);
 
   if (!session.worktree) return null;
-  const files = status?.files.slice(0, 8) ?? [];
-  const extraFileCount = Math.max(0, (status?.files.length ?? 0) - files.length);
+  const files = status?.files ?? [];
   const branch = status?.branch ?? session.worktree.branch;
   const baseRef = status?.baseRef ?? session.worktree.baseRef;
 
@@ -194,16 +191,17 @@ function WorktreeStatusPanel({
       )}
       {files.length > 0 && (
         <details className="worktree-files-details">
-          <summary>Changed files ({status?.files.length ?? files.length})</summary>
+          <summary>
+            <span>Changed files ({files.length})</span>
+            <small>{files.length > 12 ? 'Scroll list' : 'Review paths'}</small>
+          </summary>
           <ul className="worktree-file-list" aria-label="Changed files">
             {files.map((file) => (
               <li key={`${file.indexStatus}${file.worktreeStatus}:${file.path}`}>
                 <code>{file.indexStatus}{file.worktreeStatus}</code>
                 <span title={file.path}>{file.path}</span>
-                <button type="button" onClick={() => onAddPathContextAttachment(file.path)}>Attach</button>
               </li>
             ))}
-            {extraFileCount > 0 && <li className="worktree-more">+ {extraFileCount} more</li>}
           </ul>
         </details>
       )}
@@ -393,7 +391,6 @@ export default function ConversationWorkspace({
             status={activeWorktreeStatus}
             error={activeWorktreeStatusError}
             isLoading={isWorktreeStatusLoading}
-            onAddPathContextAttachment={onAddPathContextAttachment}
           />
           <div className="events" ref={eventsRef}>
             <div className="conversation-content">
