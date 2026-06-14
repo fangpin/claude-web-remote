@@ -193,16 +193,19 @@ function WorktreeStatusPanel({
         <p className="worktree-warning">This worktree has uncommitted changes. Stop only keeps it; cleanup is blocked until you commit, stash, or clean the changes.</p>
       )}
       {files.length > 0 && (
-        <ul className="worktree-file-list" aria-label="Changed files">
-          {files.map((file) => (
-            <li key={`${file.indexStatus}${file.worktreeStatus}:${file.path}`}>
-              <code>{file.indexStatus}{file.worktreeStatus}</code>
-              <span title={file.path}>{file.path}</span>
-              <button type="button" onClick={() => onAddPathContextAttachment(file.path)}>Attach</button>
-            </li>
-          ))}
-          {extraFileCount > 0 && <li className="worktree-more">+ {extraFileCount} more</li>}
-        </ul>
+        <details className="worktree-files-details">
+          <summary>Changed files ({status?.files.length ?? files.length})</summary>
+          <ul className="worktree-file-list" aria-label="Changed files">
+            {files.map((file) => (
+              <li key={`${file.indexStatus}${file.worktreeStatus}:${file.path}`}>
+                <code>{file.indexStatus}{file.worktreeStatus}</code>
+                <span title={file.path}>{file.path}</span>
+                <button type="button" onClick={() => onAddPathContextAttachment(file.path)}>Attach</button>
+              </li>
+            ))}
+            {extraFileCount > 0 && <li className="worktree-more">+ {extraFileCount} more</li>}
+          </ul>
+        </details>
       )}
       {diffError && <p className="worktree-warning">Unable to load diff: {diffError}</p>}
       {diff && (
