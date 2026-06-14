@@ -529,7 +529,14 @@ describe('App', () => {
     expectSessionStatus('Repo One', 'Waiting for you');
     expectSessionStatus('Worktree Repo', 'Running');
     expectSessionStatus('Stopped Repo', 'Ended');
-    expect(screen.getByText('Chat')).toBeInTheDocument();
+    const conversationHeader = screen.getByRole('heading', { name: 'Repo One' }).closest('header');
+    expect(conversationHeader).not.toBeNull();
+    expect(within(conversationHeader as HTMLElement).queryByText('Chat')).not.toBeInTheDocument();
+    expect(within(conversationHeader as HTMLElement).queryByText('/repo/one')).not.toBeInTheDocument();
+    expect(within(conversationHeader as HTMLElement).getByRole('button', { name: 'one · workspace' })).toBeInTheDocument();
+    expect(within(conversationHeader as HTMLElement).getByRole('button', { name: 'Stop' })).toBeInTheDocument();
+    expect(within(conversationHeader as HTMLElement).getByRole('button', { name: 'Activity' })).toBeInTheDocument();
+    expect(within(conversationHeader as HTMLElement).getByRole('button', { name: 'More session actions' })).toBeInTheDocument();
     expect(screen.getByLabelText('Claude: Claude is waiting')).toBeInTheDocument();
     expect(screen.getByLabelText('Claude attention notification')).toHaveTextContent('Claude is waiting');
     expect(screen.queryByLabelText('Claude needs attention')).not.toBeInTheDocument();
@@ -1321,6 +1328,23 @@ describe('App', () => {
 
     expect(screen.getByLabelText('Message')).toHaveValue('Run the relevant tests');
     expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/sessions/s1/input')).toBe(false);
+  });
+
+  it('keeps workspace paths hidden until the header project chip is opened', async () => {
+    render(<App />);
+
+    const header = (await screen.findByRole('heading', { name: 'Repo One' })).closest('header');
+    expect(header).not.toBeNull();
+    expect(within(header as HTMLElement).queryByText('/repo/one')).not.toBeInTheDocument();
+
+    fireEvent.click(within(header as HTMLElement).getByRole('button', { name: 'one · workspace' }));
+
+    expect(within(header as HTMLElement).getByText('cwd')).toBeInTheDocument();
+    expect(within(header as HTMLElement).getByText('/repo/one')).toBeInTheDocument();
+    expect(within(header as HTMLElement).getByText('permission mode')).toBeInTheDocument();
+    expect(within(header as HTMLElement).getByText('acceptEdits')).toBeInTheDocument();
+    expect(within(header as HTMLElement).getByText('runtime status')).toBeInTheDocument();
+    expect(within(header as HTMLElement).getByText('Waiting for you')).toBeInTheDocument();
   });
 
   it('renames the active chat from the header', async () => {
