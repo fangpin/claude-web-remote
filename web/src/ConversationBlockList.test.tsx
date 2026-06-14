@@ -45,7 +45,8 @@ describe('ConversationBlockList', () => {
     expect(within(article).getByText('42')).toHaveClass('hljs-number');
     expect(within(article).getByText('TypeScript')).toHaveClass('code-language');
     expect(within(article).getByRole('button', { name: 'Copy code' })).toHaveClass('copy-button');
-    expect(within(article).getByText('Raw events')).toBeInTheDocument();
+    expect(within(article).queryByText('Raw events')).not.toBeInTheDocument();
+    expect(within(article).queryByText('1 event')).not.toBeInTheDocument();
   });
 
   it('renders GitHub-flavored Markdown tables', () => {
@@ -167,13 +168,12 @@ describe('ConversationBlockList', () => {
     expect(within(article).getByText('completed').closest('header')).toHaveClass('tool-activity-header');
     expect(within(article).getByText('completed').closest('.tool-status')).toHaveClass('tool-status-completed');
     expect(within(article).getByText('$ git status')).toBeInTheDocument();
-    expect(within(article).getAllByText('Result shown (14 chars)')).toHaveLength(2);
-    const details = within(article).getByText('On branch main').closest('details');
-    expect(details).toHaveClass('tool-details');
-    expect(details).not.toHaveAttribute('open');
+    expect(within(article).getByText('Result shown (14 chars)')).toBeInTheDocument();
+    expect(within(article).getByText('On branch main')).toBeInTheDocument();
+    expect(within(article).queryByText('Raw events')).not.toBeInTheDocument();
   });
 
-  it('hides Read tool result output from the main card while keeping raw details', () => {
+  it('hides hidden tool result output and raw payload from the main card', () => {
     const blocks: ConversationBlock[] = [
       {
         id: 'tool-read',
@@ -195,10 +195,10 @@ describe('ConversationBlockList', () => {
     const article = screen.getByRole('article');
     expect(within(article).getByText('Read')).toBeInTheDocument();
     expect(within(article).getByText('/tmp/a.txt')).toBeInTheDocument();
-    expect(within(article).getAllByText('Read output hidden (20 chars)')).toHaveLength(2);
+    expect(within(article).getByText('Read output hidden (20 chars)')).toBeInTheDocument();
     expect(within(article).queryByText('Result')).not.toBeInTheDocument();
     expect(within(article).queryByText('secret file contents')).not.toBeInTheDocument();
-    expect(within(article).getByText('Raw events')).toBeInTheDocument();
+    expect(within(article).queryByText('Raw events')).not.toBeInTheDocument();
   });
 
   it('collapses Bash tool result output by default', () => {
@@ -222,6 +222,7 @@ describe('ConversationBlockList', () => {
 
     const article = screen.getByRole('article');
     expect(within(article).getAllByText('Result collapsed (11 chars)')).toHaveLength(2);
+    expect(within(article).queryByText('Raw events')).not.toBeInTheDocument();
     const details = within(article).getByText('long stdout').closest('details');
     expect(details).not.toBeNull();
     expect(details).not.toHaveAttribute('open');
@@ -368,7 +369,7 @@ describe('ConversationBlockList', () => {
 
     const articles = screen.getAllByRole('article');
     articles.forEach((article) => {
-      expect(within(article).getByText('Raw events').closest('details')).not.toHaveAttribute('open');
+      expect(within(article).queryByText('Raw events')).not.toBeInTheDocument();
     });
 
     fireEvent.click(within(articles[0]).getByRole('button', { name: 'Copy code' }));
@@ -507,7 +508,7 @@ describe('ConversationBlockList', () => {
     expect(container.querySelector('.message-block.system')).not.toBeNull();
     expect(container.querySelector('.tool-block.running')).not.toBeNull();
     expect(container.querySelector('.task-block.pending')).not.toBeNull();
-    expect(container.querySelectorAll('.raw-event-details')).toHaveLength(4);
+    expect(container.querySelectorAll('.raw-event-details')).toHaveLength(0);
   });
 
   it('keeps App.css selectors aligned with rendered conversation block DOM', () => {
@@ -555,7 +556,7 @@ describe('ConversationBlockList', () => {
     expect(within(articles[1]).getByText('unknown_event').closest('header')).toHaveClass('block-header');
   });
 
-  it('renders raw event details with pretty JSON for message, tool, task, error, and raw blocks', () => {
+  it('keeps technical raw details only on error and raw fallback blocks', () => {
     const blocks: ConversationBlock[] = [
       {
         id: 'message-raw',
@@ -607,21 +608,20 @@ describe('ConversationBlockList', () => {
     render(<ConversationBlockList blocks={blocks} />);
 
     const articles = screen.getAllByRole('article');
-    const expectedRawFragments = [
-      ['"messageNested": {', '"ok": true'],
-      ['"toolNested": {', '"path": "/tmp/example.txt"'],
-      ['"taskNested": {', '"exitCode": 0'],
-      ['"errorNested": {', '"message": "Boom"'],
-      ['"rawNested": {', '"preserved": true']
-    ];
+    expect(within(articles[0]).queryByText('Raw events')).not.toBeInTheDocument();
+    expect(within(articles[1]).queryByText('Raw events')).not.toBeInTheDocument();
+    expect(within(articles[2]).queryByText('Raw events')).not.toBeInTheDocument();
 
-    articles.forEach((article, index) => {
-      const details = within(article).getByText('Raw events').closest('details');
-      expect(details).toHaveClass('raw-event-details');
-      expect(details).not.toHaveAttribute('open');
-      expectedRawFragments[index].forEach((fragment) => {
-        expect(details).toHaveTextContent(fragment);
-      });
-    });
+    const errorDetails = within(articles[3]).getByText('Raw events').closest('details');
+    expect(errorDetails).toHaveClass('raw-event-details');
+    expect(errorDetails).not.toHaveAttribute('open');
+    expect(errorDetails).toHaveTextContent('"errorNested": {');
+    expect(errorDetails).toHaveTextContent('"message": "Boom"');
+
+    const rawDetails = within(articles[4]).getByText('Raw events').closest('details');
+    expect(rawDetails).toHaveClass('raw-event-details');
+    expect(rawDetails).not.toHaveAttribute('open');
+    expect(rawDetails).toHaveTextContent('"rawNested": {');
+    expect(rawDetails).toHaveTextContent('"preserved": true');
   });
 });

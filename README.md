@@ -11,7 +11,7 @@ The code, files, git repositories, Claude CLI, and model gateway all stay on the
 - Chat-first session creation with workspace context selection
 - Session rename/update support
 - Optional git worktree sessions with branch, dirty state, and changed-file visibility
-- Streaming event display from `claude --output-format stream-json`
+- Compact chat-first transcript display from `claude --output-format stream-json`, with detailed tool activity available in the Inspector
 - User input forwarding to the remote Claude process
 - Claude-like composer with slash commands, context hints, context reference attachments, and inline stop/send controls
 - Read-only action review cards for waiting sessions, permission-like events, risky commands, and failed actions
