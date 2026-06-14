@@ -10,6 +10,7 @@ import {
   listSessions,
   restartSession,
   resumeSession,
+  sendInput,
   stopAndRemoveWorktree,
   stopSession,
   unarchiveSession,
@@ -252,6 +253,23 @@ export function useSessions({
     return () => window.clearInterval(intervalId);
   }, [listModeState, refreshActiveWorktreeStatus, refreshSessions]);
 
+  function openCreatedSession(created: SessionInfo) {
+    if (listModeState === 'archived') {
+      skipNextListRefresh.current = true;
+      setListModeState('active');
+      setSessions([created]);
+    } else {
+      setSessions((current) => [created, ...current]);
+    }
+    isStartSurfaceOpenRef.current = false;
+    setActiveId(created.id);
+    setIsStartSurfaceOpen(false);
+    setCwd('');
+    setUseWorktree(true);
+    callbacksRef.current.onTasksChanged?.();
+    callbacksRef.current.onSessionTasksChanged?.(created.id);
+  }
+
   async function onCreateSession(event: FormEvent) {
     event.preventDefault();
     setError(null);
@@ -261,20 +279,32 @@ export function useSessions({
         permissionMode,
         worktree: useWorktree ? { enabled: true } : undefined
       });
-      if (listModeState === 'archived') {
-        skipNextListRefresh.current = true;
-        setListModeState('active');
-        setSessions([created]);
-      } else {
-        setSessions((current) => [created, ...current]);
+      openCreatedSession(created);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function onStartSession(initialPrompt: string) {
+    const launchCwd = cwd.trim();
+    const prompt = initialPrompt.trim();
+    if (!launchCwd || !prompt) return;
+    setError(null);
+    try {
+      const created = await createSession({
+        cwd: launchCwd,
+        permissionMode,
+        worktree: useWorktree ? { enabled: true } : undefined
+      });
+      openCreatedSession(created);
+      try {
+        const updated = await sendInput(created.id, prompt);
+        if (updated) {
+          setSessions((current) => current.map((session) => session.id === updated.id ? updated : session));
+        }
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : String(err));
       }
-      isStartSurfaceOpenRef.current = false;
-      setActiveId(created.id);
-      setIsStartSurfaceOpen(false);
-      setCwd('');
-      setUseWorktree(true);
-      callbacksRef.current.onTasksChanged?.();
-      callbacksRef.current.onSessionTasksChanged?.(created.id);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -458,6 +488,7 @@ export function useSessions({
     visibleSessions,
     onArchive,
     onCreateSession,
+    onStartSession,
     onCreateGroup,
     onDelete,
     onDeleteGroup,
