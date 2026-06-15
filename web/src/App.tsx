@@ -696,7 +696,10 @@ function focusFallbackAfterSidebarClose() {
           onRemoveContextAttachment={composerState.removeContextAttachment}
           onSend={composerState.onSend}
           onSetActiveSuggestionIndex={composerState.setActiveSuggestionIndex}
-          onToggleActivityDrawer={() => setIsInspectorOpen((open) => !open)}
+          onToggleActivityDrawer={() => {
+            setInspectorTab('activity');
+            setIsInspectorOpen((open) => !open);
+          }}
           onUsePrompt={composerState.usePrompt}
           onDismissError={() => reportApiError(null)}
           onRetryEvents={eventState.retryActiveEvents}

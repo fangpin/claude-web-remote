@@ -388,7 +388,7 @@ export default function ConversationWorkspace({
             <button
               type="button"
               className="activity-drawer-trigger"
-              aria-label="Open activity drawer"
+              aria-label={isActivityDrawerOpen ? 'Close activity drawer' : 'Open activity drawer'}
               aria-expanded={isActivityDrawerOpen}
               onClick={onToggleActivityDrawer}
             >
