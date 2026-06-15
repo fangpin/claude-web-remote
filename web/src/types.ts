@@ -27,8 +27,28 @@ export type WorktreeStatus = {
   shortStatus: string[];
 };
 
+export type WorktreeDiffFile = {
+  path: string;
+  status: string;
+  additions?: number | null;
+  deletions?: number | null;
+};
+
 export type WorktreeDiff = {
   diff: string;
+  files: WorktreeDiffFile[];
+  truncated: boolean;
+  limitBytes: number;
+};
+
+export type PreviewReferenceKind = 'read' | 'edited' | 'written' | 'searched' | 'mentioned';
+
+export type PreviewFileReference = {
+  path: string;
+  kind: PreviewReferenceKind;
+  eventId: number;
+  title: string;
+  snippet?: string;
 };
 
 export type SessionInfo = {

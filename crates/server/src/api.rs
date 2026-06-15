@@ -504,6 +504,30 @@ done
         }
     }
 
+    fn git(root: &std::path::Path, args: &[&str]) {
+        let output = std::process::Command::new("git")
+            .current_dir(root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    async fn init_repo(root: &std::path::Path) {
+        fs::create_dir_all(root).unwrap();
+        git(root, &["init", "-b", "master"]);
+        git(root, &["config", "user.email", "test@example.com"]);
+        git(root, &["config", "user.name", "Test User"]);
+        fs::write(root.join("README.md"), "hello\n").unwrap();
+        git(root, &["add", "README.md"]);
+        git(root, &["commit", "-m", "initial"]);
+    }
+
     #[tokio::test]
     async fn diagnostics_route_reports_config_and_redacts_launcher_secrets() {
         let temp = tempfile::tempdir().unwrap();
@@ -872,6 +896,50 @@ done
             body["events"].as_array().unwrap()[0]["sessionId"],
             session.id.to_string()
         );
+    }
+
+    #[tokio::test]
+    async fn worktree_diff_route_returns_structured_diff() {
+        let temp = tempfile::tempdir().unwrap();
+        let repo = temp.path().join("repo");
+        init_repo(&repo).await;
+        let state = test_state(&temp).await;
+        let session = state
+            .manager
+            .create_session(CreateSessionRequest {
+                cwd: repo,
+                name: Some("worktree-diff".to_string()),
+                permission_mode: None,
+                worktree: Some(crate::WorktreeRequest { enabled: true }),
+            })
+            .await
+            .unwrap();
+        let worktree_path = session.worktree.as_ref().unwrap().worktree_cwd.clone();
+        fs::write(worktree_path.join("README.md"), "hello\nchanged\n").unwrap();
+        let app = build_router(state, None);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/sessions/{}/worktree-diff", session.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(body["diff"].as_str().unwrap().contains("+changed"));
+        assert_eq!(body["files"][0]["path"], "README.md");
+        assert_eq!(body["files"][0]["status"], "modified");
+        assert_eq!(body["truncated"], false);
+        assert!(body["limitBytes"].as_u64().unwrap() > 0);
     }
 
     #[tokio::test]

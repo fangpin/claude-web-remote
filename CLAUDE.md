@@ -31,7 +31,7 @@ Key backend modules:
 - `crates/server/src/api.rs` exposes REST and WebSocket endpoints.
 - `GET/POST/PATCH/DELETE /api/session-groups` manages durable custom session groups.
 - `PATCH /api/sessions/{id}` updates session metadata such as the chat name and `groupId` without restarting Claude.
-- `GET /api/sessions/{id}/worktree-diff` returns a read-only git diff for worktree sessions.
+- `GET /api/sessions/{id}/worktree-diff` returns a structured read-only git diff and changed-file metadata for worktree sessions.
 - `GET /api/sessions/{id}/transcript?afterId=<id>&beforeId=<id>&limit=<n>` returns persisted transcript events over plain HTTP for active, stopped, ended, failed, and archived sessions; `limit` bounds long-session initial loads and `beforeId` pages older windows, while `GET /api/sessions/{id}/events?afterId=<id>` remains the WebSocket replay-then-live stream for running sessions.
 
 ## Commands
@@ -50,7 +50,7 @@ npm --prefix web test
 npm --prefix web run build
 ```
 
-In a fresh git worktree, install frontend dependencies before running frontend checks if `web/node_modules` is missing:
+In a fresh git worktree, install frontend dependencies before running frontend checks if `web/node_modules` is missing. If `npm --prefix web test` fails with `vitest: command not found`, run this install command and rerun the checks:
 
 ```bash
 npm --prefix web install

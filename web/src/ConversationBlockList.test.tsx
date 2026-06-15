@@ -204,6 +204,34 @@ describe('ConversationBlockList', () => {
     expect(within(article).getByText('Raw events')).toBeInTheDocument();
   });
 
+  it('opens tool file paths in Preview', () => {
+    const onOpenPreviewPath = vi.fn();
+    const blocks: ConversationBlock[] = [
+      {
+        id: 'tool-read',
+        type: 'tool',
+        name: 'Read',
+        status: 'completed',
+        inputSummary: 'web/src/App.tsx',
+        resultSummary: 'Read output hidden (20 chars)',
+        resultKind: 'text',
+        resultDisplay: 'hidden',
+        resultLabel: 'Read output hidden (20 chars)',
+        eventIds: [10, 11],
+        rawEvents: [
+          rawEvent(10, { type: 'tool_use', id: 'toolu_read', name: 'Read', input: { file_path: 'web/src/App.tsx' } }),
+          rawEvent(11, { type: 'tool_result', tool_use_id: 'toolu_read', content: 'const app = true;' })
+        ]
+      }
+    ];
+
+    render(<ConversationBlockList blocks={blocks} displayMode="debug" onDisplayModeChange={vi.fn()} onOpenPreviewPath={onOpenPreviewPath} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open web/src/App.tsx in Preview' }));
+
+    expect(onOpenPreviewPath).toHaveBeenCalledWith('web/src/App.tsx');
+  });
+
   it('hides hidden tool result output and raw payload from the main card', () => {
     const blocks: ConversationBlock[] = [
       {

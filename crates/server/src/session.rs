@@ -1385,6 +1385,66 @@ done
     }
 
     #[tokio::test]
+    async fn reports_worktree_diff_for_worktree_sessions() {
+        let temp = tempfile::tempdir().unwrap();
+        let repo = temp.path().join("repo");
+        init_repo(&repo).await;
+        let bin = fake_claude(temp.path());
+        let store = EventStore::new(temp.path().join("data")).await.unwrap();
+        let manager = SessionManager::new(
+            store,
+            vec![bin.to_string_lossy().to_string()],
+            "acceptEdits".to_string(),
+            worktree_config(),
+        );
+        let created = manager
+            .create_session(CreateSessionRequest {
+                cwd: repo,
+                name: None,
+                permission_mode: None,
+                worktree: Some(WorktreeRequest { enabled: true }),
+            })
+            .await
+            .unwrap();
+        let worktree_path = created.worktree.as_ref().unwrap().worktree_cwd.clone();
+        fs::write(worktree_path.join("README.md"), "hello\nchanged\n").unwrap();
+
+        let diff = manager.worktree_diff(created.id).await.unwrap();
+
+        assert!(diff.diff.contains("diff --git a/README.md b/README.md"));
+        assert_eq!(diff.files[0].path, "README.md");
+        assert!(!diff.truncated);
+        manager.stop_session(created.id).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn worktree_diff_rejects_non_worktree_sessions() {
+        let temp = tempfile::tempdir().unwrap();
+        let bin = fake_claude(temp.path());
+        let store = EventStore::new(temp.path().join("data")).await.unwrap();
+        let manager = SessionManager::new(
+            store,
+            vec![bin.to_string_lossy().to_string()],
+            "acceptEdits".to_string(),
+            worktree_config(),
+        );
+        let created = manager
+            .create_session(CreateSessionRequest {
+                cwd: temp.path().to_path_buf(),
+                name: None,
+                permission_mode: None,
+                worktree: None,
+            })
+            .await
+            .unwrap();
+
+        let err = manager.worktree_diff(created.id).await.unwrap_err();
+
+        assert!(err.to_string().contains("session has no worktree"));
+        manager.stop_session(created.id).await.unwrap();
+    }
+
+    #[tokio::test]
     async fn worktree_session_preserves_requested_repo_subdirectory_as_cwd() {
         let temp = tempfile::tempdir().unwrap();
         let repo = temp.path().join("repo");

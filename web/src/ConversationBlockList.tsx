@@ -1,5 +1,6 @@
 import RawEventDetails from './RawEventDetails';
 import type { ConversationBlock, ErrorBlock, MessageBlock, RawBlock, TaskBlock, ToolBlock } from './conversationBlocks';
+import { extractPreviewFileReferences } from './previewReferences';
 import { transcriptToolSummaryLabel } from './toolSummaries';
 import type { ConversationDisplayMode } from './presentationPolicy';
 import hljs from 'highlight.js/lib/core';
@@ -23,6 +24,7 @@ type ConversationBlockListProps = {
   blocks: ConversationBlock[];
   displayMode: ConversationDisplayMode;
   onDisplayModeChange: (mode: ConversationDisplayMode) => void;
+  onOpenPreviewPath?: (path: string) => void;
 };
 
 function roleLabel(role: MessageBlock['role']): string {
@@ -345,10 +347,30 @@ function summaryCaret(isOpenByDefault: boolean): string {
   return isOpenByDefault ? '▾' : '▸';
 }
 
-function ToolBlockCard({ block, displayMode }: { block: ToolBlock; displayMode: ConversationDisplayMode }) {
+function previewPathsForBlock(block: ToolBlock | TaskBlock): string[] {
+  return [...new Set(extractPreviewFileReferences(block.rawEvents).map((reference) => reference.path))];
+}
+
+function OpenPreviewButton({ path, onOpenPreviewPath }: { path: string; onOpenPreviewPath?: (path: string) => void }) {
+  if (!onOpenPreviewPath) return null;
+  return (
+    <button
+      type="button"
+      className="open-preview-button"
+      onClick={() => onOpenPreviewPath(path)}
+      aria-label={`Open ${path} in Preview`}
+      title={`Open ${path} in Preview`}
+    >
+      Preview
+    </button>
+  );
+}
+
+function ToolBlockCard({ block, displayMode, onOpenPreviewPath }: { block: ToolBlock; displayMode: ConversationDisplayMode; onOpenPreviewPath?: (path: string) => void }) {
   const hasVisibleResult = block.resultSummary.trim() && block.resultDisplay !== 'hidden';
   const showInlineResult = hasVisibleResult && block.resultDisplay === 'visible';
   const showCollapsedResult = hasVisibleResult && block.resultDisplay === 'collapsed';
+  const firstPreviewPath = previewPathsForBlock(block)[0];
 
   return (
     <article id={blockElementId(block)} className={`conversation-block tool-block ${block.status} result-${block.resultKind}${block.density === 'compact' ? ' compact' : ''}`}>
@@ -358,6 +380,7 @@ function ToolBlockCard({ block, displayMode }: { block: ToolBlock; displayMode: 
           <span className="tool-status-dot" aria-hidden="true" />
           {block.status}
         </span>
+        {firstPreviewPath && <OpenPreviewButton path={firstPreviewPath} onOpenPreviewPath={onOpenPreviewPath} />}
       </header>
       <div className="tool-activity-body">
         {block.inputSummary.trim() && <p className="tool-input-summary">{block.inputSummary}</p>}
@@ -383,7 +406,7 @@ function ToolBlockCard({ block, displayMode }: { block: ToolBlock; displayMode: 
   );
 }
 
-function ToolSummaryDetails({ block }: { block: ToolBlock }) {
+function ToolSummaryDetails({ block, onOpenPreviewPath }: { block: ToolBlock; onOpenPreviewPath?: (path: string) => void }) {
   const isOpenByDefault = block.status === 'failed' || block.status === 'running';
   const label = transcriptToolSummaryLabel({
     type: 'tool',
@@ -393,6 +416,7 @@ function ToolSummaryDetails({ block }: { block: ToolBlock }) {
     resultSummary: block.resultSummary
   });
   const hasVisibleResult = block.resultSummary.trim() && block.resultDisplay !== 'hidden';
+  const firstPreviewPath = previewPathsForBlock(block)[0];
 
   return (
     <details
@@ -400,7 +424,10 @@ function ToolSummaryDetails({ block }: { block: ToolBlock }) {
       className={`conversation-block tool-block ${block.status} result-${block.resultKind}${block.density === 'compact' ? ' compact' : ''} tool-summary-details`}
       open={isOpenByDefault}
     >
-      <summary className="tool-summary-chip">{summaryCaret(isOpenByDefault)} {label}</summary>
+      <summary className="tool-summary-chip">
+        {summaryCaret(isOpenByDefault)} {label}
+        {firstPreviewPath && <OpenPreviewButton path={firstPreviewPath} onOpenPreviewPath={onOpenPreviewPath} />}
+      </summary>
       <div className="tool-summary-body">
         {block.inputSummary.trim() && <p className="tool-input-summary">{block.inputSummary}</p>}
         {block.resultLabel && <p className="tool-result-label">{block.resultLabel}</p>}
@@ -415,11 +442,13 @@ function ToolSummaryDetails({ block }: { block: ToolBlock }) {
   );
 }
 
-function ToolBlockView({ block, displayMode }: { block: ToolBlock; displayMode: ConversationDisplayMode }) {
-  return displayMode === 'debug' ? <ToolBlockCard block={block} displayMode={displayMode} /> : <ToolSummaryDetails block={block} />;
+function ToolBlockView({ block, displayMode, onOpenPreviewPath }: { block: ToolBlock; displayMode: ConversationDisplayMode; onOpenPreviewPath?: (path: string) => void }) {
+  return displayMode === 'debug' ? <ToolBlockCard block={block} displayMode={displayMode} onOpenPreviewPath={onOpenPreviewPath} /> : <ToolSummaryDetails block={block} onOpenPreviewPath={onOpenPreviewPath} />;
 }
 
-function TaskBlockCard({ block, displayMode }: { block: TaskBlock; displayMode: ConversationDisplayMode }) {
+function TaskBlockCard({ block, displayMode, onOpenPreviewPath }: { block: TaskBlock; displayMode: ConversationDisplayMode; onOpenPreviewPath?: (path: string) => void }) {
+  const firstPreviewPath = previewPathsForBlock(block)[0];
+
   return (
     <article id={blockElementId(block)} className={`conversation-block task-block ${block.status}${block.density === 'compact' ? ' compact' : ''}`}>
       <header className="block-header task-header">
@@ -430,6 +459,7 @@ function TaskBlockCard({ block, displayMode }: { block: TaskBlock; displayMode: 
         <span className="task-meta-row">
           <span className="task-source">{block.source}</span>
           <span className="task-status">{block.status}</span>
+          {firstPreviewPath && <OpenPreviewButton path={firstPreviewPath} onOpenPreviewPath={onOpenPreviewPath} />}
         </span>
       </header>
       <p className="task-summary">{block.summary}</p>
@@ -462,8 +492,8 @@ function TaskBlockCard({ block, displayMode }: { block: TaskBlock; displayMode: 
   );
 }
 
-function TaskBlockView({ block, displayMode }: { block: TaskBlock; displayMode: ConversationDisplayMode }) {
-  if (displayMode === 'debug') return <TaskBlockCard block={block} displayMode={displayMode} />;
+function TaskBlockView({ block, displayMode, onOpenPreviewPath }: { block: TaskBlock; displayMode: ConversationDisplayMode; onOpenPreviewPath?: (path: string) => void }) {
+  if (displayMode === 'debug') return <TaskBlockCard block={block} displayMode={displayMode} onOpenPreviewPath={onOpenPreviewPath} />;
 
   const isOpenByDefault = block.status === 'failed' || block.status === 'running';
   const label = transcriptToolSummaryLabel({
@@ -567,21 +597,21 @@ function ConversationDisplayModeSwitch({
   );
 }
 
-function ConversationBlockView({ block, displayMode }: { block: ConversationBlock; displayMode: ConversationDisplayMode }) {
+function ConversationBlockView({ block, displayMode, onOpenPreviewPath }: { block: ConversationBlock; displayMode: ConversationDisplayMode; onOpenPreviewPath?: (path: string) => void }) {
   if (block.type === 'anchor') return <span id={blockElementId(block)} className="conversation-anchor" aria-hidden="true" />;
   if (block.type === 'message') return <MessageBlockView block={block} displayMode={displayMode} />;
-  if (block.type === 'tool') return <ToolBlockView block={block} displayMode={displayMode} />;
-  if (block.type === 'task') return <TaskBlockView block={block} displayMode={displayMode} />;
+  if (block.type === 'tool') return <ToolBlockView block={block} displayMode={displayMode} onOpenPreviewPath={onOpenPreviewPath} />;
+  if (block.type === 'task') return <TaskBlockView block={block} displayMode={displayMode} onOpenPreviewPath={onOpenPreviewPath} />;
   if (block.type === 'error') return <ErrorBlockView block={block} displayMode={displayMode} />;
   return <RawBlockView block={block} displayMode={displayMode} />;
 }
 
-export default function ConversationBlockList({ blocks, displayMode, onDisplayModeChange }: ConversationBlockListProps) {
+export default function ConversationBlockList({ blocks, displayMode, onDisplayModeChange, onOpenPreviewPath }: ConversationBlockListProps) {
   return (
     <div className="conversation-blocks">
       <ConversationDisplayModeSwitch displayMode={displayMode} onDisplayModeChange={onDisplayModeChange} />
       {blocks.map((block) => (
-        <ConversationBlockView key={block.id} block={block} displayMode={displayMode} />
+        <ConversationBlockView key={block.id} block={block} displayMode={displayMode} onOpenPreviewPath={onOpenPreviewPath} />
       ))}
     </div>
   );

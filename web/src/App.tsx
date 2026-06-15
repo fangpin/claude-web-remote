@@ -53,6 +53,7 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('activity');
   const [conversationDisplayModes, setConversationDisplayModes] = useState<Record<string, ConversationDisplayMode>>({});
+  const [selectedPreviewPath, setSelectedPreviewPath] = useState<string | null>(null);
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const isDeveloperMode = import.meta.env.DEV;
   const isDiagnosticsVisible = isDeveloperMode && view === 'sessions' && isInspectorOpen && inspectorTab === 'diagnostics';
@@ -363,6 +364,13 @@ function focusFallbackAfterSidebarClose() {
     setInspectorTab('diagnostics');
   }
 
+  function onOpenPreviewPath(path: string) {
+    setView('sessions');
+    setIsInspectorOpen(true);
+    setInspectorTab('preview');
+    setSelectedPreviewPath(path);
+  }
+
   function showActiveSessions() {
     setView('sessions');
     setIsSidebarOpen(true);
@@ -515,7 +523,7 @@ function focusFallbackAfterSidebarClose() {
   });
 
   function visibleInspectorTabs(): InspectorTab[] {
-    return isDeveloperMode ? ['activity', 'session', 'plan', 'global', 'diagnostics'] : ['activity', 'session', 'plan', 'global'];
+    return isDeveloperMode ? ['activity', 'preview', 'session', 'plan', 'global', 'diagnostics'] : ['activity', 'preview', 'session', 'plan', 'global'];
   }
 
   function onResizeInspectorStart(event: ReactPointerEvent<HTMLButtonElement>) {
@@ -823,12 +831,14 @@ function focusFallbackAfterSidebarClose() {
           onRetryEvents={eventState.retryActiveEvents}
           onLoadOlderEvents={eventState.loadOlderEvents}
           onOpenReviewActivity={onOpenReviewActivity}
+          onOpenPreviewPath={onOpenPreviewPath}
           onRenameSession={sessionState.onRename}
           onUseEmptyStatePrompt={composerState.useEmptyStatePrompt}
         />
       }
       inspector={
         <InspectorPanel
+          activeEvents={eventState.activeEvents}
           activities={activities}
           activePlan={eventState.activePlan}
           activeSession={sessionState.activeSession}
@@ -839,6 +849,7 @@ function focusFallbackAfterSidebarClose() {
           isDeveloperMode={isDeveloperMode}
           isDiagnosticsLoading={diagnosticsState.isLoading}
           isInspectorOpen={isInspectorOpen}
+          selectedPreviewPath={selectedPreviewPath}
           sessionDiagnostics={diagnosticsState.sessionDiagnostics}
           sessionTaskError={taskState.sessionTaskError}
           sessionTasks={taskState.sessionTasks}

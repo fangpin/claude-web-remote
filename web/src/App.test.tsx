@@ -344,7 +344,12 @@ beforeEach(() => {
     }
     const worktreeDiffMatch = url.match(/^\/api\/sessions\/([^/?]+)\/worktree-diff$/);
     if (worktreeDiffMatch && !init) {
-      return jsonResponse({ diff: 'diff --git a/web/src/App.tsx b/web/src/App.tsx\n+changed' });
+      return jsonResponse({
+        diff: 'diff --git a/web/src/App.tsx b/web/src/App.tsx\n+changed',
+        files: [{ path: 'web/src/App.tsx', status: 'modified', additions: 1, deletions: 0 }],
+        truncated: false,
+        limitBytes: 200000
+      });
     }
     if (url === '/api/session-groups' && !init) {
       return jsonResponse({ groups: sessionGroups });
@@ -1526,7 +1531,7 @@ describe('App', () => {
     expect(await within(drawer).findByText('Daemon health checks are passing.')).toBeInTheDocument();
   });
 
-  it('copies the session id and opens worktree diff from the More menu', async () => {
+  it('copies the session id and shows worktree diff in Preview', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.assign(navigator, { clipboard: { writeText } });
     dirtyWorktreeStatus = true;
@@ -1541,10 +1546,11 @@ describe('App', () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('s4'));
     expect(within(header as HTMLElement).queryByRole('button', { name: 'Open worktree diff' })).not.toBeInTheDocument();
 
-    fireEvent.click(within(header as HTMLElement).getByRole('button', { name: 'More session actions' }));
-    fireEvent.click(within(header as HTMLElement).getByRole('button', { name: 'Open worktree diff' }));
-    expect(await screen.findByLabelText('Header worktree diff')).toBeInTheDocument();
-    expect(await screen.findByText(/diff --git a\/web\/src\/App\.tsx/)).toBeInTheDocument();
+    const drawer = await openActivityDrawer();
+    fireEvent.click(within(drawer).getByRole('tab', { name: 'Preview' }));
+    const previewPanel = within(drawer).getByRole('tabpanel', { name: 'Preview' });
+    expect(await within(previewPanel).findByText('Worktree diff')).toBeInTheDocument();
+    expect(within(previewPanel).getByText(/diff --git a\/web\/src\/App\.tsx/)).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s4/worktree-diff', undefined);
   });
 
@@ -1911,9 +1917,11 @@ describe('App', () => {
     fireEvent.click(screen.getByText('Changed files (1)'));
     expect(screen.getByText('web/src/App.tsx')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Attach' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'View diff' }));
-    expect(await screen.findByText('Worktree diff')).toBeInTheDocument();
-    expect(screen.getByText(/diff --git a\/web\/src\/App\.tsx/)).toBeInTheDocument();
+    const drawer = await openActivityDrawer();
+    fireEvent.click(within(drawer).getByRole('tab', { name: 'Preview' }));
+    const previewPanel = within(drawer).getByRole('tabpanel', { name: 'Preview' });
+    expect(await within(previewPanel).findByText('Worktree diff')).toBeInTheDocument();
+    expect(within(previewPanel).getByText(/diff --git a\/web\/src\/App\.tsx/)).toBeInTheDocument();
     expect(screen.getByText(/cleanup is blocked until you commit, stash, or clean/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Review dirty worktree first' })).toBeDisabled();
     const header = screen.getByRole('heading', { name: 'Worktree Repo' }).closest('header');

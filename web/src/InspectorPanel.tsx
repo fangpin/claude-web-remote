@@ -1,6 +1,7 @@
 import type { KeyboardEvent, PointerEvent } from 'react';
 import ActivityPanel from './ActivityPanel';
 import type { ActivityItem, ReviewSurface } from './activityTimeline';
+import PreviewPanel from './PreviewPanel';
 import type { SessionPlan } from './sessionPlan';
 import TasksPanel from './TasksPanel';
 import type {
@@ -10,12 +11,14 @@ import type {
   SessionDiagnosticsResponse,
   SessionInfo,
   TaskGroups,
-  TaskInfo
+  TaskInfo,
+  UiEvent
 } from './types';
 
-export type InspectorTab = 'activity' | 'session' | 'global' | 'plan' | 'diagnostics';
+export type InspectorTab = 'activity' | 'preview' | 'session' | 'global' | 'plan' | 'diagnostics';
 
 type Props = {
+  activeEvents: UiEvent[];
   activities: ActivityItem[];
   activePlan: SessionPlan | null;
   activeSession: SessionInfo | null;
@@ -26,6 +29,7 @@ type Props = {
   isDeveloperMode: boolean;
   isDiagnosticsLoading: boolean;
   isInspectorOpen: boolean;
+  selectedPreviewPath: string | null;
   sessionDiagnostics: SessionDiagnosticsResponse | null;
   sessionTaskError: string | null;
   sessionTasks: TaskGroups;
@@ -43,6 +47,7 @@ type Props = {
 };
 
 export default function InspectorPanel({
+  activeEvents,
   activities,
   activePlan,
   activeSession,
@@ -53,6 +58,7 @@ export default function InspectorPanel({
   isDeveloperMode,
   isDiagnosticsLoading,
   isInspectorOpen,
+  selectedPreviewPath,
   sessionDiagnostics,
   sessionTaskError,
   sessionTasks,
@@ -95,6 +101,7 @@ export default function InspectorPanel({
         </header>
         <div className="inspector-tabs" role="tablist" aria-label="Activity drawer sections">
           <button type="button" id="inspector-tab-activity" role="tab" aria-selected={inspectorTab === 'activity'} aria-controls="inspector-panel-activity" tabIndex={inspectorTab === 'activity' ? 0 : -1} onClick={() => onSetInspectorTab('activity')} onKeyDown={onInspectorTabKeyDown}>Activity</button>
+          <button type="button" id="inspector-tab-preview" role="tab" aria-selected={inspectorTab === 'preview'} aria-controls="inspector-panel-preview" tabIndex={inspectorTab === 'preview' ? 0 : -1} onClick={() => onSetInspectorTab('preview')} onKeyDown={onInspectorTabKeyDown}>Preview</button>
           <button type="button" id="inspector-tab-session" role="tab" aria-selected={inspectorTab === 'session'} aria-controls="inspector-panel-session" tabIndex={inspectorTab === 'session' ? 0 : -1} onClick={() => onSetInspectorTab('session')} onKeyDown={onInspectorTabKeyDown}>Tasks</button>
           <button type="button" id="inspector-tab-plan" role="tab" aria-selected={inspectorTab === 'plan'} aria-controls="inspector-panel-plan" tabIndex={inspectorTab === 'plan' ? 0 : -1} onClick={() => onSetInspectorTab('plan')} onKeyDown={onInspectorTabKeyDown}>Plan</button>
         </div>
@@ -106,6 +113,9 @@ export default function InspectorPanel({
             onSelectActivity={onSelectActivity}
           />
         </div>
+        <section id="inspector-panel-preview" role="tabpanel" aria-labelledby="inspector-tab-preview" hidden={inspectorTab !== 'preview'}>
+          <PreviewPanel activeSession={activeSession} events={activeEvents} selectedPath={selectedPreviewPath} />
+        </section>
         <div id="inspector-panel-session" role="tabpanel" aria-labelledby="inspector-tab-session" hidden={inspectorTab !== 'session'}>
           {isActiveSessionMode ? (
             <TasksPanel title="Tasks" tasks={sessionTasks} error={sessionTaskError} compact onSelectTask={onSelectTask} />

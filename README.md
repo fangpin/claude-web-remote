@@ -215,7 +215,7 @@ The Web UI supports app-level shortcuts for keyboard-first navigation:
 
 `Cmd/Ctrl+L` is intentionally left to the browser address bar; use `Cmd/Ctrl+K` or `/` to return to Claude input.
 
-Enable **Use git worktree** to start Claude in an isolated checkout. Worktree sessions show the checkout path, source repo, branch, clean/dirty state, and changed files in the worktree status panel below the session header. Dirty worktrees expose a read-only **View diff** action. Worktree sessions can also copy delivery context for manual commit/PR handoff without executing git writes. `Stop only` keeps the worktree for review; `Stop and remove worktree` is only available for clean app-created worktrees and never force-removes dirty changes.
+Enable **Use git worktree** to start Claude in an isolated checkout. Worktree sessions show the checkout path, source repo, branch, clean/dirty state, and changed files in the worktree status panel below the session header. The Inspector **Preview** tab shows the read-only worktree diff and transcript-derived file snippets. Worktree sessions can also copy delivery context for manual commit/PR handoff without executing git writes. `Stop only` keeps the worktree for review; `Stop and remove worktree` is only available for clean app-created worktrees and never force-removes dirty changes.
 
 ## Session API
 
@@ -225,7 +225,7 @@ Worktree diffs are read-only and available for worktree sessions:
 GET /api/sessions/<session-id>/worktree-diff
 ```
 
-This returns `{ "diff": "..." }` for the current unstaged worktree diff.
+This returns a structured read-only response with the current worktree diff, changed-file metadata, truncation status, and response size limit.
 
 Session groups can be managed without touching Claude processes:
 
