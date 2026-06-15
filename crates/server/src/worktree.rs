@@ -1,6 +1,7 @@
 use crate::{AppError, AppResult, WorktreeBaseRef, WorktreeConfig};
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashMap,
     ffi::OsStr,
     path::{Path, PathBuf},
     process::Stdio,
@@ -40,10 +41,24 @@ pub struct WorktreeFileStatus {
     pub original_path: Option<String>,
 }
 
+pub const WORKTREE_DIFF_LIMIT_BYTES: usize = 200_000;
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct WorktreeDiff {
     pub diff: String,
+    pub files: Vec<WorktreeDiffFile>,
+    pub truncated: bool,
+    pub limit_bytes: usize,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeDiffFile {
+    pub path: String,
+    pub status: String,
+    pub additions: Option<usize>,
+    pub deletions: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -122,8 +137,44 @@ impl WorktreeManager {
     }
 
     pub async fn diff(&self, meta: &WorktreeMeta) -> AppResult<WorktreeDiff> {
-        let diff = run_git(&meta.worktree_cwd, ["diff", "--", "."]).await?;
-        Ok(WorktreeDiff { diff })
+        let base_ref = meta.base_ref.as_deref().unwrap_or("HEAD");
+        let diff = run_git(
+            &meta.worktree_cwd,
+            [
+                "diff",
+                "--no-ext-diff",
+                "--find-renames",
+                base_ref,
+                "--",
+                ".",
+            ],
+        )
+        .await?;
+        let numstat = run_git(
+            &meta.worktree_cwd,
+            ["diff", "--numstat", "--find-renames", base_ref, "--", "."],
+        )
+        .await?;
+        let name_status = run_git(
+            &meta.worktree_cwd,
+            [
+                "diff",
+                "--name-status",
+                "--find-renames",
+                base_ref,
+                "--",
+                ".",
+            ],
+        )
+        .await?;
+        let (diff, truncated) = truncate_diff(diff);
+
+        Ok(WorktreeDiff {
+            diff,
+            files: parse_diff_files(&numstat, &name_status),
+            truncated,
+            limit_bytes: WORKTREE_DIFF_LIMIT_BYTES,
+        })
     }
 
     pub async fn remove(&self, meta: &WorktreeMeta) -> AppResult<()> {
@@ -204,6 +255,81 @@ async fn has_commit_ref(source_cwd: &Path, remote_ref: &str) -> AppResult<bool> 
         .output()
         .await?;
     Ok(output.status.success())
+}
+
+fn truncate_diff(diff: String) -> (String, bool) {
+    if diff.len() <= WORKTREE_DIFF_LIMIT_BYTES {
+        return (diff, false);
+    }
+
+    let mut limit = WORKTREE_DIFF_LIMIT_BYTES;
+    while !diff.is_char_boundary(limit) {
+        limit -= 1;
+    }
+
+    (diff[..limit].to_string(), true)
+}
+
+fn parse_diff_files(numstat: &str, name_status: &str) -> Vec<WorktreeDiffFile> {
+    let stats: HashMap<String, (Option<usize>, Option<usize>)> = numstat
+        .lines()
+        .filter_map(parse_numstat)
+        .map(|(path, additions, deletions)| (path, (additions, deletions)))
+        .collect();
+
+    name_status
+        .lines()
+        .filter_map(parse_name_status_line)
+        .map(|(path, status)| {
+            let (additions, deletions) = stats.get(&path).copied().unwrap_or((None, None));
+            WorktreeDiffFile {
+                path,
+                status,
+                additions,
+                deletions,
+            }
+        })
+        .collect()
+}
+
+fn parse_numstat(line: &str) -> Option<(String, Option<usize>, Option<usize>)> {
+    let mut parts = line.split('\t');
+    let additions = parse_optional_count(parts.next()?)?;
+    let deletions = parse_optional_count(parts.next()?)?;
+    let path = parts.next_back().or_else(|| parts.next())?.to_string();
+
+    Some((path, additions, deletions))
+}
+
+fn parse_optional_count(value: &str) -> Option<Option<usize>> {
+    if value == "-" {
+        Some(None)
+    } else {
+        value.parse().ok().map(Some)
+    }
+}
+
+fn parse_name_status_line(line: &str) -> Option<(String, String)> {
+    let mut parts = line.split('\t');
+    let status = parts.next()?;
+    let path = parts.next_back().or_else(|| parts.next())?.to_string();
+
+    Some((path, diff_status_label(status)))
+}
+
+fn diff_status_label(status: &str) -> String {
+    match status.chars().next().unwrap_or(' ') {
+        'A' => "added",
+        'C' => "copied",
+        'D' => "deleted",
+        'M' => "modified",
+        'R' => "renamed",
+        'T' => "type_changed",
+        'U' => "unmerged",
+        'X' => "unknown",
+        _ => "unknown",
+    }
+    .to_string()
 }
 
 fn parse_short_status_line(line: &str) -> WorktreeFileStatus {
@@ -535,6 +661,80 @@ mod tests {
         assert!(status.files.iter().any(|file| {
             file.path == "new.txt" && file.index_status == "?" && file.worktree_status == "?"
         }));
+    }
+
+    #[tokio::test]
+    async fn reports_worktree_diff_with_file_metadata() {
+        let temp = tempfile::tempdir().unwrap();
+        let repo = temp.path().join("repo");
+        init_repo(&repo).await;
+        let manager = WorktreeManager::new(WorktreeConfig {
+            worktrees_dir: None,
+            branch_prefix: "pin".to_string(),
+            base_ref: WorktreeBaseRef::Head,
+        });
+        let meta = manager.create(&repo).await.unwrap();
+        fs::write(meta.worktree_cwd.join("README.md"), "hello\nchanged\n").unwrap();
+
+        let diff = manager.diff(&meta).await.unwrap();
+
+        assert!(diff.diff.contains("diff --git a/README.md b/README.md"));
+        assert!(diff.diff.contains("+changed"));
+        assert_eq!(diff.files.len(), 1);
+        assert_eq!(diff.files[0].path, "README.md");
+        assert_eq!(diff.files[0].status, "modified");
+        assert_eq!(diff.files[0].additions, Some(1));
+        assert_eq!(diff.files[0].deletions, Some(0));
+        assert!(!diff.truncated);
+        assert_eq!(diff.limit_bytes, WORKTREE_DIFF_LIMIT_BYTES);
+    }
+
+    #[tokio::test]
+    async fn reports_clean_worktree_diff() {
+        let temp = tempfile::tempdir().unwrap();
+        let repo = temp.path().join("repo");
+        init_repo(&repo).await;
+        let manager = WorktreeManager::new(WorktreeConfig {
+            worktrees_dir: None,
+            branch_prefix: "pin".to_string(),
+            base_ref: WorktreeBaseRef::Head,
+        });
+        let meta = manager.create(&repo).await.unwrap();
+
+        let diff = manager.diff(&meta).await.unwrap();
+
+        assert_eq!(diff.diff, "");
+        assert!(diff.files.is_empty());
+        assert!(!diff.truncated);
+    }
+
+    #[test]
+    fn truncates_diff_on_utf8_boundary() {
+        let source = format!("{}é", "a".repeat(WORKTREE_DIFF_LIMIT_BYTES));
+
+        let (truncated, did_truncate) = truncate_diff(source.clone());
+
+        assert!(did_truncate);
+        assert!(truncated.len() <= WORKTREE_DIFF_LIMIT_BYTES);
+        assert!(source.starts_with(&truncated));
+    }
+
+    #[test]
+    fn parses_diff_file_metadata() {
+        let numstat = "12\t4\tweb/src/App.tsx\n-\t-\tassets/logo.png";
+        let name_status = "M\tweb/src/App.tsx\nA\tassets/logo.png";
+
+        let files = parse_diff_files(numstat, name_status);
+
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0].path, "web/src/App.tsx");
+        assert_eq!(files[0].status, "modified");
+        assert_eq!(files[0].additions, Some(12));
+        assert_eq!(files[0].deletions, Some(4));
+        assert_eq!(files[1].path, "assets/logo.png");
+        assert_eq!(files[1].status, "added");
+        assert_eq!(files[1].additions, None);
+        assert_eq!(files[1].deletions, None);
     }
 
     #[tokio::test]
