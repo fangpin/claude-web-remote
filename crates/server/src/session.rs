@@ -1,8 +1,10 @@
 use crate::{
-    AppError, AppResult, ClaudeProcess, ClaudeProcessConfig, EventKind, EventStore, ProcessEvent,
-    SessionGroup, SessionMeta, SessionStatus, TaskGroups, UiEvent, WorktreeConfig, WorktreeManager,
-    WorktreeMeta, WorktreeStatus, extract_claude_session_id, group_tasks, has_unfinished_tool_use,
-    project_session_tasks, store::SessionListFilter,
+    AllowPermissionRequest, AppError, AppResult, ClaudeProcess, ClaudeProcessConfig,
+    DenyPermissionRequest, EventKind, EventStore, HookPermissionRequest, PendingPermissionRequest,
+    PendingPermissionsResponse, PermissionBridge, PermissionCapability, ProcessEvent, SessionGroup,
+    SessionMeta, SessionStatus, TaskGroups, UiEvent, WorktreeConfig, WorktreeManager, WorktreeMeta,
+    WorktreeStatus, extract_claude_session_id, group_tasks, has_unfinished_tool_use,
+    hook_stdout_for_decision, project_session_tasks, store::SessionListFilter,
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -51,6 +53,7 @@ pub struct SessionInfo {
     pub permission_mode: String,
     pub status: SessionStatus,
     pub runtime_status: SessionRuntimeStatus,
+    pub permission_capability: PermissionCapability,
     pub claude_session_id: Option<String>,
     pub group_id: Option<Uuid>,
     pub worktree: Option<WorktreeMeta>,
@@ -70,6 +73,7 @@ pub struct SessionManager {
     launcher: Vec<String>,
     default_permission_mode: String,
     worktree_manager: WorktreeManager,
+    permission_bridge: PermissionBridge,
     running: Arc<Mutex<HashMap<Uuid, RunningSession>>>,
     starting: Arc<Mutex<HashSet<Uuid>>>,
 }
@@ -80,12 +84,14 @@ impl SessionManager {
         launcher: Vec<String>,
         default_permission_mode: String,
         worktree_config: WorktreeConfig,
+        permission_bridge: PermissionBridge,
     ) -> Self {
         Self {
             store,
             launcher,
             default_permission_mode,
             worktree_manager: WorktreeManager::new(worktree_config),
+            permission_bridge,
             running: Arc::new(Mutex::new(HashMap::new())),
             starting: Arc::new(Mutex::new(HashSet::new())),
         }
@@ -329,7 +335,76 @@ impl SessionManager {
     pub async fn stop_session(&self, session_id: Uuid) -> AppResult<()> {
         let _meta = self.load_active_meta(session_id).await?;
         self.stop_running_process(session_id).await?;
+        self.fail_pending_permissions(session_id, "session stopped")
+            .await?;
         self.update_status(session_id, SessionStatus::Stopped).await
+    }
+
+    pub async fn pending_permissions(
+        &self,
+        session_id: Uuid,
+    ) -> AppResult<PendingPermissionsResponse> {
+        let _meta = self.load_active_meta(session_id).await?;
+        Ok(self.permission_bridge.list_response(session_id).await)
+    }
+
+    pub async fn allow_permission(
+        &self,
+        session_id: Uuid,
+        request_id: String,
+        updated_input: Option<serde_json::Value>,
+    ) -> AppResult<PendingPermissionRequest> {
+        let _meta = self.load_active_meta(session_id).await?;
+        let resolved = self
+            .permission_bridge
+            .allow(
+                session_id,
+                &request_id,
+                AllowPermissionRequest { updated_input },
+            )
+            .await?;
+        self.record_permission_event(session_id, "permission_resolved", &resolved)
+            .await?;
+        Ok(resolved)
+    }
+
+    pub async fn deny_permission(
+        &self,
+        session_id: Uuid,
+        request_id: String,
+        message: Option<String>,
+    ) -> AppResult<PendingPermissionRequest> {
+        let _meta = self.load_active_meta(session_id).await?;
+        let resolved = self
+            .permission_bridge
+            .deny(session_id, &request_id, DenyPermissionRequest { message })
+            .await?;
+        self.record_permission_event(session_id, "permission_resolved", &resolved)
+            .await?;
+        Ok(resolved)
+    }
+
+    pub async fn permission_hook_request(
+        &self,
+        request: HookPermissionRequest,
+    ) -> AppResult<serde_json::Value> {
+        let session_id = request.session_id;
+        let wait = self.permission_bridge.register(request).await?;
+        self.record_permission_event(session_id, "permission_request", &wait.request)
+            .await?;
+        let decision = wait.wait().await?;
+        let mut event = UiEvent::new(
+            0,
+            session_id,
+            EventKind::System,
+            json!({
+                "type": "permission_hook_decision",
+                "decision": decision,
+            }),
+        );
+        self.store.append_event_with_next_id(&mut event).await?;
+        let _ = self.broadcast_event(session_id, event).await;
+        Ok(hook_stdout_for_decision(&decision))
     }
 
     pub async fn worktree_status(&self, session_id: Uuid) -> AppResult<WorktreeStatus> {
@@ -537,6 +612,38 @@ impl SessionManager {
         self.store.load_events_after(session_id, after_id).await
     }
 
+    async fn fail_pending_permissions(&self, session_id: Uuid, message: &str) -> AppResult<()> {
+        let failed = self
+            .permission_bridge
+            .fail_session_permissions(session_id, message)
+            .await;
+        for request in failed {
+            self.record_permission_event(session_id, "permission_resolved", &request)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn record_permission_event(
+        &self,
+        session_id: Uuid,
+        event_type: &str,
+        request: &PendingPermissionRequest,
+    ) -> AppResult<()> {
+        let mut event = UiEvent::new(
+            0,
+            session_id,
+            EventKind::System,
+            json!({
+                "type": event_type,
+                "permission": request,
+            }),
+        );
+        self.store.append_event_with_next_id(&mut event).await?;
+        let _ = self.broadcast_event(session_id, event).await;
+        Ok(())
+    }
+
     async fn stop_running_process(&self, session_id: Uuid) -> AppResult<()> {
         let running = self.running.lock().await.remove(&session_id);
         if let Some(session) = running {
@@ -718,6 +825,7 @@ impl SessionManager {
                     }
                     ProcessEvent::Exited(_) => {
                         let _ = running.lock().await.remove(&session_id);
+                        // Pending permission hooks cannot continue after the Claude process exits.
                         let _ = store
                             .update_meta(session_id, |meta| {
                                 if meta.status != SessionStatus::Stopped {
@@ -746,7 +854,11 @@ impl SessionManager {
     async fn session_info(&self, meta: SessionMeta) -> AppResult<SessionInfo> {
         let events = self.store.load_events_after(meta.id, 0).await?;
         let runtime_status = runtime_status(&meta, &events);
-        Ok(SessionInfo::new(meta, runtime_status))
+        Ok(SessionInfo::new(
+            meta,
+            runtime_status,
+            self.permission_bridge.capability().clone(),
+        ))
     }
 
     async fn update_claude_session_id(
@@ -813,7 +925,11 @@ fn expand_home(path: PathBuf) -> PathBuf {
 }
 
 impl SessionInfo {
-    fn new(meta: SessionMeta, runtime_status: SessionRuntimeStatus) -> Self {
+    fn new(
+        meta: SessionMeta,
+        runtime_status: SessionRuntimeStatus,
+        permission_capability: PermissionCapability,
+    ) -> Self {
         Self {
             id: meta.id,
             name: meta.name,
@@ -821,6 +937,7 @@ impl SessionInfo {
             permission_mode: meta.permission_mode,
             status: meta.status,
             runtime_status,
+            permission_capability,
             claude_session_id: meta.claude_session_id,
             group_id: meta.group_id,
             worktree: meta.worktree,
@@ -941,6 +1058,13 @@ mod tests {
             branch_prefix: "pin".to_string(),
             base_ref: crate::WorktreeBaseRef::Head,
         }
+    }
+
+    fn permission_bridge() -> PermissionBridge {
+        PermissionBridge::new(
+            "test-token",
+            PermissionCapability::unavailable("permission bridge disabled in tests"),
+        )
     }
 
     fn fake_claude(dir: &std::path::Path) -> PathBuf {
@@ -1305,6 +1429,7 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
+            permission_bridge(),
         );
 
         let created = manager
@@ -1337,6 +1462,7 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
+            permission_bridge(),
         );
         let created = manager
             .create_session(CreateSessionRequest {
@@ -1368,6 +1494,7 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
+            permission_bridge(),
         );
         let created = manager
             .create_session(CreateSessionRequest {
@@ -1401,6 +1528,7 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
+            permission_bridge(),
         );
 
         let created = manager
@@ -1435,6 +1563,7 @@ done
             ],
             "acceptEdits".to_string(),
             worktree_config(),
+            permission_bridge(),
         );
 
         let result = manager
@@ -1474,6 +1603,7 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
+            permission_bridge(),
         );
         let session = manager
             .create_session(CreateSessionRequest {
@@ -1507,6 +1637,7 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
+            permission_bridge(),
         );
         let session = manager
             .create_session(CreateSessionRequest {
@@ -1544,6 +1675,7 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
+            permission_bridge(),
         );
         let now = Utc::now();
         let meta = SessionMeta {
@@ -1595,6 +1727,7 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
+            permission_bridge(),
         );
 
         let created = manager
@@ -1620,6 +1753,7 @@ done
             vec!["claude".to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
+            permission_bridge(),
         );
 
         let result = manager
@@ -1644,6 +1778,7 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
+            permission_bridge(),
         );
 
         let created = manager
@@ -1670,6 +1805,7 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
+            permission_bridge(),
         );
         let session = manager
             .create_session(CreateSessionRequest {
@@ -1710,6 +1846,7 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
+            permission_bridge(),
         );
 
         let created = manager
@@ -1753,6 +1890,7 @@ done
             vec![bin.to_string_lossy().to_string()],
             "auto".to_string(),
             worktree_config(),
+            permission_bridge(),
         );
 
         let created = manager
@@ -1778,6 +1916,7 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
+            permission_bridge(),
         );
 
         let session = manager
@@ -1804,6 +1943,7 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
+            permission_bridge(),
         );
 
         let session = manager
@@ -1845,6 +1985,7 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
+            permission_bridge(),
         );
 
         let session = manager
@@ -1927,6 +2068,7 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
+            permission_bridge(),
         );
 
         manager.restore_active_sessions().await.unwrap();
@@ -1976,6 +2118,7 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
+            permission_bridge(),
         );
 
         manager.restore_active_sessions().await.unwrap();
@@ -2009,6 +2152,7 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
+            permission_bridge(),
         );
 
         let session = manager
@@ -2049,6 +2193,7 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
+            permission_bridge(),
         );
 
         let session = manager
@@ -2106,6 +2251,7 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
+            permission_bridge(),
         );
 
         let session = manager
@@ -2141,6 +2287,7 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
+            permission_bridge(),
         );
         let session = manager
             .create_session(CreateSessionRequest {
@@ -2194,6 +2341,7 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
+            permission_bridge(),
         );
         let session = manager
             .create_session(CreateSessionRequest {
@@ -2235,6 +2383,7 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
+            permission_bridge(),
         );
         let session = manager
             .create_session(CreateSessionRequest {
@@ -2284,6 +2433,7 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
+            permission_bridge(),
         );
         let session = manager
             .create_session(CreateSessionRequest {
@@ -2320,6 +2470,7 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
+            permission_bridge(),
         );
         let session = manager
             .create_session(CreateSessionRequest {
@@ -2368,6 +2519,7 @@ done
             vec![wrapper.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
+            permission_bridge(),
         );
         let session = manager
             .create_session(CreateSessionRequest {
@@ -2408,6 +2560,7 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
+            permission_bridge(),
         );
         let session_id = Uuid::new_v4();
         let now = Utc::now();
@@ -2449,6 +2602,7 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
+            permission_bridge(),
         );
         let session_id = Uuid::new_v4();
         let now = Utc::now();
@@ -2479,6 +2633,88 @@ done
     }
 
     #[tokio::test]
+    async fn permission_hook_allow_persists_resolved_event_and_updates_session_info() {
+        let temp = tempfile::tempdir().unwrap();
+        let bin = fake_claude(temp.path());
+        let store = EventStore::new(temp.path().join("data")).await.unwrap();
+        let manager = SessionManager::new(
+            store.clone(),
+            vec![bin.to_string_lossy().to_string()],
+            "acceptEdits".to_string(),
+            worktree_config(),
+            PermissionBridge::new("test-token", PermissionCapability::available()),
+        );
+        let session = manager
+            .create_session(CreateSessionRequest {
+                cwd: temp.path().to_path_buf(),
+                name: None,
+                permission_mode: None,
+                worktree: None,
+            })
+            .await
+            .unwrap();
+
+        let hook_request = HookPermissionRequest {
+            token: "test-token".to_string(),
+            session_id: session.id,
+            hook_session_id: Some("hook-session".to_string()),
+            cwd: Some(temp.path().display().to_string()),
+            permission_mode: Some("acceptEdits".to_string()),
+            tool_name: "Bash".to_string(),
+            tool_input: json!({ "command": "npm --prefix web test" }),
+        };
+        let hook = manager.clone();
+        let hook_task =
+            tokio::spawn(async move { hook.permission_hook_request(hook_request).await });
+
+        let pending = wait_for_events(&store, session.id, |events| {
+            events
+                .iter()
+                .any(|event| event.payload["type"] == "permission_request")
+        })
+        .await;
+        assert!(
+            pending
+                .iter()
+                .any(|event| event.payload["type"] == "permission_request")
+        );
+        let pending_permissions = manager
+            .pending_permissions(session.id)
+            .await
+            .unwrap()
+            .pending;
+        assert_eq!(pending_permissions.len(), 1);
+        let request_id = pending_permissions[0].request_id.clone();
+
+        let resolved = manager
+            .allow_permission(session.id, request_id, None)
+            .await
+            .unwrap();
+        assert_eq!(resolved.status, crate::PermissionStatus::Allowed);
+        let hook_stdout = hook_task.await.unwrap().unwrap();
+        assert_eq!(
+            hook_stdout["hookSpecificOutput"]["decision"]["behavior"],
+            "allow"
+        );
+        let events = wait_for_events(&store, session.id, |events| {
+            events
+                .iter()
+                .any(|event| event.payload["type"] == "permission_resolved")
+        })
+        .await;
+        assert!(
+            events
+                .iter()
+                .any(|event| event.payload["type"] == "permission_resolved")
+        );
+        let info = manager.get_session(session.id).await.unwrap();
+        assert_eq!(
+            info.permission_capability.status,
+            crate::PermissionCapabilityStatus::Available
+        );
+    }
+
+    #[tokio::test]
     async fn resume_uses_persisted_claude_session_id() {
         let temp = tempfile::tempdir().unwrap();
         let args_log = temp.path().join("args.log");
@@ -2500,6 +2736,7 @@ done
             vec![wrapper.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
+            permission_bridge(),
         );
         let session = manager
             .create_session(CreateSessionRequest {

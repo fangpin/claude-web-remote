@@ -2,7 +2,8 @@ use anyhow::Context;
 use axum::serve;
 use clap::Parser;
 use claude_remote_web_server::{
-    AppState, Config, ConfigStore, EventStore, SessionManager, build_router,
+    AppState, Config, ConfigStore, EventStore, PermissionBridge, PermissionCapability,
+    SessionManager, build_router,
 };
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
@@ -38,11 +39,18 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let store = EventStore::new(&config.data_dir).await?;
+    let permission_bridge = PermissionBridge::new(
+        uuid::Uuid::new_v4().to_string(),
+        PermissionCapability::unavailable(
+            "permission hook injection has not been verified for this Claude Code version",
+        ),
+    );
     let manager = SessionManager::new(
         store.clone(),
         config.launcher.clone(),
         config.default_permission_mode.clone(),
         config.worktree.clone(),
+        permission_bridge,
     );
     manager.restore_active_sessions().await?;
     let config_store = ConfigStore::new(config_path, config.clone());

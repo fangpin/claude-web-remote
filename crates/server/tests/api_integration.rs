@@ -1,8 +1,9 @@
 use axum::Router;
 use chrono::Utc;
 use claude_remote_web_server::{
-    AppState, ConfigStore, EventKind, EventStore, ResolvedConfig, SessionManager, SessionMeta,
-    SessionStatus, UiEvent, WorktreeBaseRef, WorktreeConfig, build_router,
+    AppState, ConfigStore, EventKind, EventStore, PermissionBridge, PermissionCapability,
+    ResolvedConfig, SessionManager, SessionMeta, SessionStatus, UiEvent, WorktreeBaseRef,
+    WorktreeConfig, build_router,
 };
 use futures::StreamExt;
 use serde_json::{Value, json};
@@ -123,6 +124,7 @@ async fn spawn_app_with_config_and_web_dir(
         launcher.clone(),
         "bypassPermissions".to_string(),
         worktree.clone(),
+        PermissionBridge::new("test-token", PermissionCapability::available()),
     );
     let config = ConfigStore::new(
         config_path,
@@ -159,6 +161,7 @@ async fn spawn_app_with_store(store: EventStore) -> SocketAddr {
             branch_prefix: "pin".to_string(),
             base_ref: claude_remote_web_server::WorktreeBaseRef::Head,
         },
+        PermissionBridge::new("test-token", PermissionCapability::available()),
     );
     let config = ConfigStore::new(
         PathBuf::from("config.toml"),

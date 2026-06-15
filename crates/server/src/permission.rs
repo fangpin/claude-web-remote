@@ -151,10 +151,24 @@ pub enum PermissionDecision {
 }
 
 type PendingWaiter = oneshot::Sender<PermissionDecision>;
+type PendingReceiver = oneshot::Receiver<PermissionDecision>;
 
 struct PendingPermissionEntry {
     request: PendingPermissionRequest,
     waiter: Option<PendingWaiter>,
+}
+
+pub struct RegisteredPermissionRequest {
+    pub request: PendingPermissionRequest,
+    receiver: PendingReceiver,
+}
+
+impl RegisteredPermissionRequest {
+    pub async fn wait(self) -> AppResult<PermissionDecision> {
+        self.receiver
+            .await
+            .map_err(|_| AppError::Process("permission request was dropped".to_string()))
+    }
 }
 
 #[derive(Clone)]
@@ -202,18 +216,31 @@ impl PermissionBridge {
         }
     }
 
-    pub async fn register_and_wait(
+    pub async fn register(
         &self,
         request: HookPermissionRequest,
-    ) -> AppResult<PermissionDecision> {
+    ) -> AppResult<RegisteredPermissionRequest> {
         if request.token != self.token {
             return Err(AppError::InvalidRequest(
                 "invalid permission token".to_string(),
             ));
         }
 
-        if !self.capability.can_act() {
-            return Ok(PermissionDecision::Deny {
+        let request_id = Uuid::new_v4().to_string();
+        let pending = PendingPermissionRequest::from_hook_request(request_id.clone(), request);
+        let (sender, receiver) = oneshot::channel();
+
+        if self.capability.can_act() {
+            let mut requests = self.requests.lock().await;
+            requests.insert(
+                request_id,
+                PendingPermissionEntry {
+                    request: pending.clone(),
+                    waiter: Some(sender),
+                },
+            );
+        } else {
+            let _ = sender.send(PermissionDecision::Deny {
                 message: self
                     .capability
                     .reason
@@ -222,24 +249,17 @@ impl PermissionBridge {
             });
         }
 
-        let request_id = Uuid::new_v4().to_string();
-        let pending = PendingPermissionRequest::from_hook_request(request_id.clone(), request);
-        let (sender, receiver) = oneshot::channel();
+        Ok(RegisteredPermissionRequest {
+            request: pending,
+            receiver,
+        })
+    }
 
-        {
-            let mut requests = self.requests.lock().await;
-            requests.insert(
-                request_id,
-                PendingPermissionEntry {
-                    request: pending,
-                    waiter: Some(sender),
-                },
-            );
-        }
-
-        receiver
-            .await
-            .map_err(|_| AppError::Process("permission request was dropped".to_string()))
+    pub async fn register_and_wait(
+        &self,
+        request: HookPermissionRequest,
+    ) -> AppResult<PermissionDecision> {
+        self.register(request).await?.wait().await
     }
 
     pub async fn allow(
