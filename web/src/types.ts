@@ -1,6 +1,41 @@
 export type SessionStatus = 'starting' | 'running' | 'exited' | 'stopped' | 'failed';
 export type SessionRuntimeStatus = 'starting' | 'running' | 'waiting' | 'ended' | 'stopped' | 'failed';
 
+export type PermissionCapabilityStatus = 'available' | 'unavailable';
+
+export type PermissionCapability = {
+  status: PermissionCapabilityStatus;
+  reason?: string | null;
+};
+
+export type PermissionStatus = 'pending' | 'allowed' | 'denied' | 'expired' | 'failed';
+export type PermissionEditable = 'bashCommand';
+
+export type PermissionDecision =
+  | { behavior: 'allow'; updatedInput?: unknown | null }
+  | { behavior: 'deny'; message: string };
+
+export type PendingPermissionRequest = {
+  requestId: string;
+  sessionId: string;
+  hookSessionId?: string | null;
+  toolName: string;
+  toolInput: unknown;
+  summary: string;
+  cwd?: string | null;
+  permissionMode?: string | null;
+  status: PermissionStatus;
+  editable?: PermissionEditable | null;
+  decision?: PermissionDecision | null;
+  createdAt: string;
+  resolvedAt?: string | null;
+};
+
+export type PendingPermissionsResponse = {
+  capability: PermissionCapability;
+  pending: PendingPermissionRequest[];
+};
+
 export type WorktreeInfo = {
   sourceCwd: string;
   worktreeCwd: string;
@@ -38,6 +73,7 @@ export type SessionInfo = {
   permissionMode: string;
   status: SessionStatus;
   runtimeStatus?: SessionRuntimeStatus;
+  permissionCapability?: PermissionCapability;
   claudeSessionId?: string | null;
   groupId?: string | null;
   worktree?: WorktreeInfo | null;
