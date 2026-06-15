@@ -298,7 +298,7 @@ export function useSessions({
       });
       openCreatedSession(created);
       try {
-        const updated = await sendInput(created.id, prompt);
+        const updated = await sendInput(created.id, initialPrompt);
         if (updated) {
           setSessions((current) => current.map((session) => session.id === updated.id ? updated : session));
         }
