@@ -68,6 +68,20 @@ describe('buildActivityTimeline', () => {
     });
   });
 
+  it('uses the shared tool input summary shape for transcript parity', () => {
+    const activities = buildActivityTimeline([
+      event(1, 'tool', { type: 'tool_use', id: 'toolu_read', name: 'Read', input: { file_path: '/repo/a.ts', offset: 1, limit: 2 } }),
+      event(2, 'tool', { type: 'tool_use', id: 'toolu_edit', name: 'Edit', input: { file_path: 'web/src/App.tsx', old_string: 'old', new_string: 'new' } })
+    ], [1, 2]);
+
+    expect(activities.find((activity) => activity.id === 'activity-toolu_read')).toMatchObject({
+      summary: '/repo/a.ts (offset 1, limit 2)'
+    });
+    expect(activities.find((activity) => activity.id === 'activity-toolu_edit')).toMatchObject({
+      summary: 'web/src/App.tsx · replace "old" -> "new"'
+    });
+  });
+
   it('marks permission-like events as waiting until a result arrives', () => {
     const activities = buildActivityTimeline([
       event(1, 'tool', {

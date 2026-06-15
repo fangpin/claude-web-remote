@@ -65,6 +65,32 @@ describe('buildConversationBlocks', () => {
     expect(blocks).toEqual([]);
   });
 
+  it('keeps chat projection defaults when no display mode is passed', () => {
+    const blocks = buildConversationBlocks([
+      event(1, 'system', { message: 'daemon notice' }),
+      event(2, 'raw', { type: 'result', subtype: 'success' }),
+      event(3, 'raw', { message: 'transport detail' })
+    ]);
+
+    expect(blocks).toMatchObject([
+      { id: 'raw-3', type: 'raw', label: 'Unknown event', severity: 'warning' }
+    ]);
+  });
+
+  it('projects hidden system and metadata events as raw blocks in debug mode', () => {
+    const blocks = buildConversationBlocks([
+      event(1, 'system', { message: 'daemon notice' }),
+      event(2, 'raw', { type: 'result', subtype: 'success' }),
+      event(3, 'user', { type: 'user', message: { content: [{ type: 'text', text: 'internal wrapper' }] } })
+    ], { displayMode: 'debug' });
+
+    expect(blocks).toMatchObject([
+      { id: 'raw-1', type: 'raw', label: 'System event', severity: 'info', eventIds: [1] },
+      { id: 'raw-2', type: 'raw', label: 'Raw event', severity: 'info', eventIds: [2] },
+      { id: 'raw-3', type: 'raw', label: 'Raw event', severity: 'info', eventIds: [3] }
+    ]);
+  });
+
   it('extracts assistant text and hides Claude stream-json system content', () => {
     const assistantPayload = { type: 'assistant', message: { content: [{ type: 'text', text: 'done' }] } };
     const systemPayload = { type: 'system', content: [{ type: 'text', text: 'session ready' }] };
@@ -280,6 +306,20 @@ describe('buildConversationBlocks', () => {
       resultLabel: 'Failed result shown (21 chars)',
       eventIds: [1, 2]
     });
+  });
+
+  it('uses shared compact summary input for Bash, Read, and Edit blocks', () => {
+    const blocks = buildConversationBlocks([
+      event(1, 'tool', { type: 'tool_use', id: 'toolu_read', name: 'Read', input: { file_path: '/repo/a.ts', offset: 1, limit: 2 } }),
+      event(2, 'tool', { type: 'tool_result', tool_use_id: 'toolu_read', is_error: true, content: 'Error: missing' }),
+      event(3, 'tool', { type: 'tool_use', id: 'toolu_edit', name: 'Edit', input: { file_path: 'web/src/App.tsx', old_string: 'old', new_string: 'new' } }),
+      event(4, 'tool', { type: 'tool_result', tool_use_id: 'toolu_edit', content: 'updated' })
+    ]);
+
+    expect(blocks).toMatchObject([
+      { id: 'tool-toolu_read', type: 'tool', inputSummary: '/repo/a.ts (offset 1, limit 2)' },
+      { id: 'tool-toolu_edit', type: 'tool', inputSummary: 'web/src/App.tsx · replace "old" -> "new"' }
+    ]);
   });
 
   it('classifies tool result semantics for diff, code, and path output', () => {
