@@ -103,7 +103,7 @@ function buildSessionSections(
     sections.push({
       key: 'pinned',
       title: 'Pinned',
-      description: listMode === 'archived' ? 'Saved archived conversations' : 'Favorites and active work',
+      description: countLabel(pinnedSessions.length),
       sessions: pinnedSessions
     });
   }
@@ -118,7 +118,7 @@ function buildSessionSections(
       sections.push({
         key: `group:${group.id}`,
         title: group.name,
-        description: groupSessions.length > 0 ? 'Custom group' : 'Drop chats here',
+        description: groupSessions.length > 0 ? countLabel(groupSessions.length) : 'Drop chats here',
         sessions: groupSessions,
         groupId: group.id,
         isCustomGroup: true
@@ -139,7 +139,7 @@ function buildSessionSections(
       projects.set(key, {
         key,
         title: pathBasename(projectPath),
-        description: `${parentPath(projectPath)} · ${timeHintForSession(session, now)}`,
+        description: timeHintForSession(session, now),
         sessions: [session],
         projectPath
       });
@@ -495,7 +495,7 @@ export default function SessionSidebar({
                     <p title={section.projectPath ?? undefined}>{section.description}</p>
                   </div>
                   <div className="session-section-heading-actions">
-                    <span>{countLabel(section.sessions.length)}</span>
+                    {!section.description.includes(countLabel(section.sessions.length)) && <span>{countLabel(section.sessions.length)}</span>}
                     {section.isCustomGroup && section.groupId && (
                       <>
                         <button type="button" onClick={() => onEditGroup(section)}>Rename</button>

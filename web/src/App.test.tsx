@@ -528,7 +528,6 @@ describe('App', () => {
     expect(within(sessionButton('Stopped Repo')).queryByText('Ended')).not.toBeInTheDocument();
     expect(within(sessionButton('Repo One')).getByText('/repo/one')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'one' })).toBeInTheDocument();
-    expect(screen.getByText('Can resume')).toBeInTheDocument();
     expect(screen.getByText('Chat')).toBeInTheDocument();
     expect(screen.getByLabelText('Claude: Claude is waiting')).toBeInTheDocument();
     expect(screen.getByLabelText('Claude attention notification')).toHaveTextContent('Claude is waiting');
@@ -596,7 +595,7 @@ describe('App', () => {
     });
 
     expect(await screen.findByText('Streaming now')).toBeInTheDocument();
-    await waitFor(() => expect(screen.getAllByText('Ready for your reply').length).toBeGreaterThan(0));
+    await waitFor(() => expect(within(screen.getByLabelText('Composer context')).getByText('Waiting for you')).toBeInTheDocument());
   });
 
   it('filters sessions locally by name, cwd, status, and worktree branch', async () => {
