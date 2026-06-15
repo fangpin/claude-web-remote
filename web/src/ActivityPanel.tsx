@@ -90,7 +90,7 @@ export default function ActivityPanel({ activities = [], activeSession, waitingM
     <section className="activity-panel" aria-label="Activity timeline">
       <header className="activity-panel-header">
         <div>
-          <h3>Activity</h3>
+          <h3>Current run</h3>
           <p>
             {statusOrder.map((status) => `${activityCount(activities, status)} ${statusLabels[status].toLowerCase()}`).join(' · ')}
           </p>
@@ -98,7 +98,7 @@ export default function ActivityPanel({ activities = [], activeSession, waitingM
       </header>
       {waitingMessage && (
         <section className={`waiting-surface ${latestPermissionActivity ? 'permission-like' : ''}`} aria-label="Waiting status">
-          <h4>Claude is waiting</h4>
+          <h4>Waiting for you</h4>
           <p>{waitingMessage}</p>
           {latestPermissionActivity && (
             <button type="button" onClick={() => onSelectActivity(latestPermissionActivity)}>
@@ -110,12 +110,12 @@ export default function ActivityPanel({ activities = [], activeSession, waitingM
       {!activeSession ? (
         <div className="activity-empty">
           <span className="activity-empty-title">No session selected</span>
-          <span>Select a session to see recent tool activity.</span>
+          <span>Select a chat to see what Claude has been doing.</span>
         </div>
       ) : activities.length === 0 ? (
         <div className="activity-empty">
-          <span className="activity-empty-title">No tool activity yet</span>
-          <span>Tool calls will appear here when Claude starts using them.</span>
+          <span className="activity-empty-title">No activity yet</span>
+          <span>Claude's tool calls and permission waits will appear here.</span>
         </div>
       ) : (
         <div className="activity-list">

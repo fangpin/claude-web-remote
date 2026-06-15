@@ -137,7 +137,7 @@ label {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 72px minmax(260px, 320px) minmax(0, 1fr) var(--inspector-width, 360px);
+  grid-template-columns: 72px minmax(260px, 320px) minmax(0, 1fr);
   height: 100vh;
   min-height: 0;
   color: var(--text);
@@ -145,15 +145,7 @@ label {
 }
 
 .app-shell.sidebar-closed {
-  grid-template-columns: 72px 0 minmax(0, 1fr) var(--inspector-width, 360px);
-}
-
-.app-shell.inspector-closed {
-  grid-template-columns: 72px minmax(260px, 320px) minmax(0, 1fr) 0;
-}
-
-.app-shell.sidebar-closed.inspector-closed {
-  grid-template-columns: 72px 0 minmax(0, 1fr) 0;
+  grid-template-columns: 72px 0 minmax(0, 1fr);
 }
 
 .primary-rail {
@@ -1271,6 +1263,7 @@ button.danger:hover {
 
 .conversation-header {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
   min-height: 50px;
@@ -1283,6 +1276,12 @@ button.danger:hover {
   display: grid;
   gap: 4px;
   min-width: 0;
+}
+
+.activity-drawer-trigger {
+  justify-self: end;
+  padding: 6px 10px;
+  font-size: 12px;
 }
 
 .conversation-title-row {
@@ -3361,14 +3360,39 @@ button.danger:hover {
   margin: 12px auto 0;
 }
 
-.inspector {
-  position: relative;
+.activity-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  width: auto;
+  height: auto;
+  border: 0;
+  border-radius: 0;
+  background: rgb(45 42 38 / 0.22);
+  padding: 0;
+  cursor: default;
+  backdrop-filter: blur(2px);
+}
+
+.activity-drawer-backdrop:hover {
+  background: rgb(45 42 38 / 0.24);
+}
+
+.inspector,
+.activity-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 60;
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, auto) minmax(0, 1fr);
+  width: min(var(--inspector-width, 360px), calc(100vw - 72px));
   min-width: 0;
   min-height: 0;
   border-left: 1px solid var(--border);
   background: var(--panel-bg);
+  box-shadow: var(--shadow-popover);
 }
 
 .inspector-resize-handle {
@@ -3401,50 +3425,12 @@ button.danger:hover {
   background: var(--accent);
 }
 
-.inspector-edge-toggle,
-.inspector-floating-toggle {
+.inspector-header,
+.activity-drawer-header {
   display: grid;
-  place-items: center;
-  width: 40px;
-  height: 72px;
-  border-color: var(--border);
-  border-radius: 999px;
-  color: var(--muted);
-  background: var(--surface);
-  padding: 0;
-  box-shadow: 0 4px 14px rgb(45 42 38 / 0.12);
-  touch-action: manipulation;
-}
-
-.inspector-edge-toggle {
-  position: absolute;
-  top: 50%;
-  left: -20px;
-  z-index: 120;
-  transform: translateY(-50%);
-}
-
-.inspector-floating-toggle {
-  position: fixed;
-  top: 50%;
-  right: 12px;
-  z-index: 120;
-  transform: translateY(-50%);
-}
-
-.inspector-edge-toggle:hover,
-.inspector-floating-toggle:hover {
-  color: var(--text);
-  background: var(--surface-hover);
-}
-
-.inspector-edge-toggle:active,
-.inspector-floating-toggle:active {
-  transform: translateY(-50%);
-}
-
-.inspector-header {
-  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
   min-width: 0;
   border-bottom: 1px solid var(--border);
   padding: 15px 16px;
@@ -3473,10 +3459,14 @@ button.danger:hover {
   font-size: 13px;
 }
 
+.activity-drawer-close {
+  padding: 6px 10px;
+  font-size: 12px;
+}
 
 .inspector-tabs {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 3px;
   border-bottom: 1px solid var(--border);
   padding: 10px 10px 9px;
@@ -3508,18 +3498,37 @@ button.danger:hover {
   box-shadow: 0 1px 2px rgb(45 42 38 / 0.04);
 }
 
-.app-shell.inspector-closed .inspector {
-  overflow: hidden;
-  pointer-events: none;
+.activity-drawer-advanced {
+  display: grid;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+  padding: 10px 14px;
 }
 
-.app-shell.inspector-closed .inspector-header {
-  display: none;
+.activity-drawer-advanced h3 {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 720;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
-.app-shell.inspector-closed .inspector-tabs,
-.app-shell.inspector-closed [role='tabpanel'] {
-  display: none !important;
+.activity-drawer-advanced-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.activity-drawer-advanced-actions button {
+  padding: 6px 9px;
+  font-size: 12px;
+}
+
+.activity-drawer-advanced-actions button[aria-pressed='true'] {
+  border-color: #d8c7b8;
+  color: var(--text);
+  background: #fffaf4;
 }
 
 .inspector-empty,
@@ -4259,8 +4268,7 @@ button.danger:hover {
     overflow: hidden;
   }
 
-  .app-shell,
-  .app-shell.inspector-closed {
+  .app-shell {
     grid-template-columns: 64px minmax(220px, 280px) minmax(0, 1fr);
     grid-template-rows: 1fr;
     height: 100vh;
@@ -4291,44 +4299,18 @@ button.danger:hover {
     margin-bottom: 26px;
   }
 
-  .inspector {
-    position: fixed;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 30;
-    grid-column: auto;
+  .activity-drawer {
     width: min(var(--inspector-width, 360px), calc(100vw - 72px));
-    border-top: 0;
-    border-left: 1px solid var(--border);
-    box-shadow: var(--shadow-popover);
-  }
-
-  .app-shell.inspector-closed .inspector {
-    width: 0;
-    overflow: hidden;
-    border-left: 0;
-    background: transparent;
-    box-shadow: none;
-    pointer-events: none;
-  }
-
-  .app-shell.inspector-closed .inspector-header,
-  .app-shell.inspector-closed .inspector-tabs,
-  .app-shell.inspector-closed .inspector [role='tabpanel'] {
-    display: none !important;
   }
 }
 
 @media (max-width: 760px) {
-  .app-shell,
-  .app-shell.inspector-closed {
+  .app-shell {
     grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(150px, 24vh) minmax(0, 1fr) auto;
+    grid-template-rows: auto minmax(150px, 24vh) minmax(0, 1fr);
   }
 
-  .app-shell.view-config,
-  .app-shell.view-config.inspector-closed {
+  .app-shell.view-config {
     grid-template-rows: auto minmax(0, 1fr);
   }
 
@@ -4416,6 +4398,7 @@ button.danger:hover {
 
   .conversation-header {
     display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 10px;
     padding: 12px 14px;
   }
@@ -4495,58 +4478,12 @@ button.danger:hover {
     max-height: min(310px, 44vh);
   }
 
-  .inspector,
-  .app-shell.inspector-closed .inspector {
-    position: relative;
-    top: auto;
-    right: auto;
-    bottom: auto;
-    width: auto;
-    min-height: 0;
-    max-height: 96px;
-    overflow: hidden;
-    border-top: 1px solid var(--border);
-    border-left: 0;
-    box-shadow: none;
+  .activity-drawer {
+    width: min(420px, calc(100vw - 18px));
   }
 
   .inspector-resize-handle {
     display: none;
-  }
-
-  .inspector-edge-toggle,
-  .inspector-floating-toggle {
-    top: 8px;
-    right: 10px;
-    left: auto;
-    width: 40px;
-    height: 40px;
-    transform: none;
-  }
-
-  .inspector-floating-toggle {
-    position: fixed;
-  }
-
-  .inspector-edge-toggle:active,
-  .inspector-floating-toggle:active {
-    transform: translateY(1px);
-  }
-
-  .inspector-header {
-    padding: 10px 56px 10px 12px;
-  }
-
-  .inspector-header button,
-  .inspector-tabs,
-  .inspector [role='tabpanel'] {
-    display: none !important;
-  }
-
-  .app-shell.inspector-closed .inspector {
-    width: auto;
-    background: var(--panel-bg);
-    pointer-events: auto;
   }
 
   .conversation-empty {
@@ -4611,20 +4548,12 @@ body {
 }
 
 .app-shell {
-  grid-template-columns: 58px minmax(260px, 312px) minmax(0, 1fr) var(--inspector-width, 360px);
+  grid-template-columns: 58px minmax(260px, 312px) minmax(0, 1fr);
   background: transparent;
 }
 
 .app-shell.sidebar-closed {
-  grid-template-columns: 58px 0 minmax(0, 1fr) var(--inspector-width, 360px);
-}
-
-.app-shell.inspector-closed {
-  grid-template-columns: 58px minmax(260px, 312px) minmax(0, 1fr) 0;
-}
-
-.app-shell.sidebar-closed.inspector-closed {
-  grid-template-columns: 58px 0 minmax(0, 1fr) 0;
+  grid-template-columns: 58px 0 minmax(0, 1fr);
 }
 
 .primary-rail {
@@ -5089,11 +5018,6 @@ body {
   backdrop-filter: blur(18px);
 }
 
-.inspector-edge-toggle,
-.inspector-floating-toggle {
-  border-color: rgb(111 94 75 / 0.16);
-  background: rgb(255 250 242 / 0.92);
-}
 
 .inspector-header {
   border-bottom-color: rgb(111 94 75 / 0.1);
@@ -5121,14 +5045,6 @@ body {
   box-shadow: none;
 }
 
-.app-shell.inspector-closed .inspector {
-  background: transparent;
-  border-left-color: transparent;
-}
-
-.app-shell.inspector-closed .inspector-header {
-  background: transparent;
-}
 
 .activity-card,
 .diagnostic-block,
@@ -5141,17 +5057,14 @@ body {
 }
 
 @media (max-width: 1100px) {
-  .app-shell,
-  .app-shell.inspector-closed {
+  .app-shell {
     grid-template-columns: 56px minmax(220px, 284px) minmax(0, 1fr);
   }
 }
 
 @media (max-width: 760px) {
   .app-shell,
-  .app-shell.inspector-closed,
-  .app-shell.sidebar-closed,
-  .app-shell.sidebar-closed.inspector-closed {
+  .app-shell.sidebar-closed {
     grid-template-columns: minmax(0, 1fr);
   }
 
