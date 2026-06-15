@@ -82,7 +82,7 @@ export default function ProjectHome({
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
   const fallbackCwd = defaultProjectCwd(recentSessions, recentProjects);
   const shouldUseFallbackCwd = Boolean(!hasEditedContext && fallbackCwd && (!cwd.trim() || cwd.trim() === recentProjects[0]?.cwd));
-  const launchCwd = shouldUseFallbackCwd ? fallbackCwd : cwd.trim();
+  const launchCwd = cwd.trim();
   const canStart = Boolean(launchCwd && initialPrompt.trim());
   const projectLabel = launchCwd ? pathBasename(launchCwd) : 'Choose project';
 
