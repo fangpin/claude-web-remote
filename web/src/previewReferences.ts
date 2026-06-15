@@ -60,7 +60,8 @@ function parseToolUse(event: PreviewSourceEvent): ToolUse[] {
   const payload = event.payload;
   if (!isRecord(payload)) return [];
 
-  const candidates = [payload, ...arrayValue(payload.content), ...arrayValue(payload.message?.content)];
+  const message = isRecord(payload.message) ? payload.message : undefined;
+  const candidates = [payload, ...arrayValue(payload.content), ...arrayValue(message?.content)];
   return candidates.flatMap((candidate) => {
     if (!isRecord(candidate)) return [];
     if (candidate.type !== 'tool_use' && !candidate.name) return [];
@@ -84,7 +85,8 @@ function buildResultMap(events: PreviewSourceEvent[]): Map<string, string> {
   for (const event of events) {
     const payload = event.payload;
     if (!isRecord(payload)) continue;
-    const candidates = [payload, ...arrayValue(payload.content), ...arrayValue(payload.message?.content)];
+    const message = isRecord(payload.message) ? payload.message : undefined;
+    const candidates = [payload, ...arrayValue(payload.content), ...arrayValue(message?.content)];
     for (const candidate of candidates) {
       if (!isRecord(candidate) || candidate.type !== 'tool_result') continue;
       const toolUseId = stringValue(candidate.tool_use_id) ?? stringValue(candidate.id);
@@ -141,7 +143,8 @@ function parseStreamedToolUses(events: PreviewSourceEvent[]): ToolUse[] {
 
     if (payload.type === 'content_block_stop') {
       const index = numberValue(payload.index);
-      const state = index === undefined ? undefined : states.get(index);
+      if (index === undefined) continue;
+      const state = states.get(index);
       if (!state) continue;
       toolUses.push({
         eventId: state.eventId,
