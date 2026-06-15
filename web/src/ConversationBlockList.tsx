@@ -1,5 +1,6 @@
 import RawEventDetails from './RawEventDetails';
 import type { ConversationBlock, ErrorBlock, MessageBlock, RawBlock, TaskBlock, ToolBlock } from './conversationBlocks';
+import type { ConversationDisplayMode } from './presentationPolicy';
 import hljs from 'highlight.js/lib/core';
 import bash from 'highlight.js/lib/languages/bash';
 import css from 'highlight.js/lib/languages/css';
@@ -16,6 +17,12 @@ import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import React, { useMemo, useState } from 'react';
 import './ConversationBlockList.css';
+
+type ConversationBlockListProps = {
+  blocks: ConversationBlock[];
+  displayMode: ConversationDisplayMode;
+  onDisplayModeChange: (mode: ConversationDisplayMode) => void;
+};
 
 function roleLabel(role: MessageBlock['role']): string {
   if (role === 'assistant') return 'Claude';
@@ -259,7 +266,7 @@ function MessageMarkdown({ text }: { text: string }) {
   );
 }
 
-function MessageBlockView({ block }: { block: MessageBlock }) {
+function MessageBlockView({ block, displayMode }: { block: MessageBlock; displayMode: ConversationDisplayMode }) {
   return (
     <article id={blockElementId(block)} className={`conversation-block message-block ${block.role}`}>
       <header className="block-header message-header">
@@ -321,7 +328,7 @@ function toolResultTitle(block: ToolBlock): string {
   return 'Result';
 }
 
-function ToolBlockView({ block }: { block: ToolBlock }) {
+function ToolBlockView({ block, displayMode }: { block: ToolBlock; displayMode: ConversationDisplayMode }) {
   const hasVisibleResult = block.resultSummary.trim() && block.resultDisplay !== 'hidden';
   const showInlineResult = hasVisibleResult && block.resultDisplay === 'visible';
   const showCollapsedResult = hasVisibleResult && block.resultDisplay === 'collapsed';
@@ -358,7 +365,7 @@ function ToolBlockView({ block }: { block: ToolBlock }) {
   );
 }
 
-function TaskBlockView({ block }: { block: TaskBlock }) {
+function TaskBlockView({ block, displayMode }: { block: TaskBlock; displayMode: ConversationDisplayMode }) {
   return (
     <article id={blockElementId(block)} className={`conversation-block task-block ${block.status}${block.density === 'compact' ? ' compact' : ''}`}>
       <header className="block-header task-header">
@@ -400,7 +407,7 @@ function TaskBlockView({ block }: { block: TaskBlock }) {
   );
 }
 
-function ErrorBlockView({ block }: { block: ErrorBlock }) {
+function ErrorBlockView({ block, displayMode }: { block: ErrorBlock; displayMode: ConversationDisplayMode }) {
   return (
     <article id={blockElementId(block)} className="conversation-block error-block">
       <header className="block-header">
@@ -412,7 +419,7 @@ function ErrorBlockView({ block }: { block: ErrorBlock }) {
   );
 }
 
-function RawBlockView({ block }: { block: RawBlock }) {
+function RawBlockView({ block, displayMode }: { block: RawBlock; displayMode: ConversationDisplayMode }) {
   return (
     <article id={blockElementId(block)} className={`conversation-block raw-block ${block.severity ?? 'info'}`}>
       <header className="block-header">
@@ -423,20 +430,52 @@ function RawBlockView({ block }: { block: RawBlock }) {
   );
 }
 
-function ConversationBlockView({ block }: { block: ConversationBlock }) {
-  if (block.type === 'anchor') return <span id={blockElementId(block)} className="conversation-anchor" aria-hidden="true" />;
-  if (block.type === 'message') return <MessageBlockView block={block} />;
-  if (block.type === 'tool') return <ToolBlockView block={block} />;
-  if (block.type === 'task') return <TaskBlockView block={block} />;
-  if (block.type === 'error') return <ErrorBlockView block={block} />;
-  return <RawBlockView block={block} />;
+function ConversationDisplayModeSwitch({
+  displayMode,
+  onDisplayModeChange
+}: {
+  displayMode: ConversationDisplayMode;
+  onDisplayModeChange: (mode: ConversationDisplayMode) => void;
+}) {
+  return (
+    <div className="conversation-display-mode-switch" role="group" aria-label="Conversation display mode">
+      <button
+        type="button"
+        className={displayMode === 'chat' ? 'selected' : undefined}
+        aria-label="Chat view"
+        aria-pressed={displayMode === 'chat'}
+        onClick={() => onDisplayModeChange('chat')}
+      >
+        Chat
+      </button>
+      <button
+        type="button"
+        className={displayMode === 'debug' ? 'selected' : undefined}
+        aria-label="Debug view"
+        aria-pressed={displayMode === 'debug'}
+        onClick={() => onDisplayModeChange('debug')}
+      >
+        Debug
+      </button>
+    </div>
+  );
 }
 
-export default function ConversationBlockList({ blocks }: { blocks: ConversationBlock[] }) {
+function ConversationBlockView({ block, displayMode }: { block: ConversationBlock; displayMode: ConversationDisplayMode }) {
+  if (block.type === 'anchor') return <span id={blockElementId(block)} className="conversation-anchor" aria-hidden="true" />;
+  if (block.type === 'message') return <MessageBlockView block={block} displayMode={displayMode} />;
+  if (block.type === 'tool') return <ToolBlockView block={block} displayMode={displayMode} />;
+  if (block.type === 'task') return <TaskBlockView block={block} displayMode={displayMode} />;
+  if (block.type === 'error') return <ErrorBlockView block={block} displayMode={displayMode} />;
+  return <RawBlockView block={block} displayMode={displayMode} />;
+}
+
+export default function ConversationBlockList({ blocks, displayMode, onDisplayModeChange }: ConversationBlockListProps) {
   return (
     <div className="conversation-blocks">
+      <ConversationDisplayModeSwitch displayMode={displayMode} onDisplayModeChange={onDisplayModeChange} />
       {blocks.map((block) => (
-        <ConversationBlockView key={block.id} block={block} />
+        <ConversationBlockView key={block.id} block={block} displayMode={displayMode} />
       ))}
     </div>
   );

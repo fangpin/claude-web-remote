@@ -4,6 +4,7 @@ import { buildActivityTimeline, latestReviewActivity, reviewSurface, waitingCopy
 import ConversationWorkspace from './ConversationWorkspace';
 import InspectorPanel, { type InspectorTab } from './InspectorPanel';
 import { hasAppModifier, isEditableTarget, isPlainSlash } from './keyboardShortcuts';
+import type { ConversationDisplayMode } from './presentationPolicy';
 import ProjectHome from './ProjectHome';
 import SessionSidebar from './SessionSidebar';
 import { getContinueActionLabel } from './sessionContinuity';
@@ -51,6 +52,7 @@ export default function App() {
   const [notifiedAttentionKey, setNotifiedAttentionKey] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('session');
+  const [conversationDisplayMode, setConversationDisplayMode] = useState<ConversationDisplayMode>('chat');
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const isDiagnosticsVisible = view === 'sessions' && isInspectorOpen && inspectorTab === 'diagnostics';
   const taskActionsRef = useRef<TaskActions>({
@@ -97,6 +99,7 @@ export default function App() {
   const eventState = useSessionEvents({
     activeId: sessionState.activeId,
     activeSession: sessionState.activeSession,
+    displayMode: conversationDisplayMode,
     eventRenderLimit: EVENT_RENDER_LIMIT,
     isActiveSessionMode: sessionState.isActiveSessionMode,
     isComposerSession,
@@ -645,6 +648,7 @@ function focusFallbackAfterSidebarClose() {
           autocompleteOptionRefs={composerState.autocompleteOptionRefs}
           autocompleteToken={composerState.autocompleteToken}
           canSend={composerState.canSend}
+          conversationDisplayMode={conversationDisplayMode}
           composerDisabledReason={composerState.composerDisabledReason}
           composerRef={composerState.composerRef}
           contextAttachments={composerState.contextAttachments}
@@ -689,6 +693,7 @@ function focusFallbackAfterSidebarClose() {
           onAddPathContextAttachment={composerState.addPathContextAttachment}
           onAddTextContextAttachment={composerState.addTextContextAttachment}
           onCompleteSuggestion={composerState.completeSuggestion}
+          onConversationDisplayModeChange={setConversationDisplayMode}
           onMessageChange={composerState.onMessageChange}
           onMessageKeyDown={composerState.onMessageKeyDown}
           onMessageSelect={composerState.onMessageSelect}

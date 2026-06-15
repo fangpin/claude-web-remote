@@ -7,6 +7,7 @@ import type { AppView, SessionListMode } from './AppShell';
 import type { ClaudeCommand, SlashCommandToken } from './autocomplete';
 import type { ReviewSurface } from './activityTimeline';
 import type { ConversationBlock } from './conversationBlocks';
+import type { ConversationDisplayMode } from './presentationPolicy';
 import { getContinuityLabel, getSessionRuntimeLabel } from './sessionContinuity';
 import type { EventConnectionState } from './useSessionEvents';
 import type { ComposerContextAttachment, SessionInfo, WorktreeStatus } from './types';
@@ -23,6 +24,7 @@ type Props = {
   autocompleteOptionRefs: RefObject<Array<HTMLButtonElement | null>>;
   autocompleteToken: SlashCommandToken | null;
   canSend: boolean;
+  conversationDisplayMode: ConversationDisplayMode;
   contextAttachments: ComposerContextAttachment[];
   composerDisabledReason: string;
   composerRef: RefObject<HTMLFormElement | null>;
@@ -54,6 +56,7 @@ type Props = {
   onAddPathContextAttachment: (path: string) => void;
   onAddTextContextAttachment: (name: string, content: string) => void;
   onCompleteSuggestion: (suggestion: ClaudeCommand) => void;
+  onConversationDisplayModeChange: (mode: ConversationDisplayMode) => void;
   onMessageChange: (value: string, element: HTMLTextAreaElement) => void;
   onMessageKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   onMessageSelect: (value: string, cursor: number | null) => void;
@@ -282,6 +285,7 @@ export default function ConversationWorkspace({
   autocompleteOptionRefs,
   autocompleteToken,
   canSend,
+  conversationDisplayMode,
   composerDisabledReason,
   contextAttachments,
   composerRef,
@@ -313,6 +317,7 @@ export default function ConversationWorkspace({
   onAddPathContextAttachment,
   onAddTextContextAttachment,
   onCompleteSuggestion,
+  onConversationDisplayModeChange,
   onMessageChange,
   onMessageKeyDown,
   onMessageSelect,
@@ -439,7 +444,11 @@ export default function ConversationWorkspace({
                   )}
                 </section>
               )}
-              <ConversationBlockList blocks={activeBlocks} />
+              <ConversationBlockList
+                blocks={activeBlocks}
+                displayMode={conversationDisplayMode}
+                onDisplayModeChange={onConversationDisplayModeChange}
+              />
             </div>
           </div>
           <Composer

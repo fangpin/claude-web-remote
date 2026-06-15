@@ -16,6 +16,10 @@ describe('ConversationBlockList', () => {
   beforeEach(() => cleanup());
   afterEach(() => vi.unstubAllGlobals());
 
+  function renderConversation(blocks: ConversationBlock[], displayMode: 'chat' | 'debug' = 'chat') {
+    return render(<ConversationBlockList blocks={blocks} displayMode={displayMode} onDisplayModeChange={vi.fn()} />);
+  }
+
   it('renders assistant messages as Markdown', () => {
     const blocks: ConversationBlock[] = [
       {
@@ -28,7 +32,7 @@ describe('ConversationBlockList', () => {
       }
     ];
 
-    render(<ConversationBlockList blocks={blocks} />);
+    renderConversation(blocks);
 
     const article = screen.getByRole('article');
     expect(article).toHaveClass('conversation-block', 'message-block', 'assistant');
@@ -49,6 +53,29 @@ describe('ConversationBlockList', () => {
     expect(within(article).queryByText('1 event')).not.toBeInTheDocument();
   });
 
+  it('renders a Chat Debug mode switch and calls back when changed', () => {
+    const onDisplayModeChange = vi.fn();
+    const blocks: ConversationBlock[] = [
+      {
+        id: 'message-1',
+        type: 'message',
+        role: 'assistant',
+        text: 'Hello',
+        eventIds: [1],
+        rawEvents: [rawEvent(1, { message: 'Hello' })]
+      }
+    ];
+
+    render(<ConversationBlockList blocks={blocks} displayMode="chat" onDisplayModeChange={onDisplayModeChange} />);
+
+    expect(screen.getByRole('button', { name: 'Chat view' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Debug view' })).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Debug view' }));
+
+    expect(onDisplayModeChange).toHaveBeenCalledWith('debug');
+  });
+
   it('renders GitHub-flavored Markdown tables', () => {
     const blocks: ConversationBlock[] = [
       {
@@ -61,7 +88,7 @@ describe('ConversationBlockList', () => {
       }
     ];
 
-    render(<ConversationBlockList blocks={blocks} />);
+    renderConversation(blocks);
 
     const article = screen.getByRole('article');
     const table = within(article).getByRole('table');
@@ -96,7 +123,7 @@ describe('ConversationBlockList', () => {
       }
     ];
 
-    const { container } = render(<ConversationBlockList blocks={blocks} />);
+    const { container } = renderConversation(blocks);
 
     const article = screen.getByRole('article');
     const nestedItem = within(article).getByText(/nested item with/).closest('li');
@@ -132,7 +159,7 @@ describe('ConversationBlockList', () => {
       }
     ];
 
-    render(<ConversationBlockList blocks={blocks} />);
+    renderConversation(blocks);
 
     const articles = screen.getAllByRole('article');
     expect(articles[0]).toHaveClass('message-block', 'user');
@@ -160,7 +187,7 @@ describe('ConversationBlockList', () => {
       }
     ];
 
-    render(<ConversationBlockList blocks={blocks} />);
+    renderConversation(blocks);
 
     const article = screen.getByRole('article');
     expect(article).toHaveClass('conversation-block', 'tool-block', 'completed');
@@ -190,7 +217,7 @@ describe('ConversationBlockList', () => {
       }
     ];
 
-    render(<ConversationBlockList blocks={blocks} />);
+    renderConversation(blocks);
 
     const article = screen.getByRole('article');
     expect(within(article).getByText('Read')).toBeInTheDocument();
@@ -218,7 +245,7 @@ describe('ConversationBlockList', () => {
       }
     ];
 
-    render(<ConversationBlockList blocks={blocks} />);
+    renderConversation(blocks);
 
     const article = screen.getByRole('article');
     expect(within(article).getAllByText('Result collapsed (11 chars)')).toHaveLength(2);
@@ -246,7 +273,7 @@ describe('ConversationBlockList', () => {
       }
     ];
 
-    render(<ConversationBlockList blocks={blocks} />);
+    renderConversation(blocks);
 
     const article = screen.getByRole('article');
     expect(article).toHaveClass('tool-block', 'failed', 'result-text');
@@ -300,7 +327,7 @@ describe('ConversationBlockList', () => {
       }
     ];
 
-    render(<ConversationBlockList blocks={blocks} />);
+    renderConversation(blocks);
 
     const articles = screen.getAllByRole('article');
     expect(within(articles[0]).getByText('Diff')).toBeInTheDocument();
@@ -365,7 +392,7 @@ describe('ConversationBlockList', () => {
       }
     ];
 
-    render(<ConversationBlockList blocks={blocks} />);
+    renderConversation(blocks);
 
     const articles = screen.getAllByRole('article');
     articles.forEach((article) => {
@@ -407,7 +434,7 @@ describe('ConversationBlockList', () => {
     ];
 
     try {
-      render(<ConversationBlockList blocks={blocks} />);
+      renderConversation(blocks);
 
       fireEvent.click(screen.getByRole('button', { name: 'Copy code' }));
 
@@ -439,7 +466,7 @@ describe('ConversationBlockList', () => {
       }
     ];
 
-    render(<ConversationBlockList blocks={blocks} />);
+    renderConversation(blocks);
 
     const article = screen.getByRole('article');
     expect(article).toHaveClass('conversation-block', 'task-block', 'running');
@@ -502,7 +529,7 @@ describe('ConversationBlockList', () => {
       }
     ];
 
-    const { container } = render(<ConversationBlockList blocks={blocks} />);
+    const { container } = renderConversation(blocks);
 
     expect(container.querySelector('.message-block.user')).not.toBeNull();
     expect(container.querySelector('.message-block.system')).not.toBeNull();
@@ -546,7 +573,7 @@ describe('ConversationBlockList', () => {
       }
     ];
 
-    render(<ConversationBlockList blocks={blocks} />);
+    renderConversation(blocks);
 
     const articles = screen.getAllByRole('article');
     expect(articles[0]).toHaveClass('conversation-block', 'error-block');
@@ -605,7 +632,7 @@ describe('ConversationBlockList', () => {
       }
     ];
 
-    render(<ConversationBlockList blocks={blocks} />);
+    renderConversation(blocks);
 
     const articles = screen.getAllByRole('article');
     expect(within(articles[0]).queryByText('Raw events')).not.toBeInTheDocument();
