@@ -3580,6 +3580,13 @@ button.danger:hover {
   display: grid;
   gap: 5px;
   min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.preview-file-list li {
+  min-width: 0;
 }
 
 .preview-file-list button {

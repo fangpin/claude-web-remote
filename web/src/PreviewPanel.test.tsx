@@ -141,7 +141,118 @@ describe('PreviewPanel', () => {
     expect(await screen.findByText('Unable to load worktree diff: git failed')).toBeInTheDocument();
   });
 
-  it('uses selectedPath, allows local selection, and falls back to transcript snippets', async () => {
+  it('normalizes absolute selectedPath values against source and worktree roots', async () => {
+    const loadWorktreeDiff = vi.fn(async () =>
+      diff({
+        diff:
+          'diff --git a/web/src/App.tsx b/web/src/App.tsx\n+changed\n' +
+          'diff --git a/web/src/PreviewPanel.tsx b/web/src/PreviewPanel.tsx\n+preview',
+        files: [
+          { path: 'web/src/App.tsx', status: 'modified', additions: 1, deletions: 0 },
+          { path: 'web/src/PreviewPanel.tsx', status: 'modified', additions: 1, deletions: 0 }
+        ]
+      })
+    );
+    const { rerender } = render(
+      <PreviewPanel
+        activeSession={worktreeSession()}
+        events={[]}
+        selectedPath="/repo/one/web/src/PreviewPanel.tsx"
+        loadWorktreeDiff={loadWorktreeDiff}
+      />
+    );
+
+    expect(await screen.findByRole('button', { name: /web\/src\/PreviewPanel.tsx/ })).toHaveAttribute('aria-pressed', 'true');
+
+    rerender(
+      <PreviewPanel
+        activeSession={worktreeSession()}
+        events={[]}
+        selectedPath="/repo/one/.claude/worktrees/abc123/web/src/App.tsx"
+        loadWorktreeDiff={loadWorktreeDiff}
+      />
+    );
+
+    expect(await screen.findByRole('button', { name: /web\/src\/App.tsx/ })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('lets local row clicks override selectedPath until the prop changes', async () => {
+    const loadWorktreeDiff = vi.fn(async () =>
+      diff({
+        diff:
+          'diff --git a/web/src/App.tsx b/web/src/App.tsx\n+changed\n' +
+          'diff --git a/web/src/PreviewPanel.tsx b/web/src/PreviewPanel.tsx\n+preview',
+        files: [
+          { path: 'web/src/App.tsx', status: 'modified', additions: 1, deletions: 0 },
+          { path: 'web/src/PreviewPanel.tsx', status: 'modified', additions: 1, deletions: 0 }
+        ]
+      })
+    );
+
+    const { rerender } = render(
+      <PreviewPanel
+        activeSession={worktreeSession()}
+        events={[]}
+        selectedPath="web/src/PreviewPanel.tsx"
+        loadWorktreeDiff={loadWorktreeDiff}
+      />
+    );
+
+    const appButton = await screen.findByRole('button', { name: /web\/src\/App.tsx/ });
+    const previewButton = screen.getByRole('button', { name: /web\/src\/PreviewPanel.tsx/ });
+    expect(previewButton).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(appButton);
+
+    expect(appButton).toHaveAttribute('aria-pressed', 'true');
+    expect(previewButton).toHaveAttribute('aria-pressed', 'false');
+
+    rerender(
+      <PreviewPanel
+        activeSession={worktreeSession()}
+        events={[]}
+        selectedPath="web/src/PreviewPanel.tsx"
+        loadWorktreeDiff={loadWorktreeDiff}
+      />
+    );
+
+    expect(appButton).toHaveAttribute('aria-pressed', 'true');
+
+    rerender(
+      <PreviewPanel
+        activeSession={worktreeSession()}
+        events={[]}
+        selectedPath="web/src/PreviewPanel.tsx?changed"
+        loadWorktreeDiff={loadWorktreeDiff}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: /web\/src\/PreviewPanel.tsx/ })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('does not reload the diff when only the session object identity changes', async () => {
+    const loadWorktreeDiff = vi.fn(async () => diff());
+    const { rerender } = render(
+      <PreviewPanel activeSession={worktreeSession()} events={[]} selectedPath={null} loadWorktreeDiff={loadWorktreeDiff} />
+    );
+
+    expect(await screen.findByRole('button', { name: /web\/src\/App.tsx/ })).toBeInTheDocument();
+    expect(loadWorktreeDiff).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <PreviewPanel
+        activeSession={worktreeSession({ updatedAt: '2026-06-11T00:00:01Z' })}
+        events={[]}
+        selectedPath={null}
+        loadWorktreeDiff={loadWorktreeDiff}
+      />
+    );
+
+    expect(loadWorktreeDiff).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('Loading diff...')).not.toBeInTheDocument();
+  });
+
+  it('uses valid list semantics for preview file rows and falls back to transcript snippets', async () => {
     const loadWorktreeDiff = vi.fn(async () =>
       diff({
         diff: 'diff --git a/web/src/App.tsx b/web/src/App.tsx\n+changed',
@@ -159,7 +270,9 @@ describe('PreviewPanel', () => {
       />
     );
 
-    const transcriptButton = await screen.findByRole('button', { name: /web\/src\/PreviewPanel.tsx/ });
+    const list = await screen.findByRole('list', { name: 'Preview files' });
+    expect(within(list).getAllByRole('listitem')).toHaveLength(2);
+    const transcriptButton = within(list).getByRole('button', { name: /web\/src\/PreviewPanel.tsx/ });
     expect(transcriptButton).toHaveAttribute('aria-pressed', 'true');
     expect(screen.queryByRole('heading', { name: 'Worktree diff' })).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Transcript snippets' })).toBeInTheDocument();

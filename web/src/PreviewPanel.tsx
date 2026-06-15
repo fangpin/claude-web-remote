@@ -25,6 +25,7 @@ export default function PreviewPanel({
   const [localSelectedPath, setLocalSelectedPath] = useState<string | null>(null);
   const [diffState, setDiffState] = useState<DiffState>({ status: 'idle', diff: null, error: null });
 
+  const diffSessionId = activeSession?.worktree ? activeSession.id : null;
   const references = useMemo(() => extractPreviewFileReferences(events), [events]);
   const referenceMap = useMemo(() => groupReferencesByPath(references, activeSession), [activeSession, references]);
   const diffFiles = diffState.status === 'loaded' ? diffState.diff.files : [];
@@ -43,7 +44,8 @@ export default function PreviewPanel({
     return [...merged];
   }, [activeSession, diffFiles, references]);
 
-  const activePathCandidate = selectedPath ?? localSelectedPath ?? paths[0] ?? null;
+  const normalizedSelectedPath = selectedPath ? relativePreviewPath(stripSelectedPathSuffix(selectedPath), activeSession) : null;
+  const activePathCandidate = localSelectedPath ?? normalizedSelectedPath ?? paths[0] ?? null;
   const activePath = activePathCandidate && paths.includes(activePathCandidate) ? activePathCandidate : paths[0] ?? null;
   const activeReferences = activePath ? referenceMap.get(activePath) ?? [] : [];
   const activeDiffFile = activePath ? diffFilesByPath.get(activePath) ?? null : null;
@@ -55,7 +57,7 @@ export default function PreviewPanel({
   }, [activeSession?.id, selectedPath]);
 
   useEffect(() => {
-    if (!isWorktree || !activeSession) {
+    if (!diffSessionId) {
       setDiffState({ status: 'idle', diff: null, error: null });
       return;
     }
@@ -63,7 +65,7 @@ export default function PreviewPanel({
     let cancelled = false;
     setDiffState({ status: 'loading', diff: null, error: null });
 
-    loadWorktreeDiff(activeSession.id)
+    loadWorktreeDiff(diffSessionId)
       .then((diff) => {
         if (cancelled) return;
         setDiffState({ status: 'loaded', diff, error: null });
@@ -76,7 +78,7 @@ export default function PreviewPanel({
     return () => {
       cancelled = true;
     };
-  }, [activeSession, isWorktree, loadWorktreeDiff]);
+  }, [diffSessionId, loadWorktreeDiff]);
 
   if (!activeSession) {
     return <div className="preview-panel preview-empty">No session selected.</div>;
@@ -103,22 +105,23 @@ export default function PreviewPanel({
 
       {paths.length > 0 ? (
         <div className="preview-layout">
-          <div className="preview-file-list" role="list" aria-label="Preview files">
+          <ul className="preview-file-list" aria-label="Preview files">
             {paths.map((path) => {
               const file = diffFilesByPath.get(path);
               return (
-                <button
-                  key={path}
-                  type="button"
-                  aria-pressed={path === activePath}
-                  onClick={() => setLocalSelectedPath(path)}
-                >
-                  <span>{path}</span>
-                  {file ? <span className="preview-file-stats">{formatDiffStats(file.additions, file.deletions)}</span> : null}
-                </button>
+                <li key={path}>
+                  <button
+                    type="button"
+                    aria-pressed={path === activePath}
+                    onClick={() => setLocalSelectedPath(path)}
+                  >
+                    <span>{path}</span>
+                    {file ? <span className="preview-file-stats">{formatDiffStats(file.additions, file.deletions)}</span> : null}
+                  </button>
+                </li>
               );
             })}
-          </div>
+          </ul>
 
           <div className="preview-detail" aria-label="Preview details">
             {activePath ? <h4>{activePath}</h4> : null}
@@ -167,8 +170,9 @@ function groupReferencesByPath(
 
 function relativePreviewPath(path: string, activeSession?: SessionInfo | null): string {
   const source = activeSession?.worktree?.sourceCwd;
+  const worktree = activeSession?.worktree?.worktreeCwd;
   const cwd = activeSession?.cwd;
-  const prefixes = [source, cwd].filter((value): value is string => Boolean(value));
+  const prefixes = [source, worktree, cwd].filter((value): value is string => Boolean(value));
 
   for (const prefix of prefixes) {
     if (path === prefix) return '';
@@ -178,6 +182,10 @@ function relativePreviewPath(path: string, activeSession?: SessionInfo | null): 
   }
 
   return path.startsWith('/') ? path.split('/').filter(Boolean).slice(-3).join('/') : path;
+}
+
+function stripSelectedPathSuffix(path: string): string {
+  return path.split(/[?#]/, 1)[0];
 }
 
 function formatDiffStats(additions?: number | null, deletions?: number | null): string {
