@@ -5262,6 +5262,10 @@ textarea {
   .session-move-select,
   .session-pin-button:hover,
   .session-pin-button.pinned,
+  .session-continuity-summary span,
+  .session-context-badge,
+  .session-context-popover summary,
+  .worktree-path-popover summary,
   .worktree-status-heading span,
   .worktree-state,
   .worktree-files-details summary small,
@@ -5283,6 +5287,37 @@ textarea {
     border-color: var(--border-subtle);
     color: var(--text-soft);
     background: var(--surface-2);
+  }
+
+  .collapsed-result summary,
+  .task-detail summary,
+  .raw-event-details summary,
+  .worktree-files-details summary,
+  .worktree-diff-viewer summary,
+  .advanced-session-options summary,
+  .diagnostic-details summary {
+    color: var(--muted);
+  }
+
+  .project-cwd-row .field-stack > span:first-child,
+  .advanced-session-options .field-stack > span:first-child,
+  .collapsed-result summary,
+  .worktree-files-details summary,
+  .worktree-diff-viewer summary {
+    color: var(--accent-strong);
+  }
+
+  .advanced-session-options summary {
+    border: 1px solid var(--border-subtle);
+    border-radius: 999px;
+    color: var(--text-soft);
+    background: var(--surface-2);
+    padding: 5px 10px;
+  }
+
+  .advanced-session-options .field-stack span,
+  .option-line small {
+    color: var(--text-soft);
   }
 
   .message-text code,

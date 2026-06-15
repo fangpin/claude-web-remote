@@ -3,8 +3,11 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'App.css'), 'utf8');
-const finalDarkOverrides = css.slice(css.lastIndexOf('@media (prefers-color-scheme: dark)'));
+const dir = dirname(fileURLToPath(import.meta.url));
+const appCss = readFileSync(join(dir, 'App.css'), 'utf8');
+const tasksCss = readFileSync(join(dir, 'TasksPanel.css'), 'utf8');
+const finalDarkOverrides = appCss.slice(appCss.lastIndexOf('@media (prefers-color-scheme: dark)'));
+const tasksDarkOverrides = tasksCss.slice(tasksCss.lastIndexOf('@media (prefers-color-scheme: dark)'));
 
 describe('dark mode CSS', () => {
   it('overrides light-only alert and empty-state surfaces with dark tokens', () => {
@@ -17,5 +20,25 @@ describe('dark mode CSS', () => {
     expect(finalDarkOverrides).toMatch(/\.session-modes button,[\s\S]*\.session-list-toolbar h2[\s\S]*color: var\(--muted\)/);
     expect(finalDarkOverrides).toMatch(/\.primary-action,[\s\S]*\.send-button[\s\S]*color: #fffaf2[\s\S]*background: linear-gradient\(180deg, #5a3f31, #3f2d23\)/);
     expect(finalDarkOverrides).toMatch(/\.primary-action:hover,[\s\S]*\.send-button:hover[\s\S]*color: #fffaf2[\s\S]*background: linear-gradient\(180deg, #6a4b3b, #4a3429\)/);
+    expect(finalDarkOverrides).toContain('.session-continuity-summary span');
+    expect(finalDarkOverrides).toContain('.session-context-popover summary');
+    expect(finalDarkOverrides).toContain('.worktree-status-heading span');
+    expect(finalDarkOverrides).toContain('.worktree-files-details summary small');
+    expect(finalDarkOverrides).toContain('.activity-empty');
+    expect(tasksDarkOverrides).toContain('.task-panel-empty');
+    expect(tasksDarkOverrides).toContain('.task-panel-empty-title');
+    expect(finalDarkOverrides).toMatch(/\.session-continuity-summary span,[\s\S]*background: var\(--surface-2\)/);
+    expect(finalDarkOverrides).toMatch(/\.session-context-popover summary[\s\S]*background: var\(--surface-2\)/);
+    expect(finalDarkOverrides).toMatch(/\.worktree-status-heading span,[\s\S]*background: var\(--surface-2\)/);
+    expect(finalDarkOverrides).toMatch(/\.activity-empty,[\s\S]*background: var\(--surface-raised\)/);
+    expect(tasksDarkOverrides).toMatch(/\.task-panel-empty,[\s\S]*background: var\(--surface-raised\)/);
+    expect(tasksDarkOverrides).toMatch(/\.task-panel-empty-title[\s\S]*color: var\(--text\)/);
+    expect(finalDarkOverrides).toMatch(/\.raw-event-details summary[\s\S]*color: var\(--muted\)/);
+    expect(finalDarkOverrides).toContain('.project-cwd-row .field-stack > span:first-child');
+    expect(finalDarkOverrides).toContain('.advanced-session-options summary');
+    expect(finalDarkOverrides).toContain('.advanced-session-options .field-stack > span:first-child');
+    expect(finalDarkOverrides).toMatch(/\.project-cwd-row \.field-stack > span:first-child,[\s\S]*color: var\(--accent-strong\)/);
+    expect(finalDarkOverrides).toMatch(/\.advanced-session-options summary[\s\S]*color: var\(--text-soft\)[\s\S]*background: var\(--surface-2\)/);
+    expect(finalDarkOverrides).toMatch(/\.advanced-session-options \.field-stack > span:first-child[\s\S]*color: var\(--accent-strong\)/);
   });
 });
