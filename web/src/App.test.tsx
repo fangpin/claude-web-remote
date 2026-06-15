@@ -561,6 +561,8 @@ describe('App', () => {
     expect(within(conversationHeader as HTMLElement).getByRole('button', { name: 'Stop' })).toBeInTheDocument();
     expect(within(conversationHeader as HTMLElement).getByRole('button', { name: 'Activity' })).toBeInTheDocument();
     expect(within(conversationHeader as HTMLElement).getByRole('button', { name: 'More session actions' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Chat view' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Debug view' })).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByLabelText('Claude: Claude is waiting')).toBeInTheDocument();
     expect(screen.getByLabelText('Claude attention notification')).toHaveTextContent('Claude is waiting');
     expect(screen.queryByLabelText('Claude needs attention')).not.toBeInTheDocument();
@@ -628,6 +630,20 @@ describe('App', () => {
 
     expect(await screen.findByText('Streaming now')).toBeInTheDocument();
     await waitFor(() => expect(within(screen.getByLabelText('Composer context')).getByText('Waiting for you')).toBeInTheDocument());
+  });
+
+  it('keeps transcript display mode scoped to the selected session', async () => {
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'Repo One' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Debug view' }));
+    expect(screen.getByRole('button', { name: 'Debug view' })).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(sessionButton('Stopped Repo'));
+
+    expect(await screen.findByRole('heading', { name: 'Stopped Repo' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Chat view' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Debug view' })).toHaveAttribute('aria-pressed', 'false');
   });
 
   it('filters sessions locally by name, cwd, status, and worktree branch', async () => {
@@ -758,9 +774,9 @@ describe('App', () => {
     expect(await screen.findAllByText('Claude requested an action that may be destructive or affect shared state.')).toHaveLength(1);
     expect(screen.getAllByRole('button', { name: 'Review' }).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: 'Copy review' })).not.toBeInTheDocument();
-    expect(screen.getAllByText('Bash').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Remove dist · $ rm -rf dist').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Run tests · $ npm test').length).toBeGreaterThan(0);
+    expect(screen.getByText('▾ Ran rm -rf dist')).toBeInTheDocument();
+    expect(screen.getByText('Remove dist · $ rm -rf dist')).toBeInTheDocument();
+    expect(screen.getByText('▸ Ran npm test')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Allow' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Deny' })).not.toBeInTheDocument();
   });
@@ -797,7 +813,7 @@ describe('App', () => {
     expect(screen.getByText('Unknown event')).toBeInTheDocument();
     expect(screen.queryByText('raw event should stay hidden')).not.toBeInTheDocument();
     expect(screen.queryByText('system event should stay hidden')).not.toBeInTheDocument();
-    expect(screen.getAllByText('Raw events')).toHaveLength(2);
+    expect(screen.queryByText('Raw events')).not.toBeInTheDocument();
   });
 
   it('creates a session from the start composer and sends the initial prompt', async () => {

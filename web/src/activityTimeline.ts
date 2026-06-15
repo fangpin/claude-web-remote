@@ -1,3 +1,4 @@
+import { summarizeToolInput } from './toolSummaries';
 import type { EventKind, SessionInfo, UiEvent } from './types';
 
 type ObjectPayload = Record<string, unknown>;
@@ -81,15 +82,6 @@ function summarize(value: unknown): string {
   return String(value);
 }
 
-function valueSummary(value: unknown, maxLength = 100): string | null {
-  if (typeof value === 'string' && value.trim()) return shortText(value, maxLength);
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  if (value === undefined || value === null) return null;
-  if (Array.isArray(value)) return `${value.length} item${value.length === 1 ? '' : 's'}`;
-  if (isObject(value)) return shortText(JSON.stringify(value), maxLength);
-  return shortText(String(value), maxLength);
-}
-
 function textFromContent(value: unknown): string | null {
   if (typeof value === 'string' && value.trim()) return value;
   if (!Array.isArray(value)) return null;
@@ -123,50 +115,6 @@ function toolUseId(payload: ObjectPayload): string | null {
 
 function resultToolUseId(payload: ObjectPayload): string | null {
   return stringField(payload, ['tool_use_id', 'toolUseId', 'id']);
-}
-
-function summarizeToolInput(name: string, input: unknown): string {
-  if (!isObject(input)) return summarize(input);
-
-  if (name === 'Bash') {
-    const command = stringField(input, ['command']);
-    const description = stringField(input, ['description']);
-    const background = input.run_in_background === true ? ' (background)' : '';
-    if (!command) return summarize(input);
-    return `${description ? `${shortText(description, 72)} · ` : ''}$ ${shortText(command, 180)}${background}`;
-  }
-
-  if (name === 'Read') {
-    const path = stringField(input, ['file_path', 'path']);
-    return path ?? summarize(input);
-  }
-
-  if (name === 'Glob') {
-    const pattern = stringField(input, ['pattern']);
-    const path = stringField(input, ['path', 'base_path']);
-    if (pattern && path) return `${pattern} in ${path}`;
-    return pattern ?? path ?? summarize(input);
-  }
-
-  if (name === 'Grep') {
-    const pattern = stringField(input, ['pattern']);
-    const path = stringField(input, ['path']);
-    const glob = stringField(input, ['glob']);
-    return [pattern ? `"${shortText(pattern, 80)}"` : null, path ? `in ${path}` : null, glob ? `glob ${glob}` : null]
-      .filter((part): part is string => Boolean(part))
-      .join(' · ') || summarize(input);
-  }
-
-  const preferredKeys = ['file_path', 'path', 'url', 'pattern', 'query', 'command', 'name', 'id'];
-  const preferred = preferredKeys
-    .map((key) => {
-      const value = valueSummary(input[key]);
-      return value ? `${key}: ${value}` : null;
-    })
-    .filter((part): part is string => part !== null);
-  if (preferred.length > 0) return preferred.slice(0, 3).join(' · ');
-
-  return summarize(input);
 }
 
 function hasStructuredFailure(payload: ObjectPayload | undefined): boolean {

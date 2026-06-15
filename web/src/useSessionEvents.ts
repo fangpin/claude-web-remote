@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { eventsUrl, listSessionEvents } from './api';
 import { buildConversationBlocks } from './conversationBlocks';
+import type { ConversationDisplayMode } from './presentationPolicy';
 import { extractSessionPlan } from './sessionPlan';
 import type { SessionInfo, UiEvent } from './types';
 
@@ -20,6 +21,7 @@ type SessionConnection = {
 type UseSessionEventsOptions = {
   activeId: string | null;
   activeSession: SessionInfo | null;
+  displayMode: ConversationDisplayMode;
   eventRenderLimit: number;
   isActiveSessionMode: boolean;
   isComposerSession: boolean;
@@ -111,6 +113,7 @@ function mergeEvents(current: UiEvent[], incoming: UiEvent[] = []): UiEvent[] {
 export function useSessionEvents({
   activeId,
   activeSession,
+  displayMode,
   eventRenderLimit,
   isActiveSessionMode,
   isComposerSession,
@@ -142,8 +145,8 @@ export function useSessionEvents({
     [activeEvents, activeVisibleEventCount]
   );
   const activeBlocks = useMemo(
-    () => buildConversationBlocks(visibleEvents),
-    [visibleEvents]
+    () => buildConversationBlocks(visibleEvents, { displayMode }),
+    [displayMode, visibleEvents]
   );
   const activeBlockEventIds = useMemo(
     () => activeBlocks.flatMap((block) => block.eventIds),

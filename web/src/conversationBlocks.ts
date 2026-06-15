@@ -4,9 +4,11 @@ import {
   toolActivityPresentation,
   toolPresentation,
   toolResultSemantics,
+  type ConversationDisplayMode,
   type RawSeverity,
   type ToolResultKind
 } from './presentationPolicy';
+import { summarizeToolInput } from './toolSummaries';
 import type { EventKind, UiEvent } from './types';
 
 type ObjectPayload = Record<string, unknown>;
@@ -79,6 +81,10 @@ export type AnchorBlock = {
 };
 
 export type ConversationBlock = MessageBlock | ToolBlock | TaskBlock | ErrorBlock | RawBlock | AnchorBlock;
+
+type BuildConversationBlocksOptions = {
+  displayMode?: ConversationDisplayMode;
+};
 
 type PendingTool = {
   event: UiEvent;
@@ -215,24 +221,6 @@ function shortText(text: string, maxLength = 160): string {
   return `${compact.slice(0, maxLength - 3).trimEnd()}...`;
 }
 
-function numberField(payload: ObjectPayload, keys: string[]): number | null {
-  for (const key of keys) {
-    const value = payload[key];
-    if (typeof value === 'number' && Number.isFinite(value)) return value;
-    if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) return Number(value);
-  }
-  return null;
-}
-
-function valueSummary(value: unknown, maxLength = 120): string | null {
-  if (typeof value === 'string' && value.trim()) return shortText(value, maxLength);
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  if (value === undefined || value === null) return null;
-  if (Array.isArray(value)) return `${value.length} item${value.length === 1 ? '' : 's'}`;
-  if (isObject(value)) return shortText(JSON.stringify(value), maxLength);
-  return shortText(String(value), maxLength);
-}
-
 function countLabel(count: number, singular: string, plural = `${singular}s`): string {
   return `${count} ${count === 1 ? singular : plural}`;
 }
@@ -248,93 +236,6 @@ function outputMeasure(text: string): string {
   const lines = lineCount(trimmed);
   const chars = trimmed.length;
   return lines > 1 ? `${countLabel(lines, 'line')}, ${countLabel(chars, 'char')}` : countLabel(chars, 'char');
-}
-
-function summarizeToolInput(name: string, input: unknown): string {
-  if (!isObject(input)) return summarize(input);
-
-  if (name === 'Bash') {
-    const command = stringField(input, ['command']);
-    const description = stringField(input, ['description']);
-    const background = input.run_in_background === true ? ' (background)' : '';
-    if (!command) return summarize(input);
-    return `${description ? `${shortText(description, 72)} · ` : ''}$ ${shortText(command, 180)}${background}`;
-  }
-
-  if (name === 'Read') {
-    const path = stringField(input, ['file_path', 'path']);
-    const offset = numberField(input, ['offset']);
-    const limit = numberField(input, ['limit']);
-    const range = [offset !== null ? `offset ${offset}` : null, limit !== null ? `limit ${limit}` : null]
-      .filter(Boolean)
-      .join(', ');
-    return path ? `${path}${range ? ` (${range})` : ''}` : summarize(input);
-  }
-
-  if (name === 'Glob') {
-    const pattern = stringField(input, ['pattern']);
-    const path = stringField(input, ['path', 'base_path']);
-    if (pattern && path) return `${pattern} in ${path}`;
-    return pattern ?? path ?? summarize(input);
-  }
-
-  if (name === 'Grep') {
-    const pattern = stringField(input, ['pattern']);
-    const path = stringField(input, ['path']);
-    const glob = stringField(input, ['glob']);
-    const outputMode = stringField(input, ['output_mode', 'outputMode']);
-    const parts = [
-      pattern ? `"${shortText(pattern, 80)}"` : null,
-      path ? `in ${path}` : null,
-      glob ? `glob ${glob}` : null,
-      outputMode
-    ].filter((part): part is string => Boolean(part));
-    return parts.length > 0 ? parts.join(' · ') : summarize(input);
-  }
-
-  if (name === 'Edit') {
-    const path = stringField(input, ['file_path', 'path']);
-    const oldString = stringField(input, ['old_string', 'oldString']);
-    const newString = stringField(input, ['new_string', 'newString']);
-    const replacement =
-      oldString || newString ? `replace "${shortText(oldString ?? '', 48)}" -> "${shortText(newString ?? '', 48)}"` : null;
-    return [path, replacement, input.replace_all === true ? 'replace all' : null]
-      .filter((part): part is string => Boolean(part))
-      .join(' · ') || summarize(input);
-  }
-
-  if (name === 'MultiEdit') {
-    const path = stringField(input, ['file_path', 'path']);
-    const edits = Array.isArray(input.edits) ? countLabel(input.edits.length, 'edit') : null;
-    return [path, edits].filter((part): part is string => Boolean(part)).join(' · ') || summarize(input);
-  }
-
-  if (name === 'Write') {
-    const path = stringField(input, ['file_path', 'path']);
-    const content = typeof input.content === 'string' ? `write ${outputMeasure(input.content)}` : null;
-    return [path, content].filter((part): part is string => Boolean(part)).join(' · ') || summarize(input);
-  }
-
-  const preferredKeys = ['file_path', 'path', 'url', 'pattern', 'query', 'command', 'name', 'id'];
-  const preferred = preferredKeys
-    .map((key) => {
-      const value = valueSummary(input[key]);
-      return value ? `${key}: ${value}` : null;
-    })
-    .filter((part): part is string => part !== null);
-  if (preferred.length > 0) return preferred.slice(0, 3).join(' · ');
-
-  return (
-    Object.entries(input)
-      .filter(([key]) => !['content', 'prompt', 'message'].includes(key))
-      .map(([key, value]) => {
-        const summary = valueSummary(value);
-        return summary ? `${key}: ${summary}` : null;
-      })
-      .filter((part): part is string => part !== null)
-      .slice(0, 3)
-      .join(' · ') || summarize(input)
-  );
 }
 
 function toolName(payload: ObjectPayload): string {
@@ -890,7 +791,14 @@ function streamingContentItems(streamingMessage: StreamingMessage): NormalizedIt
   });
 }
 
-function normalizedItems(event: UiEvent): NormalizedItem[] | null {
+function rawPresentationItems(event: UiEvent, displayMode: ConversationDisplayMode): NormalizedItem[] {
+  const presentation = rawEventPresentation(event.kind, event.payload, displayMode);
+  if (presentation.visibility === 'hidden') return [];
+  if (presentation.visibility === 'anchor') return [{ type: 'anchor', event }];
+  return [{ type: 'raw', event, label: presentation.label, severity: presentation.severity }];
+}
+
+function normalizedItems(event: UiEvent, displayMode: ConversationDisplayMode): NormalizedItem[] | null {
   const payload = isObject(event.payload) ? event.payload : { value: event.payload };
   const type = payloadType(event, payload);
   const isClaudeUserPayload = payload.type === 'user';
@@ -899,8 +807,8 @@ function normalizedItems(event: UiEvent): NormalizedItem[] | null {
   if (isErrorLikePayload(event, payload)) {
     return isIgnorableErrorPayload(payload) ? [] : [{ type: 'error', event, payload }];
   }
-  if (isSuccessfulResultPayload(event, payload)) return [];
-  if (event.kind === 'system') return [];
+  if (isSuccessfulResultPayload(event, payload) && displayMode === 'chat') return [];
+  if (event.kind === 'system') return rawPresentationItems(event, displayMode);
 
   const role = roleFromEvent(event, payload);
   const items: NormalizedItem[] = [];
@@ -927,17 +835,13 @@ function normalizedItems(event: UiEvent): NormalizedItem[] | null {
   const text = textContent(payload);
   if (text && role && !isClaudeUserPayload && !isClaudeSystemPayload) return [{ type: 'message', event, role, text }];
 
-  if (isClaudeUserPayload) {
-    const presentation = rawEventPresentation(event.kind, event.payload);
-    if (presentation.visibility === 'hidden') return [];
-    if (presentation.visibility === 'anchor') return [{ type: 'anchor', event }];
-    return [{ type: 'raw', event, label: presentation.label, severity: presentation.severity }];
-  }
+  if (isClaudeUserPayload) return rawPresentationItems(event, displayMode);
 
   return null;
 }
 
-export function buildConversationBlocks(events: UiEvent[]): ConversationBlock[] {
+export function buildConversationBlocks(events: UiEvent[], options: BuildConversationBlocksOptions = {}): ConversationBlock[] {
+  const displayMode = options.displayMode ?? 'chat';
   const blocks: ConversationBlock[] = [];
   const pendingTools = new Map<string, PendingTool>();
   const pendingToolResults = new Map<string, PendingToolResult>();
@@ -946,7 +850,7 @@ export function buildConversationBlocks(events: UiEvent[]): ConversationBlock[] 
   function appendItems(items: NormalizedItem[] | null, fallbackEvent?: UiEvent) {
     if (!items) {
       if (!fallbackEvent) return;
-      const presentation = rawEventPresentation(fallbackEvent.kind, fallbackEvent.payload);
+      const presentation = rawEventPresentation(fallbackEvent.kind, fallbackEvent.payload, displayMode);
       if (presentation.visibility === 'hidden') return;
       if (presentation.visibility === 'anchor') {
         blocks.push(makeAnchorBlock('raw', [fallbackEvent]));
@@ -1083,7 +987,7 @@ export function buildConversationBlocks(events: UiEvent[]): ConversationBlock[] 
       continue;
     }
 
-    appendItems(normalizedItems(event), event);
+    appendItems(normalizedItems(event, displayMode), event);
   }
 
   if (streamingMessage) appendItems(streamingContentItems(streamingMessage));

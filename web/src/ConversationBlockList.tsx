@@ -1,5 +1,7 @@
 import RawEventDetails from './RawEventDetails';
 import type { ConversationBlock, ErrorBlock, MessageBlock, RawBlock, TaskBlock, ToolBlock } from './conversationBlocks';
+import { transcriptToolSummaryLabel } from './toolSummaries';
+import type { ConversationDisplayMode } from './presentationPolicy';
 import hljs from 'highlight.js/lib/core';
 import bash from 'highlight.js/lib/languages/bash';
 import css from 'highlight.js/lib/languages/css';
@@ -16,6 +18,12 @@ import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import React, { useMemo, useState } from 'react';
 import './ConversationBlockList.css';
+
+type ConversationBlockListProps = {
+  blocks: ConversationBlock[];
+  displayMode: ConversationDisplayMode;
+  onDisplayModeChange: (mode: ConversationDisplayMode) => void;
+};
 
 function roleLabel(role: MessageBlock['role']): string {
   if (role === 'assistant') return 'Claude';
@@ -259,7 +267,18 @@ function MessageMarkdown({ text }: { text: string }) {
   );
 }
 
-function MessageBlockView({ block }: { block: MessageBlock }) {
+function DebugRawDetails({
+  rawEvents,
+  displayMode
+}: {
+  rawEvents: ConversationBlock['rawEvents'];
+  displayMode: ConversationDisplayMode;
+}) {
+  if (displayMode !== 'debug') return null;
+  return <RawEventDetails rawEvents={rawEvents} />;
+}
+
+function MessageBlockView({ block, displayMode }: { block: MessageBlock; displayMode: ConversationDisplayMode }) {
   return (
     <article id={blockElementId(block)} className={`conversation-block message-block ${block.role}`}>
       <header className="block-header message-header">
@@ -269,6 +288,7 @@ function MessageBlockView({ block }: { block: MessageBlock }) {
         </span>
       </header>
       <MessageMarkdown text={block.text} />
+      <DebugRawDetails rawEvents={block.rawEvents} displayMode={displayMode} />
     </article>
   );
 }
@@ -321,7 +341,11 @@ function toolResultTitle(block: ToolBlock): string {
   return 'Result';
 }
 
-function ToolBlockView({ block }: { block: ToolBlock }) {
+function summaryCaret(isOpenByDefault: boolean): string {
+  return isOpenByDefault ? '▾' : '▸';
+}
+
+function ToolBlockCard({ block, displayMode }: { block: ToolBlock; displayMode: ConversationDisplayMode }) {
   const hasVisibleResult = block.resultSummary.trim() && block.resultDisplay !== 'hidden';
   const showInlineResult = hasVisibleResult && block.resultDisplay === 'visible';
   const showCollapsedResult = hasVisibleResult && block.resultDisplay === 'collapsed';
@@ -354,11 +378,48 @@ function ToolBlockView({ block }: { block: ToolBlock }) {
           </section>
         </details>
       )}
+      <DebugRawDetails rawEvents={block.rawEvents} displayMode={displayMode} />
     </article>
   );
 }
 
-function TaskBlockView({ block }: { block: TaskBlock }) {
+function ToolSummaryDetails({ block }: { block: ToolBlock }) {
+  const isOpenByDefault = block.status === 'failed' || block.status === 'running';
+  const label = transcriptToolSummaryLabel({
+    type: 'tool',
+    name: block.name,
+    status: block.status,
+    inputSummary: block.inputSummary,
+    resultSummary: block.resultSummary
+  });
+  const hasVisibleResult = block.resultSummary.trim() && block.resultDisplay !== 'hidden';
+
+  return (
+    <details
+      id={blockElementId(block)}
+      className={`conversation-block tool-block ${block.status} result-${block.resultKind}${block.density === 'compact' ? ' compact' : ''} tool-summary-details`}
+      open={isOpenByDefault}
+    >
+      <summary className="tool-summary-chip">{summaryCaret(isOpenByDefault)} {label}</summary>
+      <div className="tool-summary-body">
+        {block.inputSummary.trim() && <p className="tool-input-summary">{block.inputSummary}</p>}
+        {block.resultLabel && <p className="tool-result-label">{block.resultLabel}</p>}
+        {hasVisibleResult && (
+          <section className="block-section tool-result tool-result-detail">
+            <h4>{toolResultTitle(block)}</h4>
+            <ToolResultContent block={block} />
+          </section>
+        )}
+      </div>
+    </details>
+  );
+}
+
+function ToolBlockView({ block, displayMode }: { block: ToolBlock; displayMode: ConversationDisplayMode }) {
+  return displayMode === 'debug' ? <ToolBlockCard block={block} displayMode={displayMode} /> : <ToolSummaryDetails block={block} />;
+}
+
+function TaskBlockCard({ block, displayMode }: { block: TaskBlock; displayMode: ConversationDisplayMode }) {
   return (
     <article id={blockElementId(block)} className={`conversation-block task-block ${block.status}${block.density === 'compact' ? ' compact' : ''}`}>
       <header className="block-header task-header">
@@ -396,47 +457,131 @@ function TaskBlockView({ block }: { block: TaskBlock }) {
           <code>{block.outputPath}</code>
         </section>
       )}
+      <DebugRawDetails rawEvents={block.rawEvents} displayMode={displayMode} />
     </article>
   );
 }
 
-function ErrorBlockView({ block }: { block: ErrorBlock }) {
+function TaskBlockView({ block, displayMode }: { block: TaskBlock; displayMode: ConversationDisplayMode }) {
+  if (displayMode === 'debug') return <TaskBlockCard block={block} displayMode={displayMode} />;
+
+  const isOpenByDefault = block.status === 'failed' || block.status === 'running';
+  const label = transcriptToolSummaryLabel({
+    type: 'task',
+    title: block.title,
+    source: block.source,
+    status: block.status,
+    summary: block.summary
+  });
+
+  return (
+    <details
+      id={blockElementId(block)}
+      className={`conversation-block task-block ${block.status}${block.density === 'compact' ? ' compact' : ''} tool-summary-details task-summary-details`}
+      open={isOpenByDefault}
+    >
+      <summary className="tool-summary-chip task-summary-chip">{summaryCaret(isOpenByDefault)} {label}</summary>
+      <div className="tool-summary-body">
+        <p className="task-status">{block.status}</p>
+        <p className="task-summary">{block.summary}</p>
+        {block.completionSummary && (
+          <section className="task-result">
+            <h4>Completed</h4>
+            <p>{block.completionSummary}</p>
+          </section>
+        )}
+        {block.failureSummary && (
+          <section className="task-result task-failure">
+            <h4>Failed</h4>
+            <p>{block.failureSummary}</p>
+          </section>
+        )}
+        {block.detail && (
+          <section className="block-section task-detail">
+            <h4>Details</h4>
+            <pre>{block.detail}</pre>
+          </section>
+        )}
+        {block.outputPath && (
+          <section className="block-section output-path">
+            <h4>Output</h4>
+            <code>{block.outputPath}</code>
+          </section>
+        )}
+      </div>
+    </details>
+  );
+}
+
+function ErrorBlockView({ block, displayMode }: { block: ErrorBlock; displayMode: ConversationDisplayMode }) {
   return (
     <article id={blockElementId(block)} className="conversation-block error-block">
       <header className="block-header">
         <span>Error</span>
       </header>
       <p>{block.message}</p>
-      <RawEventDetails rawEvents={block.rawEvents} />
+      <DebugRawDetails rawEvents={block.rawEvents} displayMode={displayMode} />
     </article>
   );
 }
 
-function RawBlockView({ block }: { block: RawBlock }) {
+function RawBlockView({ block, displayMode }: { block: RawBlock; displayMode: ConversationDisplayMode }) {
   return (
     <article id={blockElementId(block)} className={`conversation-block raw-block ${block.severity ?? 'info'}`}>
       <header className="block-header">
         <span>{block.label}</span>
       </header>
-      <RawEventDetails rawEvents={block.rawEvents} />
+      <DebugRawDetails rawEvents={block.rawEvents} displayMode={displayMode} />
     </article>
   );
 }
 
-function ConversationBlockView({ block }: { block: ConversationBlock }) {
-  if (block.type === 'anchor') return <span id={blockElementId(block)} className="conversation-anchor" aria-hidden="true" />;
-  if (block.type === 'message') return <MessageBlockView block={block} />;
-  if (block.type === 'tool') return <ToolBlockView block={block} />;
-  if (block.type === 'task') return <TaskBlockView block={block} />;
-  if (block.type === 'error') return <ErrorBlockView block={block} />;
-  return <RawBlockView block={block} />;
+function ConversationDisplayModeSwitch({
+  displayMode,
+  onDisplayModeChange
+}: {
+  displayMode: ConversationDisplayMode;
+  onDisplayModeChange: (mode: ConversationDisplayMode) => void;
+}) {
+  return (
+    <div className="conversation-display-mode" role="group" aria-label="Conversation display mode">
+      <button
+        type="button"
+        className={displayMode === 'chat' ? 'selected' : undefined}
+        aria-label="Chat view"
+        aria-pressed={displayMode === 'chat'}
+        onClick={() => onDisplayModeChange('chat')}
+      >
+        Chat
+      </button>
+      <button
+        type="button"
+        className={displayMode === 'debug' ? 'selected' : undefined}
+        aria-label="Debug view"
+        aria-pressed={displayMode === 'debug'}
+        onClick={() => onDisplayModeChange('debug')}
+      >
+        Debug
+      </button>
+    </div>
+  );
 }
 
-export default function ConversationBlockList({ blocks }: { blocks: ConversationBlock[] }) {
+function ConversationBlockView({ block, displayMode }: { block: ConversationBlock; displayMode: ConversationDisplayMode }) {
+  if (block.type === 'anchor') return <span id={blockElementId(block)} className="conversation-anchor" aria-hidden="true" />;
+  if (block.type === 'message') return <MessageBlockView block={block} displayMode={displayMode} />;
+  if (block.type === 'tool') return <ToolBlockView block={block} displayMode={displayMode} />;
+  if (block.type === 'task') return <TaskBlockView block={block} displayMode={displayMode} />;
+  if (block.type === 'error') return <ErrorBlockView block={block} displayMode={displayMode} />;
+  return <RawBlockView block={block} displayMode={displayMode} />;
+}
+
+export default function ConversationBlockList({ blocks, displayMode, onDisplayModeChange }: ConversationBlockListProps) {
   return (
     <div className="conversation-blocks">
+      <ConversationDisplayModeSwitch displayMode={displayMode} onDisplayModeChange={onDisplayModeChange} />
       {blocks.map((block) => (
-        <ConversationBlockView key={block.id} block={block} />
+        <ConversationBlockView key={block.id} block={block} displayMode={displayMode} />
       ))}
     </div>
   );

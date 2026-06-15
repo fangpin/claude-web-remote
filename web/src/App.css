@@ -1930,6 +1930,29 @@ button.danger:hover,
   min-height: 0;
 }
 
+.conversation-display-mode {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  margin: 0 0 14px;
+}
+
+.conversation-display-mode button {
+  border-color: transparent;
+  border-radius: 999px;
+  color: var(--muted);
+  background: transparent;
+  padding: 4px 9px;
+  font-size: 12px;
+  font-weight: 680;
+}
+
+.conversation-display-mode button.selected {
+  border-color: var(--border);
+  color: var(--text-soft);
+  background: rgb(255 253 250 / 0.78);
+}
+
 .project-home {
   min-height: 0;
   overflow: auto;

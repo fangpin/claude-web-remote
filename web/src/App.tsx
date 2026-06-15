@@ -4,6 +4,7 @@ import { buildActivityTimeline, latestReviewActivity, reviewSurface, waitingCopy
 import ConversationWorkspace, { type ConversationHeaderAction } from './ConversationWorkspace';
 import InspectorPanel, { type InspectorTab } from './InspectorPanel';
 import { hasAppModifier, isEditableTarget, isPlainSlash } from './keyboardShortcuts';
+import type { ConversationDisplayMode } from './presentationPolicy';
 import ProjectHome from './ProjectHome';
 import SessionSidebar from './SessionSidebar';
 import { getContinueActionLabel } from './sessionContinuity';
@@ -51,6 +52,7 @@ export default function App() {
   const [notifiedAttentionKey, setNotifiedAttentionKey] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('activity');
+  const [conversationDisplayModes, setConversationDisplayModes] = useState<Record<string, ConversationDisplayMode>>({});
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const isDeveloperMode = import.meta.env.DEV;
   const isDiagnosticsVisible = isDeveloperMode && view === 'sessions' && isInspectorOpen && inspectorTab === 'diagnostics';
@@ -94,10 +96,20 @@ export default function App() {
     refreshTasks: taskState.refreshTasks,
     refreshSessionTasks: taskState.refreshSessionTasks
   };
+  const conversationDisplayMode = sessionState.activeId ? (conversationDisplayModes[sessionState.activeId] ?? 'chat') : 'chat';
+  const setConversationDisplayMode = useCallback((mode: ConversationDisplayMode) => {
+    const sessionId = sessionState.activeId;
+    if (!sessionId) return;
+    setConversationDisplayModes((current) => ({
+      ...current,
+      [sessionId]: mode
+    }));
+  }, [sessionState.activeId]);
 
   const eventState = useSessionEvents({
     activeId: sessionState.activeId,
     activeSession: sessionState.activeSession,
+    displayMode: conversationDisplayMode,
     eventRenderLimit: EVENT_RENDER_LIMIT,
     isActiveSessionMode: sessionState.isActiveSessionMode,
     isComposerSession,
@@ -744,6 +756,7 @@ function focusFallbackAfterSidebarClose() {
           autocompleteOptionRefs={composerState.autocompleteOptionRefs}
           autocompleteToken={composerState.autocompleteToken}
           canSend={composerState.canSend}
+          conversationDisplayMode={conversationDisplayMode}
           composerDisabledReason={composerState.composerDisabledReason}
           composerRef={composerState.composerRef}
           contextAttachments={composerState.contextAttachments}
@@ -794,6 +807,7 @@ function focusFallbackAfterSidebarClose() {
           onAddPathContextAttachment={composerState.addPathContextAttachment}
           onAddTextContextAttachment={composerState.addTextContextAttachment}
           onCompleteSuggestion={composerState.completeSuggestion}
+          onConversationDisplayModeChange={setConversationDisplayMode}
           onMessageChange={composerState.onMessageChange}
           onMessageKeyDown={composerState.onMessageKeyDown}
           onMessageSelect={composerState.onMessageSelect}
