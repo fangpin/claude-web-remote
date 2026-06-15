@@ -71,7 +71,7 @@ function isAssistantProgressEvent(event: UiEvent): boolean {
   if (event.kind === 'assistant') return true;
   if (!isObjectPayload(event.payload)) return false;
   const type = event.payload.type;
-  if (type === 'message_start' || type === 'message_stop') return true;
+  if (type === 'assistant' || type === 'message_start' || type === 'message_stop') return true;
   if (type === 'content_block_start') {
     const contentBlock = event.payload.content_block;
     return isObjectPayload(contentBlock) && contentBlock.type === 'text';

@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type KeyboardEvent, type RefObject } from 'react';
+import { useId, useState, type FormEvent, type KeyboardEvent, type RefObject } from 'react';
 import { runtimeStatusLabels } from './AppShell';
 import type { ClaudeCommand, SlashCommandToken } from './autocomplete';
 import type { ComposerContextAttachment, SessionInfo } from './types';
@@ -14,26 +14,27 @@ function basename(path: string): string {
   return parts.at(-1) ?? (normalized || 'Workspace');
 }
 
-function composerTargetLabel(session: SessionInfo): string {
-  const target = basename(session.worktree?.sourceCwd ?? session.cwd);
-  return session.worktree ? `Target: ${target} · worktree` : `Target: ${target}`;
+function composerProjectLabel(session: SessionInfo): string {
+  return `Project: ${basename(session.worktree?.sourceCwd ?? session.cwd)}`;
 }
 
-function composerTargetTitle(session: SessionInfo): string {
-  return session.worktree?.sourceCwd ?? session.cwd;
+function composerProjectTitle(session: SessionInfo): string {
+  const path = session.worktree?.sourceCwd ?? session.cwd;
+  return session.worktree ? `${path} (worktree)` : path;
 }
 
-function composerContextDetails(session: SessionInfo): ComposerContextDetail[] {
+function composerContextDetails(session: SessionInfo, statusLabel: string): ComposerContextDetail[] {
   return [
-    { label: 'cwd', value: session.cwd },
-    { label: 'permission', value: session.permissionMode },
+    { label: 'Project', value: session.worktree?.sourceCwd ?? session.cwd },
     ...(session.worktree
       ? [
-          { label: 'source', value: session.worktree.sourceCwd },
-          { label: 'worktree', value: session.worktree.worktreeCwd },
-          { label: 'branch', value: session.worktree.branch }
+          { label: 'Worktree', value: session.worktree.worktreeCwd },
+          { label: 'Source', value: session.worktree.sourceCwd },
+          { label: 'Branch', value: session.worktree.branch }
         ]
-      : [])
+      : [{ label: 'Workspace', value: session.cwd }]),
+    { label: 'Permission', value: session.permissionMode },
+    { label: 'Status', value: statusLabel }
   ];
 }
 
@@ -51,7 +52,6 @@ type Props = {
   isSending: boolean;
   message: string;
   messageInputRef: RefObject<HTMLTextAreaElement | null>;
-  promptHistory: string[];
   sendStatusText: string;
   suggestions: ClaudeCommand[];
   onAddPathContextAttachment: (path: string) => void;
@@ -62,8 +62,8 @@ type Props = {
   onMessageSelect: (value: string, cursor: number | null) => void;
   onRemoveContextAttachment: (id: string) => void;
   onSend: (event: FormEvent) => void;
+  onStopSession: () => void;
   onSetActiveSuggestionIndex: (index: number) => void;
-  onUsePrompt: (prompt: string) => void;
 };
 
 export default function Composer({
@@ -80,7 +80,6 @@ export default function Composer({
   isSending,
   message,
   messageInputRef,
-  promptHistory,
   sendStatusText,
   suggestions,
   onAddPathContextAttachment,
@@ -91,18 +90,22 @@ export default function Composer({
   onMessageSelect,
   onRemoveContextAttachment,
   onSend,
-  onSetActiveSuggestionIndex,
-  onUsePrompt
+  onStopSession,
+  onSetActiveSuggestionIndex
 }: Props) {
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
-  const [historyMenuOpen, setHistoryMenuOpen] = useState(false);
   const [pathContext, setPathContext] = useState('');
   const [textContextName, setTextContextName] = useState('');
   const [textContextContent, setTextContextContent] = useState('');
+  const [contextMenuOpen, setContextMenuOpen] = useState(false);
+  const [isMessageFocused, setIsMessageFocused] = useState(false);
+  const projectContextId = useId();
   const hasAutocomplete = suggestions.length > 0 && autocompleteToken;
   const runtimeStatus = activeSession.runtimeStatus ?? activeSession.status;
   const statusLabel = isAwaitingClaude ? 'Claude is working' : runtimeStatusLabels[runtimeStatus];
-  const contextDetails = composerContextDetails(activeSession);
+  const contextDetails = composerContextDetails(activeSession, statusLabel);
+  const showHints = isMessageFocused && message.trim().length === 0;
+  const primaryActionIsStop = isAwaitingClaude && !isSending;
 
   function addPathContext() {
     if (!pathContext.trim()) return;
@@ -126,27 +129,13 @@ export default function Composer({
       ref={composerRef}
       aria-label="Message composer"
     >
-      <div className="composer-context" aria-label="Composer context">
-        <span className="composer-status-pill">
-          <span aria-hidden="true" className="composer-status-dot" />
-          {statusLabel}
-        </span>
-        <span className="composer-context-chip">Permission: {activeSession.permissionMode}</span>
-        <span className="composer-context-chip" title={composerTargetTitle(activeSession)}>{composerTargetLabel(activeSession)}</span>
-        <details className="composer-context-menu">
-          <summary aria-label="Show session context details">
-            <span>Details</span>
-          </summary>
-          <dl>
-            {contextDetails.map((item) => (
-              <div key={item.label}>
-                <dt>{item.label}</dt>
-                <dd title={item.value}>{item.value}</dd>
-              </div>
-            ))}
-          </dl>
-        </details>
-      </div>
+      <div aria-label="Composer context">
+        <div className="composer-context">
+          <span className="composer-status-pill">
+            <span aria-hidden="true" className="composer-status-dot" />
+            {statusLabel}
+          </span>
+        </div>
       {contextAttachments.length > 0 && (
         <div className="context-attachment-chips" aria-label="Context attachments">
           {contextAttachments.map((attachment) => {
@@ -205,6 +194,8 @@ export default function Composer({
           placeholder={isComposerSession ? 'Message Claude...' : composerDisabledReason}
           onChange={(event) => onMessageChange(event.target.value, event.currentTarget)}
           onSelect={(event) => onMessageSelect(event.currentTarget.value, event.currentTarget.selectionStart)}
+          onFocus={() => setIsMessageFocused(true)}
+          onBlur={() => setIsMessageFocused(false)}
           onKeyDown={onMessageKeyDown}
           rows={1}
         />
@@ -242,45 +233,17 @@ export default function Composer({
           </div>
         )}
       </div>
-      <div className="composer-hints" aria-label="Composer shortcuts">
-        <span>Enter to send</span>
-        <span>Shift Enter for newline</span>
-        <span>/ for commands</span>
-        <span>↑ for history</span>
-      </div>
+      {showHints && (
+        <div className="composer-hints" aria-label="Composer shortcuts">
+          <span>Enter send</span>
+          <span>Shift Enter newline</span>
+          <span>/ commands</span>
+          <span>↑ history</span>
+        </div>
+      )}
       <div className="composer-actions">
         <span id="composer-send-status" aria-live="polite">{sendStatusText}</span>
         <div>
-          <div className="composer-history-menu">
-            <button
-              className="composer-history-button"
-              type="button"
-              disabled={!isComposerSession || promptHistory.length === 0}
-              aria-expanded={historyMenuOpen}
-              aria-haspopup="menu"
-              onClick={() => setHistoryMenuOpen((open) => !open)}
-            >
-              History
-            </button>
-            {historyMenuOpen && (
-              <div className="prompt-history-popover" role="menu" aria-label="Prompt history">
-                {promptHistory.slice(0, 8).map((prompt, index) => (
-                  <button
-                    key={`${prompt}-${index}`}
-                    type="button"
-                    role="menuitem"
-                    title={prompt}
-                    onClick={() => {
-                      onUsePrompt(prompt);
-                      setHistoryMenuOpen(false);
-                    }}
-                  >
-                    {prompt}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
           <div className="composer-attachment-menu">
             <button
               className="composer-attach-button"
@@ -288,21 +251,21 @@ export default function Composer({
               disabled={!isComposerSession}
               aria-expanded={attachmentMenuOpen}
               aria-haspopup="dialog"
-              aria-label="Add context reference"
-              title="Add repo path or pasted text context"
+              aria-label="Add context"
+              title="Add repo path or pasted text"
               onClick={() => setAttachmentMenuOpen((open) => !open)}
             >
               <span aria-hidden="true">+</span>
             </button>
             {attachmentMenuOpen && (
-              <div className="context-attachment-popover" role="dialog" aria-label="Add context reference">
+              <div className="context-attachment-popover" role="dialog" aria-label="Add context">
                 <div className="context-attachment-copy">
-                  <strong>Add context reference</strong>
-                  <span>References are sent as prompt context. Browser files are not uploaded. Use paths relative to the session cwd.</span>
+                  <strong>Add context</strong>
+                  <span>Add a repo path or paste text for Claude to use.</span>
                 </div>
                 <div className="context-attachment-section">
                   <label htmlFor="path-context-input">
-                    Repo path
+                    Add repo path
                     <input
                       id="path-context-input"
                       value={pathContext}
@@ -329,7 +292,7 @@ export default function Composer({
                     />
                   </label>
                   <label htmlFor="text-context-content-input">
-                    Pasted text
+                    Paste text
                     <textarea
                       id="text-context-content-input"
                       value={textContextContent}
@@ -343,20 +306,50 @@ export default function Composer({
               </div>
             )}
           </div>
+          <div className="composer-project-menu">
+            <button
+              className="composer-project-button"
+              type="button"
+              aria-expanded={contextMenuOpen}
+              aria-controls={contextMenuOpen ? projectContextId : undefined}
+              aria-label="Show project context"
+              title={composerProjectTitle(activeSession)}
+              onClick={() => setContextMenuOpen((open) => !open)}
+            >
+              <span>{composerProjectLabel(activeSession)}</span>
+              {activeSession.worktree && <small>worktree</small>}
+            </button>
+            {contextMenuOpen && (
+              <dl id={projectContextId} className="composer-project-popover">
+                {contextDetails.map((item) => (
+                  <div key={item.label}>
+                    <dt>{item.label}</dt>
+                    <dd title={item.value}>{item.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+          </div>
           <button
-            className="send-button"
-            type="submit"
-            disabled={!canSend}
-            aria-label={isSending ? 'Sending message' : 'Send'}
+            className={primaryActionIsStop ? 'send-button composer-stop-button' : 'send-button'}
+            type={primaryActionIsStop ? 'button' : 'submit'}
+            disabled={primaryActionIsStop ? !isComposerSession : !canSend}
+            aria-label={primaryActionIsStop ? 'Stop' : isSending ? 'Sending message' : 'Send'}
             aria-describedby="composer-send-status"
-            title={isSending ? 'Sending message' : isAwaitingClaude ? 'Send another message while Claude is working' : 'Send message'}
+            title={primaryActionIsStop ? 'Stop Claude' : isSending ? 'Sending message' : isAwaitingClaude ? 'Claude is working' : 'Send message'}
+            onClick={primaryActionIsStop ? onStopSession : undefined}
           >
-            <span className="sr-only">{isSending ? 'Sending message' : 'Send'}</span>
-            <svg aria-hidden="true" viewBox="0 0 16 16" focusable="false">
-              <path d="M8 2.25 13.25 7.5l-.9.9L8.63 4.68V14H7.37V4.68L3.65 8.4l-.9-.9L8 2.25Z" />
-            </svg>
+            <span className="sr-only">{primaryActionIsStop ? 'Stop' : isSending ? 'Sending message' : 'Send'}</span>
+            {primaryActionIsStop ? (
+              <span aria-hidden="true" className="composer-stop-icon" />
+            ) : (
+              <svg aria-hidden="true" viewBox="0 0 16 16" focusable="false">
+                <path d="M8 2.25 13.25 7.5l-.9.9L8.63 4.68V14H7.37V4.68L3.65 8.4l-.9-.9L8 2.25Z" />
+              </svg>
+            )}
           </button>
         </div>
+      </div>
       </div>
     </form>
   );

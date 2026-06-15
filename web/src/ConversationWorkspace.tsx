@@ -65,7 +65,6 @@ type Props = {
   listMode: SessionListMode;
   message: string;
   messageInputRef: RefObject<HTMLTextAreaElement | null>;
-  promptHistory: string[];
   sendStatusText: string;
   suggestions: ClaudeCommand[];
   view: AppView;
@@ -79,6 +78,7 @@ type Props = {
   onMessageSelect: (value: string, cursor: number | null) => void;
   onRemoveContextAttachment: (id: string) => void;
   onSend: (event: FormEvent) => void;
+  onStopSession: () => void;
   onSetActiveSuggestionIndex: (index: number) => void;
   onToggleActivityDrawer: () => void;
   onUsePrompt: (prompt: string) => void;
@@ -487,7 +487,6 @@ export default function ConversationWorkspace({
   listMode,
   message,
   messageInputRef,
-  promptHistory,
   sendStatusText,
   suggestions,
   view,
@@ -501,6 +500,7 @@ export default function ConversationWorkspace({
   onMessageSelect,
   onRemoveContextAttachment,
   onSend,
+  onStopSession,
   onSetActiveSuggestionIndex,
   onToggleActivityDrawer,
   onUsePrompt,
@@ -727,7 +727,6 @@ export default function ConversationWorkspace({
             isSending={isSending}
             message={message}
             messageInputRef={messageInputRef}
-            promptHistory={promptHistory}
             sendStatusText={sendStatusText}
             suggestions={suggestions}
             onAddPathContextAttachment={onAddPathContextAttachment}
@@ -738,8 +737,8 @@ export default function ConversationWorkspace({
             onMessageSelect={onMessageSelect}
             onRemoveContextAttachment={onRemoveContextAttachment}
             onSend={onSend}
+            onStopSession={onStopSession}
             onSetActiveSuggestionIndex={onSetActiveSuggestionIndex}
-            onUsePrompt={onUsePrompt}
           />
         </>
       ) : (

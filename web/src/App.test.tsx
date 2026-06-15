@@ -313,6 +313,12 @@ class FakeWebSocket {
   }
 }
 
+function emitEvent(sessionId: string, event: UiEvent) {
+  const socket = FakeWebSocket.instances.find((instance) => instance.url.includes(`/api/sessions/${sessionId}/events`));
+  if (!socket) throw new Error(`websocket not found for session: ${sessionId}`);
+  socket.emit(event);
+}
+
 beforeEach(() => {
   cleanup();
   window.localStorage.clear();
@@ -1111,7 +1117,7 @@ describe('App', () => {
     fireEvent.keyDown(window, { key: '/' });
     await waitFor(() => expect(messageInput).toHaveFocus());
     expect(messageInput).toHaveValue('/');
-    expect(screen.getByLabelText('Composer shortcuts')).toHaveTextContent('/ for commands');
+    expect(screen.queryByLabelText('Composer shortcuts')).not.toBeInTheDocument();
     expect(screen.getByRole('listbox', { name: 'Claude command suggestions' })).toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: 'Escape' });
@@ -1281,22 +1287,27 @@ describe('App', () => {
   it('adds path and pasted text context, removes chips, and sends formatted prompt context', async () => {
     render(<App />);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Add context reference' }));
-    fireEvent.change(screen.getByLabelText('Repo path'), { target: { value: 'web/src/Composer.tsx' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Add context' }));
+    expect(screen.getByRole('dialog', { name: 'Add context' })).toHaveTextContent('Add context');
+    expect(screen.getByRole('dialog', { name: 'Add context' })).toHaveTextContent('Add repo path');
+    expect(screen.getByRole('dialog', { name: 'Add context' })).toHaveTextContent('Paste text');
+    expect(screen.getByRole('dialog', { name: 'Add context' })).not.toHaveTextContent('Add context reference');
+    expect(screen.getByRole('dialog', { name: 'Add context' })).not.toHaveTextContent('References are sent as prompt context');
+    fireEvent.change(screen.getByLabelText('Add repo path'), { target: { value: 'web/src/Composer.tsx' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add path' }));
 
     expect(await screen.findByLabelText('Context attachments')).toHaveTextContent('@web/src/Composer.tsx');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add context reference' }));
-    fireEvent.change(screen.getByLabelText('Repo path'), { target: { value: 'README.md' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add context' }));
+    fireEvent.change(screen.getByLabelText('Add repo path'), { target: { value: 'README.md' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add path' }));
     fireEvent.click(screen.getByRole('button', { name: 'Remove @README.md' }));
 
     expect(screen.queryByText('@README.md')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add context reference' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add context' }));
     fireEvent.change(screen.getByLabelText('Text context name'), { target: { value: 'Stack trace' } });
-    fireEvent.change(screen.getByLabelText('Pasted text'), { target: { value: 'TypeError: failed' } });
+    fireEvent.change(screen.getByLabelText('Paste text'), { target: { value: 'TypeError: failed' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add pasted text' }));
 
     expect(screen.getByLabelText('Context attachments')).toHaveTextContent('Stack trace');
@@ -1326,8 +1337,8 @@ describe('App', () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Add context reference' }));
-    fireEvent.change(screen.getByLabelText('Repo path'), { target: { value: '@web/src/App.tsx' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Add context' }));
+    fireEvent.change(screen.getByLabelText('Add repo path'), { target: { value: '@web/src/App.tsx' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add path' }));
 
     const sendButton = screen.getByRole('button', { name: /Send/ });
@@ -1382,7 +1393,8 @@ describe('App', () => {
     render(<App />);
 
     const messageInput = await screen.findByLabelText('Message');
-    const sendButton = screen.getByRole('button', { name: /Send/ });
+    const composer = screen.getByRole('form', { name: 'Message composer' });
+    const sendButton = within(composer).getByRole('button', { name: /Send/ });
     expect(sendButton).toBeDisabled();
 
     fireEvent.change(messageInput, { target: { value: 'do work' } });
@@ -1394,39 +1406,78 @@ describe('App', () => {
     expect(fetchMock.mock.calls.filter(([url]) => String(url) === '/api/sessions/s1/input')).toHaveLength(1);
 
     await act(async () => inputDeferred.resolve());
-    expect(screen.getByRole('button', { name: /Send/ })).toBeDisabled();
+    expect(within(composer).getByRole('button', { name: 'Stop' })).toBeInTheDocument();
   });
 
-  it('keeps end session in the sidebar actions instead of the composer', async () => {
+  it('switches the composer primary action to Stop while Claude is working', async () => {
     render(<App />);
 
-    expect(await screen.findByRole('heading', { name: 'Repo One' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Stop session' })).not.toBeInTheDocument();
-    await screen.findByRole('heading', { name: 'Repo One' });
-    fireEvent.click(within(sidebarSelectedActions()).getByRole('button', { name: 'End session' }));
+    const messageInput = await screen.findByLabelText('Message');
+    const composer = screen.getByRole('form', { name: 'Message composer' });
+    expect(within(composer).queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument();
+
+    fireEvent.change(messageInput, { target: { value: 'start work' } });
+    fireEvent.click(within(composer).getByRole('button', { name: 'Send' }));
+
+    const stopButton = await within(composer).findByRole('button', { name: 'Stop' });
+    expect(stopButton).toHaveClass('composer-stop-button');
+    fireEvent.click(stopButton);
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/stop', expect.objectContaining({ method: 'POST' })));
   });
 
-  it('shows compact composer context with details for full session metadata', async () => {
+  it('shows a lightweight Project composer context with full session metadata in the popover', async () => {
     render(<App />);
 
     const context = await screen.findByLabelText('Composer context');
     expect(context).toHaveTextContent('Waiting for you');
-    expect(context).toHaveTextContent('Permission: acceptEdits');
-    expect(context).toHaveTextContent('Target: one');
-    fireEvent.click(within(context).getByText('Details'));
-    expect(within(context).getByText('/repo/one')).toBeInTheDocument();
-    expect(within(context).getByText('acceptEdits')).toBeInTheDocument();
+    expect(context).toHaveTextContent('Project: one');
+    expect(context).not.toHaveTextContent('Permission: acceptEdits');
+    expect(context).not.toHaveTextContent('Target: one');
+    expect(context).not.toHaveTextContent('Details');
+
+    fireEvent.click(within(context).getByRole('button', { name: /Show project context/ }));
+    const rows = within(context).getAllByRole('term').map((term) => term.parentElement as HTMLElement);
+    const rowTextByTerm = new Map(rows.map((row) => [within(row).getByRole('term').textContent, row.textContent]));
+    expect(rowTextByTerm.get('Project')).toContain('/repo/one');
+    expect(rowTextByTerm.get('Permission')).toContain('acceptEdits');
+    expect(rowTextByTerm.get('Status')).toContain('Waiting for you');
+    fireEvent.click(within(context).getByRole('button', { name: /Show project context/ }));
 
     fireEvent.click(sessionButton('Worktree Repo'));
 
-    const worktreeContext = await screen.findByLabelText('Composer context');
-    expect(worktreeContext).toHaveTextContent('Target: one · worktree');
-    fireEvent.click(within(worktreeContext).getByText('Details'));
-    expect(within(worktreeContext).getByText('pin/abc123')).toBeInTheDocument();
-    expect(within(worktreeContext).getByText('/repo/one')).toBeInTheDocument();
-    expect(within(worktreeContext).getAllByText('/repo/one/.claude/worktrees/abc123').length).toBeGreaterThan(0);
+    await waitFor(() => expect(screen.getByLabelText('Composer context')).toHaveTextContent('worktree'));
+    const worktreeContext = screen.getByLabelText('Composer context');
+    expect(worktreeContext).toHaveTextContent('Project: one');
+    expect(worktreeContext).not.toHaveTextContent('Target: one · worktree');
+
+    fireEvent.click(within(worktreeContext).getByRole('button', { name: /Show project context/ }));
+    const worktreeRows = within(worktreeContext).getAllByRole('term').map((term) => term.parentElement as HTMLElement);
+    const worktreeRowTextByTerm = new Map(worktreeRows.map((row) => [within(row).getByRole('term').textContent, row.textContent]));
+    expect(worktreeRowTextByTerm.get('Branch')).toContain('pin/abc123');
+    expect(worktreeRowTextByTerm.get('Source')).toContain('/repo/one');
+    expect(worktreeRowTextByTerm.get('Worktree')).toContain('/repo/one/.claude/worktrees/abc123');
+  });
+
+  it('only shows composer shortcut hints while focused and empty', async () => {
+    render(<App />);
+
+    const messageInput = await screen.findByLabelText('Message');
+    expect(screen.queryByLabelText('Composer shortcuts')).not.toBeInTheDocument();
+
+    fireEvent.focus(messageInput);
+    expect(screen.getByLabelText('Composer shortcuts')).toHaveTextContent('Enter send');
+    expect(screen.getByLabelText('Composer shortcuts')).toHaveTextContent('/ commands');
+    expect(screen.getByLabelText('Composer shortcuts')).toHaveTextContent('↑ history');
+
+    fireEvent.change(messageInput, { target: { value: 'hello' } });
+    expect(screen.queryByLabelText('Composer shortcuts')).not.toBeInTheDocument();
+
+    fireEvent.change(messageInput, { target: { value: '' } });
+    expect(screen.getByLabelText('Composer shortcuts')).toBeInTheDocument();
+
+    fireEvent.blur(messageInput);
+    expect(screen.queryByLabelText('Composer shortcuts')).not.toBeInTheDocument();
   });
 
   it('loads earlier transcript events when scrolling to the top', async () => {
@@ -1593,6 +1644,13 @@ describe('App', () => {
     expect(within(screen.getByLabelText('Session continuity')).getByText('Can resume')).toBeInTheDocument();
     expect(screen.getByText('This session is stopped. Resume the conversation to continue.')).toBeInTheDocument();
     expect(screen.getByLabelText('Message')).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Add context' })).toBeDisabled();
+    const stoppedContext = screen.getByLabelText('Composer context');
+    const stoppedProjectButton = within(stoppedContext).getByRole('button', { name: 'Show project context' });
+    expect(stoppedProjectButton).not.toBeDisabled();
+    fireEvent.click(stoppedProjectButton);
+    expect(within(stoppedContext).getByText('Permission')).toBeInTheDocument();
+    expect(within(stoppedContext).getByText('acceptEdits')).toBeInTheDocument();
 
     const socketsBeforeResume = FakeWebSocket.instances.length;
     fireEvent.click(within(headerActions()).getByRole('button', { name: 'Resume conversation' }));

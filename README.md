@@ -14,7 +14,7 @@ The code, files, git repositories, Claude CLI, and model gateway all stay on the
 - Optional git worktree sessions with branch, dirty state, and changed-file visibility
 - Compact chat-first transcript display from `claude --output-format stream-json`, with detailed tool activity available in the Activity drawer
 - User input forwarding to the remote Claude process
-- Claude-like composer with slash commands, context hints, context reference attachments, and inline stop/send controls
+- Claude-like composer with slash commands, contextual hints, lightweight project context, attachments, and inline stop/send controls
 - Read-only action review cards for waiting sessions, permission-like events, risky commands, and failed actions
 - Stop and restart session controls
 - Event, stderr, raw stdout, and session metadata persistence
@@ -193,7 +193,7 @@ Use **New group** in the session sidebar to create custom chat groups. Drag chat
 
 ## Add context to a prompt
 
-Use the composer `+` button to attach context references before sending:
+Use the composer `+` button to add context before sending:
 
 - Repo path references are sent as `@path/to/file` in the prompt, so Claude Code can read the file from the session working directory. Use paths relative to the session cwd. The Web UI does not read the file contents or browse arbitrary devbox paths.
 - Pasted text context appears as a collapsible snippet card with line/character counts, then is sent as a named fenced text block with the prompt.
