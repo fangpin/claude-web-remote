@@ -1417,7 +1417,9 @@ describe('App', () => {
     fireEvent.click(within(header as HTMLElement).getByRole('button', { name: 'More session actions' }));
     fireEvent.click(within(header as HTMLElement).getByRole('button', { name: /Copy session ID/ }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('s4'));
+    expect(within(header as HTMLElement).queryByRole('button', { name: 'Open worktree diff' })).not.toBeInTheDocument();
 
+    fireEvent.click(within(header as HTMLElement).getByRole('button', { name: 'More session actions' }));
     fireEvent.click(within(header as HTMLElement).getByRole('button', { name: 'Open worktree diff' }));
     expect(await screen.findByLabelText('Header worktree diff')).toBeInTheDocument();
     expect(await screen.findByText(/diff --git a\/web\/src\/App\.tsx/)).toBeInTheDocument();
@@ -1454,6 +1456,8 @@ describe('App', () => {
     expect(within(selectedActions).getByRole('button', { name: 'End session' })).toBeInTheDocument();
     expect(within(selectedActions).getByRole('button', { name: 'Restart' })).toBeInTheDocument();
     expect(within(selectedActions).getByRole('button', { name: 'Archive' })).toBeInTheDocument();
+    expect(within(headerActions()).getByRole('button', { name: 'Stop' })).toBeInTheDocument();
+    expect(within(openHeaderMoreMenu()).queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument();
     expect(within(screen.getByLabelText('Session continuity')).getByText('Waiting')).toHaveAttribute('title', 'Waiting for you');
 
     fireEvent.click(sessionButton('Stopped Repo'));
@@ -1513,6 +1517,7 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByRole('heading', { name: 'Starting Repo' })).toBeInTheDocument();
+    expect(within(headerActions()).getByRole('button', { name: 'Stop' })).toBeInTheDocument();
     expect(within(sidebarSelectedActions()).getByRole('button', { name: 'End session' })).toBeInTheDocument();
     expect(within(sidebarSelectedActions()).getByRole('button', { name: 'Archive' })).toBeInTheDocument();
     expect(screen.getByLabelText('Message')).toBeDisabled();
@@ -1633,7 +1638,7 @@ describe('App', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Archived' }));
     expect(await screen.findByRole('heading', { name: 'Archived Repo' })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    fireEvent.click(within(sidebarSelectedActions()).getByRole('button', { name: 'Delete' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s3?permanent=true', expect.objectContaining({ method: 'DELETE' })));
     await waitFor(() => expect(screen.queryByRole('button', { name: /Archived Repo/ })).not.toBeInTheDocument());
@@ -1713,7 +1718,7 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByRole('heading', { name: 'Repo One' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Archive' }));
+    fireEvent.click(within(sidebarSelectedActions()).getByRole('button', { name: 'Archive' }));
     fireEvent.click(sessionButton('Newest Repo'));
 
     await act(async () => {
