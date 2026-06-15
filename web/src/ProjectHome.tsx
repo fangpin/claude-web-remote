@@ -80,8 +80,8 @@ export default function ProjectHome({
   const [isContextOpen, setIsContextOpen] = useState(false);
   const [hasEditedContext, setHasEditedContext] = useState(false);
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
+  const hasInitializedContextRef = useRef(false);
   const fallbackCwd = defaultProjectCwd(recentSessions, recentProjects);
-  const shouldUseFallbackCwd = Boolean(!hasEditedContext && fallbackCwd && (!cwd.trim() || cwd.trim() === recentProjects[0]?.cwd));
   const launchCwd = cwd.trim();
   const canStart = Boolean(launchCwd && initialPrompt.trim());
   const projectLabel = launchCwd ? pathBasename(launchCwd) : 'Choose project';
@@ -91,9 +91,12 @@ export default function ProjectHome({
   }, []);
 
   useEffect(() => {
-    if (!shouldUseFallbackCwd || cwd.trim() === fallbackCwd) return;
+    const currentCwd = cwd.trim();
+    const shouldInitializeContext = !currentCwd || currentCwd === recentProjects[0]?.cwd;
+    if (hasInitializedContextRef.current || hasEditedContext || !fallbackCwd || !shouldInitializeContext) return;
+    hasInitializedContextRef.current = true;
     onSetCwd(fallbackCwd);
-  }, [cwd, fallbackCwd, onSetCwd, shouldUseFallbackCwd]);
+  }, [cwd, fallbackCwd, hasEditedContext, onSetCwd, recentProjects]);
 
   function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -149,17 +152,15 @@ export default function ProjectHome({
             <span className="start-context-chip" title={launchCwd || 'Choose a repo path on the devbox'}>Project: {projectLabel}</span>
             <span className="start-context-chip">Worktree: {useWorktree ? 'On' : 'Off'}</span>
             <span className="start-context-chip">Permission: {permissionMode}</span>
-            <details className="project-context-panel" open={isContextOpen}>
-              <summary
-                role="button"
+            <div className="project-context-panel">
+              <button
+                type="button"
                 aria-label="Change project context"
-                onClick={(event) => {
-                  event.preventDefault();
-                  setIsContextOpen((open) => !open);
-                }}
+                aria-expanded={isContextOpen}
+                onClick={() => setIsContextOpen((open) => !open)}
               >
                 Change
-              </summary>
+              </button>
               {isContextOpen && (
               <div className="project-context-body">
                 <label className="field-stack" htmlFor="project-home-cwd">
@@ -237,7 +238,7 @@ export default function ProjectHome({
                 </div>
               </div>
               )}
-            </details>
+            </div>
           </div>
         </form>
 
