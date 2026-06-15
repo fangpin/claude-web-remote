@@ -1,4 +1,3 @@
-use crate::{AppError, AppResult};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{collections::HashMap, sync::Arc};
@@ -141,86 +140,46 @@ pub enum PermissionDecision {
     },
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct PermissionBridge {
+    token: String,
+    capability: PermissionCapability,
     requests: Arc<Mutex<HashMap<String, PendingPermissionRequest>>>,
 }
 
 impl PermissionBridge {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(token: impl Into<String>, capability: PermissionCapability) -> Self {
+        Self {
+            token: token.into(),
+            capability,
+            requests: Arc::new(Mutex::new(HashMap::new())),
+        }
     }
 
-    pub async fn add_request(
-        &self,
-        request_id: String,
-        request: HookPermissionRequest,
-    ) -> PendingPermissionRequest {
-        let request = PendingPermissionRequest::from_hook_request(request_id.clone(), request);
-        self.requests
-            .lock()
-            .await
-            .insert(request_id, request.clone());
-        request
+    pub fn token(&self) -> &str {
+        &self.token
     }
 
-    pub async fn list_pending(&self) -> PendingPermissionsResponse {
+    pub fn capability(&self) -> &PermissionCapability {
+        &self.capability
+    }
+
+    pub async fn pending_for_session(&self, session_id: Uuid) -> Vec<PendingPermissionRequest> {
         let requests = self.requests.lock().await;
-        let mut requests = requests.values().cloned().collect::<Vec<_>>();
+        let mut requests = requests
+            .values()
+            .filter(|request| request.session_id == session_id)
+            .cloned()
+            .collect::<Vec<_>>();
         requests.sort_by(|left, right| left.id.cmp(&right.id));
+        requests
+    }
+
+    pub async fn list_response(&self, session_id: Uuid) -> PendingPermissionsResponse {
         PendingPermissionsResponse {
-            capability: PermissionCapability::available(),
-            requests,
+            capability: self.capability.clone(),
+            requests: self.pending_for_session(session_id).await,
         }
-    }
-
-    pub async fn allow(
-        &self,
-        request_id: &str,
-        request: AllowPermissionRequest,
-    ) -> AppResult<PermissionDecision> {
-        self.resolve(
-            request_id,
-            PermissionStatus::Allowed,
-            PermissionDecision::Allow {
-                updated_input: request.updated_input,
-            },
-        )
-        .await
-    }
-
-    pub async fn deny(
-        &self,
-        request_id: &str,
-        request: DenyPermissionRequest,
-    ) -> AppResult<PermissionDecision> {
-        self.resolve(
-            request_id,
-            PermissionStatus::Denied,
-            PermissionDecision::Deny {
-                message: request.message,
-            },
-        )
-        .await
-    }
-
-    async fn resolve(
-        &self,
-        request_id: &str,
-        status: PermissionStatus,
-        decision: PermissionDecision,
-    ) -> AppResult<PermissionDecision> {
-        let mut requests = self.requests.lock().await;
-        let request = requests
-            .get_mut(request_id)
-            .ok_or_else(|| AppError::NotFound(format!("permission request {request_id}")))?;
-        if request.status != PermissionStatus::Pending {
-            return Err(AppError::Conflict(format!(
-                "permission request {request_id} is already resolved"
-            )));
-        }
-        request.status = status;
-        Ok(decision)
     }
 }
 
@@ -291,6 +250,37 @@ mod tests {
     }
 
     #[test]
+    fn summarizes_non_bash_requests_with_compact_json_fallback() {
+        let summary = permission_summary(
+            "Read",
+            &json!({
+                "file_path": "/tmp/example.txt",
+                "offset": 12
+            }),
+        );
+        assert_eq!(
+            summary,
+            "Read: {\"file_path\":\"/tmp/example.txt\",\"offset\":12}"
+        );
+    }
+
+    #[test]
+    fn truncates_non_bash_compact_json_fallback_after_160_characters() {
+        let long_text = "x".repeat(180);
+        let tool_input = json!({ "command": long_text });
+
+        let compact_json = serde_json::to_string(&tool_input).unwrap();
+        assert!(compact_json.chars().count() > 160);
+
+        let summary = permission_summary("Read", &tool_input);
+        let expected = format!(
+            "Read: {}...",
+            compact_json.chars().take(157).collect::<String>()
+        );
+        assert_eq!(summary, expected);
+    }
+
+    #[test]
     fn detects_editable_bash_command() {
         let request = PendingPermissionRequest::from_hook_request(
             "req-1".to_string(),
@@ -299,6 +289,94 @@ mod tests {
             })),
         );
         assert_eq!(request.editable, Some(PermissionEditable::BashCommand));
+    }
+
+    #[test]
+    fn does_not_mark_non_bash_requests_editable_when_command_is_string() {
+        let mut request = hook_request(json!({
+            "command": "cargo test --manifest-path Cargo.toml"
+        }));
+        request.tool_name = "Read".to_string();
+
+        let request = PendingPermissionRequest::from_hook_request("req-2".to_string(), request);
+        assert_eq!(request.editable, None);
+    }
+
+    #[test]
+    fn does_not_mark_bash_requests_editable_when_command_is_not_string() {
+        let request = PendingPermissionRequest::from_hook_request(
+            "req-3".to_string(),
+            hook_request(json!({
+                "command": ["cargo", "test"]
+            })),
+        );
+        assert_eq!(request.editable, None);
+    }
+
+    #[tokio::test]
+    async fn lists_pending_requests_for_a_session_with_bridge_capability() {
+        let session_id = Uuid::new_v4();
+        let other_session_id = Uuid::new_v4();
+        let bridge = PermissionBridge::new(
+            "bridge-token",
+            PermissionCapability::unavailable("waiting for hook transport"),
+        );
+
+        {
+            let mut requests = bridge.requests.lock().await;
+            requests.insert(
+                "req-2".to_string(),
+                PendingPermissionRequest::from_hook_request(
+                    "req-2".to_string(),
+                    HookPermissionRequest {
+                        session_id,
+                        ..hook_request(json!({ "command": "second" }))
+                    },
+                ),
+            );
+            requests.insert(
+                "req-1".to_string(),
+                PendingPermissionRequest::from_hook_request(
+                    "req-1".to_string(),
+                    HookPermissionRequest {
+                        session_id,
+                        ..hook_request(json!({ "command": "first" }))
+                    },
+                ),
+            );
+            requests.insert(
+                "req-3".to_string(),
+                PendingPermissionRequest::from_hook_request(
+                    "req-3".to_string(),
+                    HookPermissionRequest {
+                        session_id: other_session_id,
+                        ..hook_request(json!({ "command": "other" }))
+                    },
+                ),
+            );
+        }
+
+        assert_eq!(bridge.token(), "bridge-token");
+        assert_eq!(
+            bridge.capability(),
+            &PermissionCapability::unavailable("waiting for hook transport")
+        );
+
+        let pending = bridge.pending_for_session(session_id).await;
+        assert_eq!(
+            pending
+                .iter()
+                .map(|request| request.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["req-1", "req-2"]
+        );
+
+        let response = bridge.list_response(session_id).await;
+        assert_eq!(
+            response.capability,
+            PermissionCapability::unavailable("waiting for hook transport")
+        );
+        assert_eq!(response.requests, pending);
     }
 
     #[test]
