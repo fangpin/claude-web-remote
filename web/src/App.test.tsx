@@ -1048,8 +1048,8 @@ describe('App', () => {
     const palette = await screen.findByRole('dialog', { name: 'Command palette' });
     expect(palette).toHaveTextContent('Show archived chats');
     expect(palette).toHaveTextContent('Open settings');
-    expect(palette).toHaveTextContent('Show diagnostics');
-    expect(palette).toHaveTextContent('Show keyboard shortcuts');
+    expect(palette).toHaveTextContent('Show activity');
+    expect(palette).not.toHaveTextContent('Show keyboard shortcuts');
   });
 
   it('handles app-level composer shortcuts without stealing editable input', async () => {
@@ -1152,7 +1152,7 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
     expect(await screen.findByRole('heading', { name: 'What would you like Claude to do?' })).toBeInTheDocument();
     fireEvent.keyDown(window, { key: 'Escape' });
-    expect(screen.getByRole('heading', { name: 'Where should Claude work?' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'What would you like Claude to do?' })).toBeInTheDocument();
     expect(screen.queryByRole('complementary', { name: 'Activity drawer' })).not.toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: 'i', ctrlKey: true });
@@ -1579,10 +1579,10 @@ describe('App', () => {
     expect(shell).toHaveClass('inspector-closed');
     expect(shell).not.toHaveClass('primary-rail-shell');
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Show inspector' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Open activity drawer' }));
 
     expect(shell).toHaveClass('inspector-open');
-    expect(screen.getByRole('complementary', { name: 'Session inspector' })).toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: 'Activity drawer' })).toBeInTheDocument();
   });
 
   it('loads archived sessions without opening a WebSocket or composer and unarchives them', async () => {

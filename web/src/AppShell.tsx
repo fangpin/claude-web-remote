@@ -15,22 +15,38 @@ export const runtimeStatusLabels = {
 
 type Props = {
   view: AppView;
+  listMode: SessionListMode;
   isInspectorOpen: boolean;
+  isShortcutHelpOpen: boolean;
   isSidebarOpen: boolean;
+  attentionState: 'idle' | 'working' | 'review';
+  attentionLabel: string | null;
   sidebar: ReactNode;
   workspace: ReactNode;
   inspector: ReactNode;
   inspectorWidth: number;
+  onSetShortcutHelpOpen: (isOpen: boolean) => void;
+  onShowActiveSessions: () => void;
+  onShowArchivedSessions: () => void;
+  onToggleSidebar: () => void;
 };
 
 export default function AppShell({
   view,
+  listMode,
   isInspectorOpen,
+  isShortcutHelpOpen,
   isSidebarOpen,
+  attentionState,
+  attentionLabel,
   sidebar,
   workspace,
   inspector,
-  inspectorWidth
+  inspectorWidth,
+  onSetShortcutHelpOpen,
+  onShowActiveSessions,
+  onShowArchivedSessions,
+  onToggleSidebar
 }: Props) {
   const shellStyle = { '--inspector-width': `${inspectorWidth}px` } as CSSProperties;
 
