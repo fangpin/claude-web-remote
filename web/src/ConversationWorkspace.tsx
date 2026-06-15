@@ -65,6 +65,7 @@ type Props = {
   onRetryEvents: () => void;
   onLoadOlderEvents: () => void;
   onOpenReviewActivity: (review: ReviewSurface) => void;
+  onOpenPreviewPath: (path: string) => void;
   onRenameSession: (sessionId: string, name: string | null) => void;
   onUseEmptyStatePrompt: (prompt: string) => void;
 };
@@ -324,6 +325,7 @@ export default function ConversationWorkspace({
   onRetryEvents,
   onLoadOlderEvents,
   onOpenReviewActivity,
+  onOpenPreviewPath,
   onRenameSession,
   onUseEmptyStatePrompt
 }: Props) {
@@ -439,7 +441,7 @@ export default function ConversationWorkspace({
                   )}
                 </section>
               )}
-              <ConversationBlockList blocks={activeBlocks} />
+              <ConversationBlockList blocks={activeBlocks} onOpenPreviewPath={onOpenPreviewPath} />
             </div>
           </div>
           <Composer

@@ -1753,6 +1753,28 @@ describe('App', () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/worktree-diff'))).toBe(false);
   });
 
+  it('opens Preview from a conversation tool card path', async () => {
+    eventsBySession = {
+      s1: [
+        {
+          id: 1,
+          sessionId: 's1',
+          time: '2026-06-14T00:00:00Z',
+          kind: 'tool',
+          payload: { type: 'tool_use', id: 'toolu_read', name: 'Read', input: { file_path: 'web/src/App.tsx' } }
+        }
+      ]
+    };
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Open web/src/App.tsx in Preview' }));
+
+    const inspector = screen.getByRole('complementary', { name: 'Session inspector' });
+    expect(within(inspector).getByRole('tab', { name: 'Preview' })).toHaveAttribute('aria-selected', 'true');
+    const previewPanel = within(inspector).getByRole('tabpanel', { name: 'Preview' });
+    expect(within(previewPanel).getByRole('button', { name: /web\/src\/App\.tsx/ })).toHaveAttribute('aria-pressed', 'true');
+  });
+
   it('shows session tasks in the inspector and can switch to all tasks and plan', async () => {
     render(<App />);
 

@@ -339,6 +339,13 @@ function focusFallbackAfterSidebarClose() {
     onSelectActivity(review.activity);
   }
 
+  function onOpenPreviewPath(path: string) {
+    setView('sessions');
+    setIsInspectorOpen(true);
+    setInspectorTab('preview');
+    setSelectedPreviewPath(path);
+  }
+
   function showActiveSessions() {
     setView('sessions');
     setIsSidebarOpen(true);
@@ -701,6 +708,7 @@ function focusFallbackAfterSidebarClose() {
           onRetryEvents={eventState.retryActiveEvents}
           onLoadOlderEvents={eventState.loadOlderEvents}
           onOpenReviewActivity={onOpenReviewActivity}
+          onOpenPreviewPath={onOpenPreviewPath}
           onRenameSession={sessionState.onRename}
           onUseEmptyStatePrompt={composerState.useEmptyStatePrompt}
         />

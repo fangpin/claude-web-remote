@@ -2241,6 +2241,15 @@ button.danger:hover {
   border-color: #efc8c0;
 }
 
+.open-preview-button {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 3px 8px;
+  color: var(--accent-strong);
+  font-size: 11px;
+  line-height: 1.25;
+}
+
 .tool-activity-body {
   display: grid;
   gap: 6px;

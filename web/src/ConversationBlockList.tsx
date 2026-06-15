@@ -1,5 +1,6 @@
 import RawEventDetails from './RawEventDetails';
 import type { ConversationBlock, ErrorBlock, MessageBlock, RawBlock, TaskBlock, ToolBlock } from './conversationBlocks';
+import { extractPreviewFileReferences } from './previewReferences';
 import hljs from 'highlight.js/lib/core';
 import bash from 'highlight.js/lib/languages/bash';
 import css from 'highlight.js/lib/languages/css';
@@ -321,10 +322,15 @@ function toolResultTitle(block: ToolBlock): string {
   return 'Result';
 }
 
-function ToolBlockView({ block }: { block: ToolBlock }) {
+function previewPathsForBlock(block: ToolBlock | TaskBlock): string[] {
+  return [...new Set(extractPreviewFileReferences(block.rawEvents).map((reference) => reference.path))];
+}
+
+function ToolBlockView({ block, onOpenPreviewPath }: { block: ToolBlock; onOpenPreviewPath?: (path: string) => void }) {
   const hasVisibleResult = block.resultSummary.trim() && block.resultDisplay !== 'hidden';
   const showInlineResult = hasVisibleResult && block.resultDisplay === 'visible';
   const showCollapsedResult = hasVisibleResult && block.resultDisplay === 'collapsed';
+  const firstPreviewPath = previewPathsForBlock(block)[0];
 
   return (
     <article id={blockElementId(block)} className={`conversation-block tool-block ${block.status} result-${block.resultKind}${block.density === 'compact' ? ' compact' : ''}`}>
@@ -334,6 +340,17 @@ function ToolBlockView({ block }: { block: ToolBlock }) {
           <span className="tool-status-dot" aria-hidden="true" />
           {block.status}
         </span>
+        {firstPreviewPath && onOpenPreviewPath ? (
+          <button
+            type="button"
+            className="open-preview-button"
+            onClick={() => onOpenPreviewPath(firstPreviewPath)}
+            aria-label={`Open ${firstPreviewPath} in Preview`}
+            title={`Open ${firstPreviewPath} in Preview`}
+          >
+            Preview
+          </button>
+        ) : null}
       </header>
       <div className="tool-activity-body">
         {block.inputSummary.trim() && <p className="tool-input-summary">{block.inputSummary}</p>}
@@ -358,7 +375,9 @@ function ToolBlockView({ block }: { block: ToolBlock }) {
   );
 }
 
-function TaskBlockView({ block }: { block: TaskBlock }) {
+function TaskBlockView({ block, onOpenPreviewPath }: { block: TaskBlock; onOpenPreviewPath?: (path: string) => void }) {
+  const firstPreviewPath = previewPathsForBlock(block)[0];
+
   return (
     <article id={blockElementId(block)} className={`conversation-block task-block ${block.status}${block.density === 'compact' ? ' compact' : ''}`}>
       <header className="block-header task-header">
@@ -369,6 +388,17 @@ function TaskBlockView({ block }: { block: TaskBlock }) {
         <span className="task-meta-row">
           <span className="task-source">{block.source}</span>
           <span className="task-status">{block.status}</span>
+          {firstPreviewPath && onOpenPreviewPath ? (
+            <button
+              type="button"
+              className="open-preview-button"
+              onClick={() => onOpenPreviewPath(firstPreviewPath)}
+              aria-label={`Open ${firstPreviewPath} in Preview`}
+              title={`Open ${firstPreviewPath} in Preview`}
+            >
+              Preview
+            </button>
+          ) : null}
         </span>
       </header>
       <p className="task-summary">{block.summary}</p>
@@ -423,20 +453,25 @@ function RawBlockView({ block }: { block: RawBlock }) {
   );
 }
 
-function ConversationBlockView({ block }: { block: ConversationBlock }) {
+function ConversationBlockView({ block, onOpenPreviewPath }: { block: ConversationBlock; onOpenPreviewPath?: (path: string) => void }) {
   if (block.type === 'anchor') return <span id={blockElementId(block)} className="conversation-anchor" aria-hidden="true" />;
   if (block.type === 'message') return <MessageBlockView block={block} />;
-  if (block.type === 'tool') return <ToolBlockView block={block} />;
-  if (block.type === 'task') return <TaskBlockView block={block} />;
+  if (block.type === 'tool') return <ToolBlockView block={block} onOpenPreviewPath={onOpenPreviewPath} />;
+  if (block.type === 'task') return <TaskBlockView block={block} onOpenPreviewPath={onOpenPreviewPath} />;
   if (block.type === 'error') return <ErrorBlockView block={block} />;
   return <RawBlockView block={block} />;
 }
 
-export default function ConversationBlockList({ blocks }: { blocks: ConversationBlock[] }) {
+type ConversationBlockListProps = {
+  blocks: ConversationBlock[];
+  onOpenPreviewPath?: (path: string) => void;
+};
+
+export default function ConversationBlockList({ blocks, onOpenPreviewPath }: ConversationBlockListProps) {
   return (
     <div className="conversation-blocks">
       {blocks.map((block) => (
-        <ConversationBlockView key={block.id} block={block} />
+        <ConversationBlockView key={block.id} block={block} onOpenPreviewPath={onOpenPreviewPath} />
       ))}
     </div>
   );
