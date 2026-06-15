@@ -1,10 +1,11 @@
 use crate::{
     AllowPermissionRequest, AppError, AppResult, ClaudeProcess, ClaudeProcessConfig,
     DenyPermissionRequest, EventKind, EventStore, HookPermissionRequest, PendingPermissionRequest,
-    PendingPermissionsResponse, PermissionBridge, PermissionCapability, ProcessEvent, SessionGroup,
-    SessionMeta, SessionStatus, TaskGroups, UiEvent, WorktreeConfig, WorktreeManager, WorktreeMeta,
-    WorktreeStatus, extract_claude_session_id, group_tasks, has_unfinished_tool_use,
-    hook_stdout_for_decision, project_session_tasks, store::SessionListFilter,
+    PendingPermissionsResponse, PermissionBridge, PermissionCapability, PermissionProcessConfig,
+    ProcessEvent, SessionGroup, SessionMeta, SessionStatus, TaskGroups, UiEvent, WorktreeConfig,
+    WorktreeManager, WorktreeMeta, WorktreeStatus, extract_claude_session_id, group_tasks,
+    has_unfinished_tool_use, hook_stdout_for_decision, project_session_tasks,
+    store::SessionListFilter,
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -776,6 +777,7 @@ impl SessionManager {
                 permission_mode: meta.permission_mode.clone(),
                 resume_session_id,
                 starting_event_id,
+                permission_process: self.permission_process_config(meta.id),
             },
         )
         .await?;
@@ -880,6 +882,23 @@ impl SessionManager {
         });
 
         self.session_info(meta).await
+    }
+
+    fn permission_process_config(&self, session_id: Uuid) -> Option<PermissionProcessConfig> {
+        if !self.permission_bridge.capability().can_act() {
+            return None;
+        }
+        let root = self
+            .store
+            .root()
+            .join("permission-bridge")
+            .join(session_id.to_string());
+        Some(PermissionProcessConfig {
+            settings_path: root.join("settings.json"),
+            helper_path: root.join("permission-hook-helper.sh"),
+            daemon_url: "http://127.0.0.1:8787".to_string(),
+            token: self.permission_bridge.token().to_string(),
+        })
     }
 
     async fn session_info(&self, meta: SessionMeta) -> AppResult<SessionInfo> {
@@ -2624,6 +2643,56 @@ done
         assert!(matches!(resume_result, Err(AppError::InvalidRequest(_))));
         assert_eq!(final_meta.status, SessionStatus::Stopped);
         assert!(manager.subscribe(session_id).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn available_permission_bridge_passes_settings_to_process() {
+        let temp = tempfile::tempdir().unwrap();
+        let args_log = temp.path().join("args.log");
+        let wrapper = temp.path().join("settings-wrapper.sh");
+        fs::write(
+            &wrapper,
+            format!(
+                "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" > '{}'\nprintf '{{\"type\":\"system\",\"session_id\":\"settings\"}}\\n'\nwhile IFS= read -r line; do sleep 10; done\n",
+                args_log.display()
+            ),
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&wrapper).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&wrapper, permissions).unwrap();
+        let store = EventStore::new(temp.path().join("data")).await.unwrap();
+        let manager = SessionManager::new_with_permission_bridge(
+            store,
+            vec![wrapper.to_string_lossy().to_string()],
+            "default".to_string(),
+            worktree_config(),
+            PermissionBridge::new("test-token".to_string(), PermissionCapability::available()),
+        );
+
+        let session = manager
+            .create_session(CreateSessionRequest {
+                cwd: temp.path().to_path_buf(),
+                name: None,
+                permission_mode: None,
+                worktree: None,
+            })
+            .await
+            .unwrap();
+
+        let args = wait_for_file_contents(&args_log, |contents| contents.contains("--settings"))
+            .await
+            .unwrap_or_default();
+        assert!(args.contains("--settings"));
+        let settings_path = args
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .windows(2)
+            .find_map(|parts| (parts[0] == "--settings").then_some(parts[1]))
+            .unwrap();
+        let settings = fs::read_to_string(settings_path).unwrap();
+        assert!(settings.contains("PermissionRequest"));
+        manager.stop_session(session.id).await.unwrap();
     }
 
     #[tokio::test]

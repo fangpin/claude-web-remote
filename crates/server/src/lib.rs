@@ -23,7 +23,7 @@ pub use permission::{
     PendingPermissionsResponse, PermissionBridge, PermissionCapability, PermissionCapabilityStatus,
     PermissionDecision, PermissionEditable, PermissionStatus, hook_stdout_for_decision,
 };
-pub use process::{ClaudeProcess, ClaudeProcessConfig, ProcessEvent};
+pub use process::{ClaudeProcess, ClaudeProcessConfig, PermissionProcessConfig, ProcessEvent};
 pub use session::{CreateSessionRequest, SessionInfo, SessionManager, WorktreeRequest};
 pub use store::{EventStore, SessionGroup, SessionListFilter, SessionMeta, SessionStatus};
 pub use task::{
