@@ -1369,16 +1369,59 @@ describe('App', () => {
     expect(within(header as HTMLElement).getByText('Waiting for you')).toBeInTheDocument();
   });
 
-  it('renames the active chat from the header', async () => {
+  it('renames the active chat inline from the header menu', async () => {
     render(<App />);
 
-    expect(await screen.findByRole('heading', { name: 'Repo One' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Rename chat' }));
-    fireEvent.change(screen.getByLabelText('Chat title'), { target: { value: 'Renamed Repo' } });
-    fireEvent.keyDown(screen.getByLabelText('Chat title'), { key: 'Enter' });
+    const header = (await screen.findByRole('heading', { name: 'Repo One' })).closest('header');
+    expect(header).not.toBeNull();
+    fireEvent.click(within(header as HTMLElement).getByRole('button', { name: 'More session actions' }));
+    fireEvent.click(within(header as HTMLElement).getByRole('button', { name: 'Rename' }));
+
+    const titleInput = within(header as HTMLElement).getByLabelText('Chat title');
+    fireEvent.change(titleInput, { target: { value: 'Renamed Repo' } });
+    fireEvent.keyDown(titleInput, { key: 'Enter' });
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1', expect.objectContaining({ method: 'PATCH' })));
+    const renameCall = fetchMock.mock.calls.find(([url, init]) => url === '/api/sessions/s1' && init?.method === 'PATCH');
+    expect(JSON.parse(String(renameCall?.[1]?.body))).toEqual({ name: 'Renamed Repo' });
     expect(await screen.findByRole('heading', { name: 'Renamed Repo' })).toBeInTheDocument();
+    expect(window.prompt).not.toHaveBeenCalledWith('Rename chat', expect.any(String));
+  });
+
+  it('opens activity and diagnostics from the compact header actions', async () => {
+    render(<App />);
+
+    const header = (await screen.findByRole('heading', { name: 'Repo One' })).closest('header');
+    expect(header).not.toBeNull();
+
+    fireEvent.click(within(header as HTMLElement).getByRole('button', { name: 'Activity' }));
+    expect(screen.getByRole('button', { name: 'Hide inspector' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Activity' })).toHaveAttribute('aria-selected', 'true');
+
+    fireEvent.click(within(header as HTMLElement).getByRole('button', { name: 'More session actions' }));
+    fireEvent.click(within(header as HTMLElement).getByRole('button', { name: 'View diagnostics' }));
+    expect(screen.getByRole('tab', { name: 'Diagnostics' })).toHaveAttribute('aria-selected', 'true');
+    expect(await screen.findByText('Daemon health checks are passing.')).toBeInTheDocument();
+  });
+
+  it('copies the session id and opens worktree diff from the More menu', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    dirtyWorktreeStatus = true;
+    render(<App />);
+
+    fireEvent.click(await screen.findByText('Worktree Repo'));
+    const header = (await screen.findByRole('heading', { name: 'Worktree Repo' })).closest('header');
+    expect(header).not.toBeNull();
+
+    fireEvent.click(within(header as HTMLElement).getByRole('button', { name: 'More session actions' }));
+    fireEvent.click(within(header as HTMLElement).getByRole('button', { name: /Copy session ID/ }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('s4'));
+
+    fireEvent.click(within(header as HTMLElement).getByRole('button', { name: 'Open worktree diff' }));
+    expect(await screen.findByLabelText('Header worktree diff')).toBeInTheDocument();
+    expect(await screen.findByText(/diff --git a\/web\/src\/App\.tsx/)).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s4/worktree-diff', undefined);
   });
 
   it('updates an unnamed chat with an auto-generated title after the first message', async () => {
