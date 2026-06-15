@@ -290,7 +290,7 @@ function focusFallbackAfterSidebarClose() {
         focusComposer(false);
         return;
       }
-      document.querySelector<HTMLElement>('.conversation-workspace, .config-workspace')?.focus();
+      document.querySelector<HTMLElement>(view === 'config' ? '.config-workspace' : '.conversation-workspace')?.focus();
     });
   }
 
