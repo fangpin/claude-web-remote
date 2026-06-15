@@ -4,14 +4,14 @@ import ConfigView from './ConfigView';
 import PermissionActionCard from './PermissionActionCard';
 import ConversationBlockList from './ConversationBlockList';
 import Composer from './Composer';
-import type { AppView, SessionListMode } from './AppShell';
+import type { AppView } from './AppShell';
 import type { ClaudeCommand, SlashCommandToken } from './autocomplete';
 import type { ReviewSurface } from './activityTimeline';
 import type { ConversationBlock } from './conversationBlocks';
 import type { ConversationDisplayMode } from './presentationPolicy';
 import { getContinuityLabel, getSessionRuntimeLabel } from './sessionContinuity';
 import type { EventConnectionState } from './useSessionEvents';
-import type { ComposerContextAttachment, PendingPermissionRequest, PermissionCapability, SessionInfo, WorktreeStatus } from './types';
+import type { ComposerContextAttachment, PendingPermissionRequest, PermissionCapability, SessionInfo, SessionListMode, WorktreeStatus } from './types';
 
 type ApiError = {
   message: string;

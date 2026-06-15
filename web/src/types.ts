@@ -1,5 +1,6 @@
 export type SessionStatus = 'starting' | 'running' | 'exited' | 'stopped' | 'failed';
 export type SessionRuntimeStatus = 'starting' | 'running' | 'waiting' | 'ended' | 'stopped' | 'failed';
+export type SessionListMode = 'active' | 'archived';
 
 export type PermissionCapabilityStatus = 'available' | 'unavailable';
 

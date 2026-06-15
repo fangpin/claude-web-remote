@@ -696,20 +696,18 @@ test.beforeEach(async ({ page }) => {
 });
 
 test('Claude-like UI stays readable across key viewports', async ({ page }) => {
-  const rail = page.getByRole('navigation', { name: 'Primary navigation' });
   const sidebar = page.getByRole('complementary', { name: 'Session navigation' });
   const workspace = page.getByRole('main', { name: 'Conversation workspace' });
-  const inspector = page.getByRole('complementary', { name: 'Session inspector' });
   const composer = page.getByRole('form', { name: 'Message composer' });
   const events = page.locator('.events');
 
-  await boxFor(rail, 'primary rail');
+  await expect(page.getByRole('navigation', { name: 'Primary navigation' })).toHaveCount(0);
   await boxFor(sidebar, 'session sidebar');
   await boxFor(workspace, 'conversation workspace');
   await boxFor(events, 'conversation event stream');
   await boxFor(composer, 'composer');
   await expect(page.locator('.message-block.assistant').first()).toContainText('browser layout checks');
-  await expect(page.locator('.tool-block.completed')).toContainText('Bash');
+  await expect(page.locator('.tool-block.completed')).toContainText('Ran git status --short');
   await expect(page.locator('.tool-block.completed')).toContainText('git status --short');
   await expect(page.locator('.task-block.running')).toContainText('Run browser visual layout verification');
   await expect(page.locator('.task-block.completed')).toContainText('Inspect responsive UI affordances');
@@ -720,24 +718,19 @@ test('Claude-like UI stays readable across key viewports', async ({ page }) => {
   await expectComposerPinnedBelowEvents(page);
   await expectNoHorizontalElementOverflow(events, 'event stream');
 
-  const viewport = test.info().project.use.viewport!;
-  if (viewport.width > 1100) {
-    await boxFor(inspector, 'session inspector');
-    await expect(inspector.getByRole('button', { name: 'Hide', exact: true })).toBeVisible();
-    await expect(page.getByRole('tabpanel', { name: 'Session tasks' })).toContainText('visual smoke checks');
-    await expectNoMeaningfulOverlap(sidebar, workspace, 'sidebar and workspace');
-    await expectNoMeaningfulOverlap(workspace, inspector, 'workspace and inspector');
-  } else {
-    await expectNoMeaningfulOverlap(sidebar, workspace, 'sidebar and workspace');
-
-    const beforeOpenWorkspace = await boxFor(workspace, 'workspace before inspector opens');
-    await expectCompactInspector(page, 'compact inspector');
-    const afterOpenWorkspace = await boxFor(workspace, 'workspace after inspector opens');
-    expect(
-      Math.abs(afterOpenWorkspace.width - beforeOpenWorkspace.width),
-      'opening inspector on constrained viewports should not shrink the chat workspace'
-    ).toBeLessThanOrEqual(1);
-  }
+  await expectNoMeaningfulOverlap(sidebar, workspace, 'sidebar and workspace');
+  const beforeOpenWorkspace = await boxFor(workspace, 'workspace before activity opens');
+  await page.getByRole('button', { name: 'Open activity drawer' }).click();
+  const activityDrawer = page.getByRole('complementary', { name: 'Activity drawer' });
+  await boxFor(activityDrawer, 'activity drawer');
+  await expect(activityDrawer.getByRole('button', { name: 'Close activity drawer' })).toBeVisible();
+  await activityDrawer.getByRole('tab', { name: 'Tasks' }).click();
+  await expect(page.getByRole('tabpanel', { name: 'Tasks' })).toContainText('visual smoke checks');
+  const afterOpenWorkspace = await boxFor(workspace, 'workspace after activity opens');
+  expect(
+    Math.abs(afterOpenWorkspace.width - beforeOpenWorkspace.width),
+    'opening activity on current drawer implementation should not shrink the chat workspace'
+  ).toBeLessThanOrEqual(1);
 });
 
 test('conversation content can scroll to the final block without composer obstruction', async ({ page }) => {

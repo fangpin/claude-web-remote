@@ -1,9 +1,8 @@
 import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { sendInput } from './api';
-import type { SessionListMode } from './AppShell';
 import { getComposerDisabledReason } from './sessionContinuity';
 import { applyCommandCompletion, findSlashCommandToken, getCommandSuggestions, type ClaudeCommand, type SlashCommandToken } from './autocomplete';
-import type { ComposerContextAttachment, SessionInfo } from './types';
+import type { ComposerContextAttachment, SessionInfo, SessionListMode } from './types';
 
 const MESSAGE_INPUT_MAX_HEIGHT = 220;
 const PROMPT_HISTORY_KEY = 'claude-remote-web:prompt-history';

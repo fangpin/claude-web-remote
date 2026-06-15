@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState, type DragEvent, type ReactNode } from 'react';
-import { type SessionListMode } from './AppShell';
 import { getRuntimeStatus } from './sessionContinuity';
-import type { SessionGroup, SessionInfo, SessionRuntimeStatus, SessionStatus } from './types';
+import type { SessionGroup, SessionInfo, SessionListMode, SessionRuntimeStatus, SessionStatus } from './types';
 
 type RuntimeStatusKey = SessionRuntimeStatus | SessionStatus;
 

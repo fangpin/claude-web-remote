@@ -17,8 +17,8 @@ import {
   updateSession,
   updateSessionGroup
 } from './api';
-import { runtimeStatusLabels, type SessionListMode } from './AppShell';
-import type { SessionGroup, SessionInfo, WorktreeStatus } from './types';
+import { runtimeStatusLabels } from './AppShell';
+import type { SessionGroup, SessionInfo, SessionListMode, WorktreeStatus } from './types';
 
 type UseSessionsOptions = {
   setError: (error: string | null) => void;

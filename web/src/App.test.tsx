@@ -574,7 +574,7 @@ describe('App', () => {
     expect(within(conversationHeader as HTMLElement).getByRole('button', { name: 'More session actions' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Chat view' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: 'Debug view' })).toHaveAttribute('aria-pressed', 'false');
-    expect(screen.getByLabelText('Claude: Claude is waiting')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Claude: Claude is waiting')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Claude attention notification')).toHaveTextContent('Claude is waiting');
     expect(screen.queryByLabelText('Claude needs attention')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Claude needs your review')).not.toBeInTheDocument();
@@ -1106,7 +1106,9 @@ describe('App', () => {
     expect(palette).toHaveTextContent('Show archived chats');
     expect(palette).toHaveTextContent('Open settings');
     expect(palette).toHaveTextContent('Show activity');
-    expect(palette).not.toHaveTextContent('Show keyboard shortcuts');
+    expect(palette).toHaveTextContent('Keyboard shortcuts');
+    fireEvent.click(within(palette).getByText('Keyboard shortcuts'));
+    expect(palette).toHaveTextContent('Open command palette');
   });
 
   it('handles app-level composer shortcuts without stealing editable input', async () => {

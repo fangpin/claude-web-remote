@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { listSessionTasks, listTasks } from './api';
-import type { SessionListMode } from './AppShell';
-import type { TaskGroups } from './types';
+import type { SessionListMode, TaskGroups } from './types';
 
 export const emptyTaskGroups: TaskGroups = { background: [], finished: [] };
 

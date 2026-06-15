@@ -48,7 +48,6 @@ export default function App() {
   const [view, setView] = useState<AppView>('sessions');
   const [inspectorWidth, setInspectorWidth] = useState(INSPECTOR_DEFAULT_WIDTH);
   const [isInspectorOpen, setIsInspectorOpen] = useState(false);
-  const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [dismissedAttentionKey, setDismissedAttentionKey] = useState<string | null>(null);
   const [notifiedAttentionKey, setNotifiedAttentionKey] = useState<string | null>(null);
@@ -264,6 +263,21 @@ function AttentionToast({
   );
 }
 
+function KeyboardShortcutList() {
+  return (
+    <dl>
+      <div><dt>⌘/Ctrl P</dt><dd>Open command palette</dd></div>
+      <div><dt>⌘/Ctrl N</dt><dd>New chat</dd></div>
+      <div><dt>⌘/Ctrl K</dt><dd>Focus composer</dd></div>
+      <div><dt>/</dt><dd>Focus composer</dd></div>
+      <div><dt>⌘/Ctrl B</dt><dd>Toggle sidebar</dd></div>
+      <div><dt>⌘/Ctrl I</dt><dd>Toggle Activity</dd></div>
+      <div><dt>⌥ Up/Down</dt><dd>Switch sessions</dd></div>
+      <div><dt>Esc</dt><dd>Close popovers</dd></div>
+    </dl>
+  );
+}
+
 function CommandPalette({ actions, onClose }: { actions: CommandPaletteAction[]; onClose: () => void }) {
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
@@ -273,8 +287,8 @@ function CommandPalette({ actions, onClose }: { actions: CommandPaletteAction[];
     : actions;
 
   function runAction(action: CommandPaletteAction) {
-    action.run();
     onClose();
+    action.run();
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLElement>) {
@@ -294,6 +308,7 @@ function CommandPalette({ actions, onClose }: { actions: CommandPaletteAction[];
       return;
     }
     if (event.key === 'Enter' && visibleActions[activeIndex]) {
+      if (event.target instanceof HTMLElement && event.target.closest('.command-palette-shortcuts')) return;
       event.preventDefault();
       runAction(visibleActions[activeIndex]);
     }
@@ -343,6 +358,10 @@ function CommandPalette({ actions, onClose }: { actions: CommandPaletteAction[];
             <p className="command-palette-empty">No commands match “{query}”.</p>
           )}
         </div>
+        <details className="command-palette-shortcuts">
+          <summary>Keyboard shortcuts</summary>
+          <KeyboardShortcutList />
+        </details>
       </section>
     </div>
   );
@@ -356,7 +375,7 @@ function focusFallbackAfterSidebarClose() {
         focusComposer(false);
         return;
       }
-      document.querySelector<HTMLButtonElement>('.primary-rail button')?.focus();
+      document.querySelector<HTMLElement>('.workspace')?.focus();
     });
   }
 
@@ -441,12 +460,9 @@ function focusFallbackAfterSidebarClose() {
   }
 
   function openCommandPalette() {
-    setIsShortcutHelpOpen(false);
     setIsCommandPaletteOpen(true);
   }
 
-  const attentionState = pendingPermissions.length > 0 ? 'review' : currentReviewSurface ? 'review' : eventState.isAwaitingClaude ? 'working' : 'idle';
-  const attentionLabel = pendingPermissions.length > 0 ? 'Claude needs permission' : currentReviewSurface?.title ?? (eventState.isAwaitingClaude ? 'Claude is working' : null);
   const attentionKey = pendingPermissions[0]
     ? `${pendingPermissions[0].sessionId}:${pendingPermissions[0].requestId}`
     : currentReviewSurface
@@ -511,11 +527,6 @@ function focusFallbackAfterSidebarClose() {
           setIsCommandPaletteOpen(false);
           return;
         }
-        if (isShortcutHelpOpen) {
-          event.preventDefault();
-          setIsShortcutHelpOpen(false);
-          return;
-        }
         if (hasAutocomplete) {
           event.preventDefault();
           composerState.closeAutocomplete();
@@ -530,7 +541,6 @@ function focusFallbackAfterSidebarClose() {
 
       if (hasAppModifier(event) && event.key.toLowerCase() === 'p') {
         event.preventDefault();
-        setIsShortcutHelpOpen(false);
         setIsCommandPaletteOpen((open) => !open);
         return;
       }
@@ -774,17 +784,9 @@ function focusFallbackAfterSidebarClose() {
     <>
     <AppShell
       view={view}
-      listMode={sessionState.listMode}
       isInspectorOpen={isInspectorOpen}
       inspectorWidth={inspectorWidth}
-      isShortcutHelpOpen={isShortcutHelpOpen}
       isSidebarOpen={isSidebarOpen}
-      attentionState={attentionState}
-      attentionLabel={attentionLabel}
-      onSetShortcutHelpOpen={setIsShortcutHelpOpen}
-      onShowActiveSessions={showActiveSessions}
-      onShowArchivedSessions={showArchivedSessions}
-      onToggleSidebar={toggleSidebar}
       sidebar={
         <SessionSidebar
           activeId={sessionState.activeId}

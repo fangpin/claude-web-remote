@@ -1,5 +1,5 @@
-import { runtimeStatusLabels, type SessionListMode } from './AppShell';
-import type { SessionInfo, SessionRuntimeStatus, SessionStatus } from './types';
+import { runtimeStatusLabels } from './AppShell';
+import type { SessionInfo, SessionListMode, SessionRuntimeStatus, SessionStatus } from './types';
 
 type RuntimeStatusKey = SessionRuntimeStatus | SessionStatus;
 
