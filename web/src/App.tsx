@@ -668,7 +668,6 @@ function focusFallbackAfterSidebarClose() {
           listMode={sessionState.listMode}
           message={composerState.message}
           messageInputRef={composerState.messageInputRef}
-          promptHistory={composerState.promptHistory}
           sendStatusText={composerState.sendStatusText}
           suggestions={composerState.suggestions}
           view={view}
@@ -694,8 +693,10 @@ function focusFallbackAfterSidebarClose() {
           onMessageSelect={composerState.onMessageSelect}
           onRemoveContextAttachment={composerState.removeContextAttachment}
           onSend={composerState.onSend}
+          onStopSession={() => {
+            void sessionState.onStop(false);
+          }}
           onSetActiveSuggestionIndex={composerState.setActiveSuggestionIndex}
-          onUsePrompt={composerState.usePrompt}
           onDismissError={() => reportApiError(null)}
           onRetryEvents={eventState.retryActiveEvents}
           onLoadOlderEvents={eventState.loadOlderEvents}
