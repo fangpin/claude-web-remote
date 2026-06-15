@@ -1261,6 +1261,7 @@ describe('App', () => {
     render(<App />);
 
     expect(screen.queryByRole('button', { name: 'Stop session' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Repo One' })).toBeInTheDocument();
     const sidebar = await screen.findByRole('complementary', { name: 'Session navigation' });
     fireEvent.click(within(sidebar).getByRole('button', { name: 'End session' }));
 
