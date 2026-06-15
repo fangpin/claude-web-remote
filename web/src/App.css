@@ -5193,6 +5193,18 @@ textarea {
     background: linear-gradient(180deg, #ffe4cf, #e3b087);
   }
 
+  .primary-rail button,
+  .session-modes button,
+  .session-list-toolbar h2,
+  .new-session-panel h2,
+  .session-section-heading p,
+  .session-section-heading > span,
+  .session-section-heading-actions,
+  .composer-hints,
+  .raw-event-summary {
+    color: var(--muted);
+  }
+
   .primary-rail button.active,
   .primary-rail button[aria-pressed='true'],
   .primary-rail button:hover,
@@ -5216,6 +5228,151 @@ textarea {
   .raw-block,
   .error-block {
     background: rgb(255 255 255 / 0.035);
+  }
+
+  .attention-toast,
+  .command-palette,
+  .session-management-actions,
+  .session-empty,
+  .empty-state,
+  .connection-state,
+  .event-limit-note,
+  .project-card,
+  .recent-session-card,
+  .worktree-status-panel,
+  .worktree-file-list,
+  .context-snippet-card,
+  .activity-card,
+  .activity-empty,
+  .diagnostic-block,
+  .diagnostic-grid,
+  .notice,
+  .plan-content {
+    border-color: var(--border-subtle);
+    color: var(--text-soft);
+    background: var(--surface-raised);
+  }
+
+  .session-empty-error,
+  .api-error,
+  .connection-state-error,
+  .raw-block.error,
+  .task-block.failed,
+  .tool-block.failed,
+  .error-block {
+    border-color: color-mix(in srgb, var(--danger) 34%, transparent);
+    color: var(--text-soft);
+    background: var(--danger-soft);
+  }
+
+  .session-empty-error .state-kicker,
+  .api-error strong,
+  .connection-state-error strong,
+  .raw-block.error .block-header > span:first-child,
+  .task-block.failed .task-status,
+  .tool-block.failed .tool-status,
+  .error-block .block-header > span:first-child {
+    color: var(--danger);
+  }
+
+  .deleted-note,
+  .worktree-status-panel.dirty,
+  .waiting-surface,
+  .raw-block.permission,
+  .raw-block.warning,
+  .event-limit-note,
+  .activity-limit-note,
+  .task-limit-note {
+    border-color: color-mix(in srgb, var(--warning) 34%, transparent);
+    color: var(--text-soft);
+    background: var(--warning-soft);
+  }
+
+  .deleted-note,
+  .worktree-status-panel.dirty .worktree-warning,
+  .waiting-surface h4,
+  .raw-block.permission .block-header > span:first-child,
+  .raw-block.warning .block-header > span:first-child,
+  .event-limit-note,
+  .activity-limit-note,
+  .task-limit-note {
+    color: var(--warning);
+  }
+
+  .session-empty-error p,
+  .api-error p,
+  .connection-state-error p,
+  .waiting-surface p,
+  .activity-panel-header p,
+  .diagnostics-heading p,
+  .diagnostic-block p,
+  .diagnostic-event p,
+  .task-card-meta,
+  .task-card-summary,
+  .task-empty {
+    color: var(--text-soft);
+  }
+
+  .directory-suggestions button,
+  .session-search input,
+  .session-section-heading > span,
+  .session-section-heading-actions > span,
+  .session-group-empty,
+  .session-move-select,
+  .session-pin-button:hover,
+  .session-pin-button.pinned,
+  .worktree-status-heading span,
+  .worktree-state,
+  .worktree-files-details summary small,
+  .diff-summary span,
+  .diff-file-list li,
+  .task-status,
+  .output-path code,
+  .raw-event-details pre,
+  .composer-status-pill,
+  .composer-context-chip,
+  .composer-context-menu summary,
+  .context-attachment-chip,
+  .autocomplete-category,
+  .empty-prompts button,
+  .review-status-pill,
+  .activity-status,
+  .activity-card-jump,
+  .task-status-pill {
+    border-color: var(--border-subtle);
+    color: var(--text-soft);
+    background: var(--surface-2);
+  }
+
+  .message-text code,
+  .message-text .message-code,
+  .conversation-block pre,
+  .worktree-diff-viewer pre,
+  .session-empty pre,
+  .api-error pre,
+  .connection-state pre,
+  .diagnostic-block code,
+  .context-snippet-card pre {
+    border-color: var(--border-subtle);
+    color: var(--text-soft);
+    background: var(--surface-3);
+  }
+
+  .message-text th,
+  .message-text td {
+    border-color: var(--border-subtle);
+  }
+
+  .message-text th {
+    background: var(--surface-3);
+  }
+
+  .message-text td {
+    background: var(--surface-2);
+  }
+
+  .code-frame .hljs {
+    color: var(--text-soft);
   }
 }
 
