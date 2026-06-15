@@ -125,7 +125,7 @@ Keep `claude_bin` backward compatibility unless intentionally removing legacy co
 - Do not use shell parsing for configured launcher values.
 - Preserve full raw event payloads; frontend rendering should add readability without dropping data.
 - Keep session event logs append-only.
-- Do not add fake browser-side Stop Generating or permission approve/deny controls while driving raw Claude Code CLI stream-json; those control frames are not documented as supported.
+- Do not add fake browser-side Stop Generating or permission approve/deny controls while driving raw Claude Code CLI stream-json; those control frames are not documented as supported. Permission approve/deny UI is allowed only when backed by the server-side PermissionRequest hook bridge and must be hidden when that bridge reports unavailable capability.
 - Restart should use persisted Claude session id when available.
 - If no Claude session id is available, restart fresh and record a system event.
 - Bind to `127.0.0.1` by default.

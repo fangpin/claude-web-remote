@@ -3,6 +3,8 @@ import type {
   CreateSessionInput,
   DiagnosticsResponse,
   ManagedConfig,
+  PendingPermissionRequest,
+  PendingPermissionsResponse,
   SessionDiagnosticsResponse,
   SessionGroup,
   SessionInfo,
@@ -125,6 +127,24 @@ export async function sendInput(sessionId: string, text: string): Promise<Sessio
 
 export async function stopSession(sessionId: string): Promise<void> {
   await request<{ ok: true }>(`/api/sessions/${sessionId}/stop`, { method: 'POST' });
+}
+
+export async function listPendingPermissions(sessionId: string): Promise<PendingPermissionsResponse> {
+  return request<PendingPermissionsResponse>(`/api/sessions/${sessionId}/permissions/pending`);
+}
+
+export async function allowPermission(sessionId: string, requestId: string, updatedInput?: unknown): Promise<PendingPermissionRequest> {
+  return request<PendingPermissionRequest>(`/api/sessions/${sessionId}/permissions/${requestId}/allow`, {
+    method: 'POST',
+    body: JSON.stringify(updatedInput === undefined ? {} : { updatedInput })
+  });
+}
+
+export async function denyPermission(sessionId: string, requestId: string, message: string): Promise<PendingPermissionRequest> {
+  return request<PendingPermissionRequest>(`/api/sessions/${sessionId}/permissions/${requestId}/deny`, {
+    method: 'POST',
+    body: JSON.stringify({ message })
+  });
 }
 
 export async function getWorktreeStatus(sessionId: string): Promise<WorktreeStatus> {

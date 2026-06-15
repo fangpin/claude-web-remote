@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { getWorktreeDiff } from './api';
 import ConfigView from './ConfigView';
+import PermissionActionCard from './PermissionActionCard';
 import ConversationBlockList from './ConversationBlockList';
 import Composer from './Composer';
 import type { AppView, SessionListMode } from './AppShell';
@@ -10,7 +11,7 @@ import type { ConversationBlock } from './conversationBlocks';
 import type { ConversationDisplayMode } from './presentationPolicy';
 import { getContinuityLabel, getSessionRuntimeLabel } from './sessionContinuity';
 import type { EventConnectionState } from './useSessionEvents';
-import type { ComposerContextAttachment, SessionInfo, WorktreeStatus } from './types';
+import type { ComposerContextAttachment, PendingPermissionRequest, PermissionCapability, SessionInfo, WorktreeStatus } from './types';
 
 type ApiError = {
   message: string;
@@ -51,6 +52,8 @@ type Props = {
   canLoadOlderEvents: boolean;
   hiddenEventCount: number;
   reviewSurface: ReviewSurface | null;
+  pendingPermissions: PendingPermissionRequest[];
+  permissionCapability: PermissionCapability | null;
   isActivityDrawerOpen: boolean;
   isAwaitingClaude: boolean;
   isComposerSession: boolean;
@@ -86,6 +89,8 @@ type Props = {
   onRetryEvents: () => void;
   onLoadOlderEvents: () => void;
   onOpenReviewActivity: (review: ReviewSurface) => void;
+  onAllowPermission: (permission: PendingPermissionRequest, updatedInput?: unknown) => void;
+  onDenyPermission: (permission: PendingPermissionRequest, message: string) => void;
   onOpenPreviewPath: (path: string) => void;
   onRenameSession: (sessionId: string, name: string | null) => void;
   onUseEmptyStatePrompt: (prompt: string) => void;
@@ -473,6 +478,8 @@ export default function ConversationWorkspace({
   canLoadOlderEvents,
   hiddenEventCount,
   reviewSurface,
+  pendingPermissions,
+  permissionCapability,
   isActivityDrawerOpen,
   isAwaitingClaude,
   isComposerSession,
@@ -508,6 +515,8 @@ export default function ConversationWorkspace({
   onRetryEvents,
   onLoadOlderEvents,
   onOpenReviewActivity,
+  onAllowPermission,
+  onDenyPermission,
   onOpenPreviewPath,
   onRenameSession,
   onUseEmptyStatePrompt
@@ -688,6 +697,14 @@ export default function ConversationWorkspace({
                   </span>
                   <button type="button" onClick={onLoadOlderEvents}>Load earlier</button>
                 </div>
+              )}
+              {pendingPermissions[0] && permissionCapability && (
+                <PermissionActionCard
+                  permission={pendingPermissions[0]}
+                  capability={permissionCapability}
+                  onAllow={onAllowPermission}
+                  onDeny={onDenyPermission}
+                />
               )}
               {activeBlocks.length === 0 && !canLoadOlderEvents && hiddenEventCount === 0 && eventConnectionState !== 'connecting' && eventConnectionState !== 'reconnecting' && (
                 <section className="conversation-empty" aria-label="Conversation starter">

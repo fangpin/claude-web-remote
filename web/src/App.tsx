@@ -1,14 +1,16 @@
 import { FormEvent, KeyboardEvent, PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from 'react';
 import AppShell, { type AppView } from './AppShell';
+import { allowPermission, denyPermission, listPendingPermissions } from './api';
 import { buildActivityTimeline, latestReviewActivity, reviewSurface, waitingCopy, type ActivityItem } from './activityTimeline';
 import ConversationWorkspace, { type ConversationHeaderAction } from './ConversationWorkspace';
 import InspectorPanel, { type InspectorTab } from './InspectorPanel';
 import { hasAppModifier, isEditableTarget, isPlainSlash } from './keyboardShortcuts';
+import { mergePendingPermissions, permissionsFromEvents } from './permissionEvents';
 import type { ConversationDisplayMode } from './presentationPolicy';
 import ProjectHome from './ProjectHome';
 import SessionSidebar from './SessionSidebar';
 import { getContinueActionLabel } from './sessionContinuity';
-import type { TaskInfo } from './types';
+import type { PendingPermissionRequest, PermissionCapability, TaskInfo } from './types';
 import { useComposerState } from './useComposerState';
 import { useDiagnostics } from './useDiagnostics';
 import { useSessionEvents } from './useSessionEvents';
@@ -55,6 +57,8 @@ export default function App() {
   const [conversationDisplayModes, setConversationDisplayModes] = useState<Record<string, ConversationDisplayMode>>({});
   const [selectedPreviewPath, setSelectedPreviewPath] = useState<string | null>(null);
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
+  const [apiPendingPermissions, setApiPendingPermissions] = useState<PendingPermissionRequest[]>([]);
+  const [permissionCapability, setPermissionCapability] = useState<PermissionCapability | null>(null);
   const isDeveloperMode = import.meta.env.DEV;
   const isDiagnosticsVisible = isDeveloperMode && view === 'sessions' && isInspectorOpen && inspectorTab === 'diagnostics';
   const taskActionsRef = useRef<TaskActions>({
@@ -146,9 +150,57 @@ export default function App() {
       }
     : null;
   const activities = buildActivityTimeline(eventState.activeEvents, eventState.activeBlockEventIds);
+  const eventPendingPermissions = permissionsFromEvents(eventState.activeEvents);
+  const pendingPermissions = mergePendingPermissions(eventPendingPermissions, Array.isArray(apiPendingPermissions) ? apiPendingPermissions : []);
+  const effectivePermissionCapability = permissionCapability ?? sessionState.activeSession?.permissionCapability ?? null;
   const latestPermissionActivity = activities.find((activity) => activity.isPermissionLike && ['running', 'waiting'].includes(activity.status));
   const currentReviewSurface = reviewSurface(sessionState.activeSession, latestReviewActivity(activities));
   const waitingMessage = waitingCopy(sessionState.activeSession, latestPermissionActivity ?? null);
+
+  useEffect(() => {
+    const sessionId = sessionState.activeSession?.id;
+    if (!sessionId) {
+      setApiPendingPermissions([]);
+      setPermissionCapability(null);
+      return;
+    }
+    const activeSessionId = sessionId;
+    let cancelled = false;
+    async function loadPendingPermissions() {
+      try {
+        const result = await listPendingPermissions(activeSessionId);
+        if (cancelled) return;
+        setApiPendingPermissions(result.pending);
+        setPermissionCapability(result.capability);
+      } catch (error) {
+        if (cancelled) return;
+        setApiPendingPermissions([]);
+        setPermissionCapability({ status: 'unavailable', reason: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    void loadPendingPermissions();
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionState.activeSession?.id, sessionState.activeSession?.updatedAt]);
+
+  async function onAllowPermission(permission: PendingPermissionRequest, updatedInput?: unknown) {
+    try {
+      const resolved = await allowPermission(permission.sessionId, permission.requestId, updatedInput);
+      setApiPendingPermissions((current) => current.filter((item) => item.requestId !== resolved.requestId));
+    } catch (error) {
+      reportApiError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function onDenyPermission(permission: PendingPermissionRequest, message: string) {
+    try {
+      const resolved = await denyPermission(permission.sessionId, permission.requestId, message);
+      setApiPendingPermissions((current) => current.filter((item) => item.requestId !== resolved.requestId));
+    } catch (error) {
+      reportApiError(error instanceof Error ? error.message : String(error));
+    }
+  }
 
   function focusComposer(seedSlash = false) {
     if (!isComposerSession) return;
@@ -393,12 +445,14 @@ function focusFallbackAfterSidebarClose() {
     setIsCommandPaletteOpen(true);
   }
 
-  const attentionState = currentReviewSurface ? 'review' : eventState.isAwaitingClaude ? 'working' : 'idle';
-  const attentionLabel = currentReviewSurface?.title ?? (eventState.isAwaitingClaude ? 'Claude is working' : null);
-  const attentionKey = currentReviewSurface
-    ? `${sessionState.activeSession?.id ?? 'session'}:${currentReviewSurface.activity?.id ?? currentReviewSurface.title}`
-    : null;
-  const shouldShowAttentionToast = Boolean(currentReviewSurface && attentionKey !== dismissedAttentionKey);
+  const attentionState = pendingPermissions.length > 0 ? 'review' : currentReviewSurface ? 'review' : eventState.isAwaitingClaude ? 'working' : 'idle';
+  const attentionLabel = pendingPermissions.length > 0 ? 'Claude needs permission' : currentReviewSurface?.title ?? (eventState.isAwaitingClaude ? 'Claude is working' : null);
+  const attentionKey = pendingPermissions[0]
+    ? `${pendingPermissions[0].sessionId}:${pendingPermissions[0].requestId}`
+    : currentReviewSurface
+      ? `${sessionState.activeSession?.id ?? 'session'}:${currentReviewSurface.activity?.id ?? currentReviewSurface.title}`
+      : null;
+  const shouldShowAttentionToast = Boolean((pendingPermissions[0] || currentReviewSurface) && attentionKey !== dismissedAttentionKey);
   const canRequestNotifications = typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default';
 
   async function enableBrowserNotifications() {
@@ -407,14 +461,15 @@ function focusFallbackAfterSidebarClose() {
   }
 
   useEffect(() => {
-    if (!currentReviewSurface || !attentionKey || notifiedAttentionKey === attentionKey) return;
+    if (!attentionKey || notifiedAttentionKey === attentionKey) return;
+    if (!pendingPermissions[0] && !currentReviewSurface) return;
     if (!('Notification' in window) || Notification.permission !== 'granted') return;
-    new Notification(currentReviewSurface.title, {
-      body: currentReviewSurface.message,
+    new Notification(pendingPermissions[0] ? 'Claude needs your permission' : currentReviewSurface!.title, {
+      body: pendingPermissions[0]?.summary ?? currentReviewSurface!.message,
       tag: attentionKey
     });
     setNotifiedAttentionKey(attentionKey);
-  }, [attentionKey, currentReviewSurface, notifiedAttentionKey]);
+  }, [attentionKey, currentReviewSurface, notifiedAttentionKey, pendingPermissions]);
 
   const chatSwitchActions: CommandPaletteAction[] = sessionState.visibleSessions.slice(0, 6).map((session) => ({
     id: `chat-${session.id}`,
@@ -780,6 +835,8 @@ function focusFallbackAfterSidebarClose() {
           canLoadOlderEvents={eventState.canLoadOlderEvents}
           hiddenEventCount={eventState.hiddenEventCount}
           reviewSurface={currentReviewSurface}
+          pendingPermissions={pendingPermissions}
+          permissionCapability={effectivePermissionCapability}
           isActivityDrawerOpen={isInspectorOpen}
           isAwaitingClaude={eventState.isAwaitingClaude}
           isComposerSession={isComposerSession}
@@ -833,6 +890,8 @@ function focusFallbackAfterSidebarClose() {
           onRetryEvents={eventState.retryActiveEvents}
           onLoadOlderEvents={eventState.loadOlderEvents}
           onOpenReviewActivity={onOpenReviewActivity}
+          onAllowPermission={onAllowPermission}
+          onDenyPermission={onDenyPermission}
           onOpenPreviewPath={onOpenPreviewPath}
           onRenameSession={sessionState.onRename}
           onUseEmptyStatePrompt={composerState.useEmptyStatePrompt}
@@ -859,9 +918,13 @@ function focusFallbackAfterSidebarClose() {
           tasks={taskState.tasks}
           waitingMessage={waitingMessage}
           reviewSurface={currentReviewSurface}
+          pendingPermissions={pendingPermissions}
+          permissionCapability={effectivePermissionCapability}
           onInspectorTabKeyDown={onInspectorTabKeyDown}
           onRefreshDiagnostics={diagnosticsState.refreshDiagnostics}
           onSelectActivity={onSelectActivity}
+          onAllowPermission={onAllowPermission}
+          onDenyPermission={onDenyPermission}
           onSelectTask={onSelectTask}
           onResizeInspectorStart={onResizeInspectorStart}
           onSetInspectorTab={setInspectorTab}
@@ -869,14 +932,14 @@ function focusFallbackAfterSidebarClose() {
         />
       }
     />
-    {shouldShowAttentionToast && currentReviewSurface && attentionKey && (
+    {shouldShowAttentionToast && attentionKey && (pendingPermissions[0] || currentReviewSurface) && (
       <AttentionToast
-        title={currentReviewSurface.title}
-        message={currentReviewSurface.message}
+        title={pendingPermissions[0] ? 'Claude needs your permission' : currentReviewSurface!.title}
+        message={pendingPermissions[0]?.summary ?? currentReviewSurface!.message}
         canNotify={canRequestNotifications}
         onEnableNotifications={enableBrowserNotifications}
         onReview={() => {
-          onOpenReviewActivity(currentReviewSurface);
+          if (currentReviewSurface) onOpenReviewActivity(currentReviewSurface);
           setDismissedAttentionKey(attentionKey);
         }}
         onDismiss={() => setDismissedAttentionKey(attentionKey)}

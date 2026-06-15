@@ -1,4 +1,5 @@
 use crate::{AppResult, UiEvent, normalize_claude_stdout};
+use serde_json::json;
 use std::{
     io::ErrorKind,
     path::PathBuf,
@@ -16,12 +17,21 @@ use tokio::{
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
+pub struct PermissionProcessConfig {
+    pub settings_path: PathBuf,
+    pub helper_path: PathBuf,
+    pub daemon_url: String,
+    pub token: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct ClaudeProcessConfig {
     pub launcher: Vec<String>,
     pub cwd: PathBuf,
     pub permission_mode: String,
     pub resume_session_id: Option<String>,
     pub starting_event_id: u64,
+    pub permission_process: Option<PermissionProcessConfig>,
 }
 
 #[derive(Debug, Clone)]
@@ -64,6 +74,13 @@ impl ClaudeProcess {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+
+        if let Some(permission_process) = &config.permission_process {
+            prepare_permission_hook_files(permission_process).await?;
+            command
+                .arg("--settings")
+                .arg(&permission_process.settings_path);
+        }
 
         if let Some(resume_session_id) = &config.resume_session_id {
             command.arg("--resume").arg(resume_session_id);
@@ -124,6 +141,52 @@ impl ClaudeProcess {
         }
         Ok(())
     }
+}
+
+async fn prepare_permission_hook_files(config: &PermissionProcessConfig) -> AppResult<()> {
+    if let Some(parent) = config.settings_path.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    if let Some(parent) = config.helper_path.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+
+    let helper_command = config.helper_path.to_string_lossy().to_string();
+    let settings = json!({
+        "hooks": {
+            "PermissionRequest": [
+                {
+                    "matcher": "",
+                    "hooks": [{ "command": helper_command }]
+                }
+            ]
+        }
+    });
+    tokio::fs::write(&config.settings_path, serde_json::to_vec_pretty(&settings)?).await?;
+
+    let helper = format!(
+        r#"#!/usr/bin/env bash
+set -euo pipefail
+payload=$(python3 -c 'import json,os,sys; p=json.load(sys.stdin); p["token"]=os.environ["CRW_PERMISSION_TOKEN"]; p["sessionId"]=os.environ["CRW_SESSION_ID"]; print(json.dumps(p))')
+curl -fsS -X POST '{daemon_url}/api/internal/permission-hooks/request' \
+  -H 'content-type: application/json' \
+  --data-binary "$payload"
+"#,
+        daemon_url = config.daemon_url
+    );
+    tokio::fs::write(&config.helper_path, helper).await?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = tokio::fs::metadata(&config.helper_path)
+            .await?
+            .permissions();
+        permissions.set_mode(0o700);
+        tokio::fs::set_permissions(&config.helper_path, permissions).await?;
+    }
+
+    Ok(())
 }
 
 async fn spawn_with_retry(mut command: Command) -> AppResult<Child> {
@@ -212,6 +275,63 @@ done
     }
 
     #[tokio::test]
+    async fn passes_settings_file_when_permission_bridge_configured() {
+        let temp = tempfile::tempdir().unwrap();
+        let args_log = temp.path().join("args.log");
+        let bin = temp.path().join("fake-claude-args.sh");
+        fs::write(
+            &bin,
+            format!(
+                r#"#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" > '{}'
+printf '{{"type":"system","session_id":"fake-session"}}\n'
+while IFS= read -r line; do exit 0; done
+"#,
+                args_log.display()
+            ),
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&bin).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&bin, permissions).unwrap();
+
+        let bridge_dir = temp.path().join("bridge");
+        let config = PermissionProcessConfig {
+            settings_path: bridge_dir.join("settings.json"),
+            helper_path: bridge_dir.join("permission-hook-helper.sh"),
+            daemon_url: "http://127.0.0.1:8787".to_string(),
+            token: "token".to_string(),
+        };
+
+        let (_process, mut rx) = ClaudeProcess::spawn(
+            Uuid::new_v4(),
+            ClaudeProcessConfig {
+                launcher: vec![bin.to_string_lossy().to_string()],
+                cwd: temp.path().to_path_buf(),
+                permission_mode: "default".to_string(),
+                resume_session_id: None,
+                starting_event_id: 1,
+                permission_process: Some(config.clone()),
+            },
+        )
+        .await
+        .unwrap();
+
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .unwrap();
+        let args = fs::read_to_string(&args_log).unwrap();
+        assert!(args.contains("--settings"));
+        assert!(args.contains(&config.settings_path.to_string_lossy().to_string()));
+        let settings = fs::read_to_string(config.settings_path).unwrap();
+        assert!(settings.contains("PermissionRequest"));
+        assert!(settings.contains(&config.helper_path.to_string_lossy().to_string()));
+        let helper = fs::read_to_string(config.helper_path).unwrap();
+        assert!(helper.contains("/api/internal/permission-hooks/request"));
+    }
+
+    #[tokio::test]
     async fn starts_process_writes_input_and_streams_events() {
         let temp = tempfile::tempdir().unwrap();
         let bin = fake_claude(temp.path());
@@ -223,6 +343,7 @@ done
                 permission_mode: "acceptEdits".to_string(),
                 resume_session_id: None,
                 starting_event_id: 1,
+                permission_process: None,
             },
         )
         .await
@@ -289,6 +410,7 @@ done
                 permission_mode: "acceptEdits".to_string(),
                 resume_session_id: Some("resume-id".to_string()),
                 starting_event_id: 1,
+                permission_process: None,
             },
         )
         .await
@@ -315,6 +437,7 @@ done
                 permission_mode: "acceptEdits".to_string(),
                 resume_session_id: None,
                 starting_event_id: 1,
+                permission_process: None,
             },
         )
         .await
@@ -346,6 +469,7 @@ done
                 permission_mode: "acceptEdits".to_string(),
                 resume_session_id: None,
                 starting_event_id: 42,
+                permission_process: None,
             },
         )
         .await

@@ -1,6 +1,7 @@
 use crate::{
-    AppError, AppResult, ConfigStore, ConfigValues, CreateSessionRequest, EventStore,
-    SessionListFilter, SessionManager, diagnostics, embedded_assets,
+    AllowPermissionRequest, AppError, AppResult, ConfigStore, ConfigValues, CreateSessionRequest,
+    DenyPermissionRequest, EventStore, HookPermissionRequest, SessionListFilter, SessionManager,
+    diagnostics, embedded_assets,
 };
 use axum::{
     Json, Router,
@@ -103,6 +104,22 @@ pub fn build_router(state: AppState, web_dir: Option<PathBuf>) -> Router {
         .route("/sessions/{id}/tasks", get(list_session_tasks))
         .route("/sessions/{id}/input", post(send_input))
         .route("/sessions/{id}/stop", post(stop_session))
+        .route(
+            "/sessions/{id}/permissions/pending",
+            get(get_pending_permissions),
+        )
+        .route(
+            "/sessions/{id}/permissions/{request_id}/allow",
+            post(allow_permission),
+        )
+        .route(
+            "/sessions/{id}/permissions/{request_id}/deny",
+            post(deny_permission),
+        )
+        .route(
+            "/internal/permission-hooks/request",
+            post(permission_hook_request),
+        )
         .route("/sessions/{id}/worktree-status", get(worktree_status))
         .route("/sessions/{id}/worktree-diff", get(worktree_diff))
         .route(
@@ -242,6 +259,46 @@ async fn stop_session(
 ) -> AppResult<Json<serde_json::Value>> {
     state.manager.stop_session(id).await?;
     Ok(Json(json!({ "ok": true })))
+}
+
+async fn get_pending_permissions(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<serde_json::Value>> {
+    Ok(Json(json!(state.manager.pending_permissions(id).await?)))
+}
+
+async fn allow_permission(
+    State(state): State<AppState>,
+    Path((id, request_id)): Path<(Uuid, String)>,
+    Json(request): Json<AllowPermissionRequest>,
+) -> AppResult<Json<serde_json::Value>> {
+    Ok(Json(json!(
+        state
+            .manager
+            .allow_permission(id, request_id, request.updated_input)
+            .await?
+    )))
+}
+
+async fn deny_permission(
+    State(state): State<AppState>,
+    Path((id, request_id)): Path<(Uuid, String)>,
+    Json(request): Json<DenyPermissionRequest>,
+) -> AppResult<Json<serde_json::Value>> {
+    Ok(Json(json!(
+        state
+            .manager
+            .deny_permission(id, request_id, request.message)
+            .await?
+    )))
+}
+
+async fn permission_hook_request(
+    State(state): State<AppState>,
+    Json(request): Json<HookPermissionRequest>,
+) -> AppResult<Json<serde_json::Value>> {
+    Ok(Json(state.manager.permission_hook_request(request).await?))
 }
 
 async fn worktree_status(
@@ -459,7 +516,7 @@ done
     async fn test_state(temp: &tempfile::TempDir) -> AppState {
         let bin = fake_claude(temp.path());
         let store = EventStore::new(temp.path().join("data")).await.unwrap();
-        let manager = SessionManager::new(
+        let manager = SessionManager::new_with_permission_bridge(
             store.clone(),
             vec![bin.to_string_lossy().to_string()],
             "bypassPermissions".to_string(),
@@ -468,6 +525,7 @@ done
                 branch_prefix: "pin".to_string(),
                 base_ref: crate::WorktreeBaseRef::Head,
             },
+            crate::PermissionBridge::new("test-token", crate::PermissionCapability::available()),
         );
         let config = ConfigStore::new(
             temp.path().join("config.toml"),
@@ -1092,6 +1150,212 @@ done
                 .as_str()
                 .unwrap()
                 .contains("not found: running session")
+        );
+    }
+
+    #[tokio::test]
+    async fn permission_routes_list_allow_deny_and_handle_hook_requests() {
+        let temp = tempfile::tempdir().unwrap();
+        let state = test_state(&temp).await;
+        let session = state
+            .manager
+            .create_session(CreateSessionRequest {
+                cwd: temp.path().to_path_buf(),
+                name: Some("permissions".to_string()),
+                permission_mode: None,
+                worktree: None,
+            })
+            .await
+            .unwrap();
+        let app = build_router(state.clone(), None);
+        let session_id = session.id;
+        let cwd = temp.path().display().to_string();
+
+        let app_for_allow_hook = app.clone();
+        let allow_task = tokio::spawn(async move {
+            let response = app_for_allow_hook
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/internal/permission-hooks/request")
+                        .header("content-type", "application/json")
+                        .body(Body::from(
+                            json!({
+                                "token": "test-token",
+                                "sessionId": session_id,
+                                "hookSessionId": "hook-allow",
+                                "cwd": cwd,
+                                "permissionMode": "bypassPermissions",
+                                "toolName": "Bash",
+                                "toolInput": { "command": "npm test" }
+                            })
+                            .to_string(),
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            serde_json::from_slice::<serde_json::Value>(
+                &axum::body::to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .unwrap(),
+            )
+            .unwrap()
+        });
+
+        for _ in 0..100 {
+            if !state
+                .manager
+                .pending_permissions(session.id)
+                .await
+                .unwrap()
+                .pending
+                .is_empty()
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        let list_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/sessions/{}/permissions/pending", session.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(list_response.status(), StatusCode::OK);
+        let listed: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(list_response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(listed["pending"].as_array().unwrap().len(), 1);
+        let allow_request_id = listed["pending"][0]["requestId"].as_str().unwrap();
+
+        let allow_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/api/sessions/{}/permissions/{allow_request_id}/allow",
+                        session.id
+                    ))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(allow_response.status(), StatusCode::OK);
+        let allowed: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(allow_response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(allowed["status"], "allowed");
+        let hook_stdout = allow_task.await.unwrap();
+        assert_eq!(
+            hook_stdout["hookSpecificOutput"]["decision"]["behavior"],
+            "allow"
+        );
+
+        let app_for_deny_hook = app.clone();
+        let deny_task = tokio::spawn(async move {
+            let response = app_for_deny_hook
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/internal/permission-hooks/request")
+                        .header("content-type", "application/json")
+                        .body(Body::from(
+                            json!({
+                                "token": "test-token",
+                                "sessionId": session_id,
+                                "hookSessionId": "hook-deny",
+                                "permissionMode": "bypassPermissions",
+                                "toolName": "Bash",
+                                "toolInput": { "command": "cargo test" }
+                            })
+                            .to_string(),
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            serde_json::from_slice::<serde_json::Value>(
+                &axum::body::to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .unwrap(),
+            )
+            .unwrap()
+        });
+        for _ in 0..100 {
+            let pending = state
+                .manager
+                .pending_permissions(session.id)
+                .await
+                .unwrap()
+                .pending;
+            if pending.len() == 1 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let deny_request_id = state
+            .manager
+            .pending_permissions(session.id)
+            .await
+            .unwrap()
+            .pending[0]
+            .request_id
+            .clone();
+        let deny_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/api/sessions/{}/permissions/{deny_request_id}/deny",
+                        session.id
+                    ))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"message":"not now"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(deny_response.status(), StatusCode::OK);
+        let denied: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(deny_response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(denied["status"], "denied");
+        let denied_hook_stdout = deny_task.await.unwrap();
+        assert_eq!(
+            denied_hook_stdout["hookSpecificOutput"]["decision"]["behavior"],
+            "deny"
+        );
+
+        let events = state
+            .manager
+            .transcript_events_after(session.id, 0)
+            .await
+            .unwrap();
+        assert!(
+            events
+                .iter()
+                .any(|event| event.payload["type"] == "permission_resolved")
         );
     }
 

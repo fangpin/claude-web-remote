@@ -1,5 +1,6 @@
 import type { ActivityItem, ActivityStatus } from './activityTimeline';
-import type { SessionInfo } from './types';
+import PermissionActionCard from './PermissionActionCard';
+import type { PendingPermissionRequest, PermissionCapability, SessionInfo } from './types';
 
 const ACTIVITY_LIMIT = 24;
 
@@ -16,6 +17,10 @@ type Props = {
   activities?: ActivityItem[];
   activeSession: SessionInfo | null;
   waitingMessage: string | null;
+  pendingPermissions?: PendingPermissionRequest[];
+  permissionCapability: PermissionCapability | null;
+  onAllowPermission: (permission: PendingPermissionRequest, updatedInput?: unknown) => void;
+  onDenyPermission: (permission: PendingPermissionRequest, message: string) => void;
   onSelectActivity: (activity: ActivityItem) => void;
 };
 
@@ -81,7 +86,16 @@ function ActivityCard({ activity, onSelectActivity }: { activity: ActivityItem; 
   );
 }
 
-export default function ActivityPanel({ activities = [], activeSession, waitingMessage, onSelectActivity }: Props) {
+export default function ActivityPanel({
+  activities = [],
+  activeSession,
+  waitingMessage,
+  pendingPermissions = [],
+  permissionCapability,
+  onAllowPermission,
+  onDenyPermission,
+  onSelectActivity
+}: Props) {
   const visibleActivities = activities.slice(0, ACTIVITY_LIMIT);
   const hiddenCount = activities.length - visibleActivities.length;
   const latestPermissionActivity = activities.find((activity) => activity.isPermissionLike && ['running', 'waiting'].includes(activity.status));
@@ -106,6 +120,20 @@ export default function ActivityPanel({ activities = [], activeSession, waitingM
             </button>
           )}
         </section>
+      )}
+      {permissionCapability && pendingPermissions.length > 0 && (
+        <div className="activity-permission-list" aria-label="Pending permissions">
+          {pendingPermissions.map((permission) => (
+            <PermissionActionCard
+              key={permission.requestId}
+              compact
+              permission={permission}
+              capability={permissionCapability}
+              onAllow={onAllowPermission}
+              onDeny={onDenyPermission}
+            />
+          ))}
+        </div>
       )}
       {!activeSession ? (
         <div className="activity-empty">

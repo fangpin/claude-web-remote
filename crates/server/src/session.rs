@@ -1,8 +1,11 @@
 use crate::{
-    AppError, AppResult, ClaudeProcess, ClaudeProcessConfig, EventKind, EventStore, ProcessEvent,
-    SessionGroup, SessionMeta, SessionStatus, TaskGroups, UiEvent, WorktreeConfig, WorktreeManager,
-    WorktreeMeta, WorktreeStatus, extract_claude_session_id, group_tasks, has_unfinished_tool_use,
-    project_session_tasks, store::SessionListFilter,
+    AllowPermissionRequest, AppError, AppResult, ClaudeProcess, ClaudeProcessConfig,
+    DenyPermissionRequest, EventKind, EventStore, HookPermissionRequest, PendingPermissionRequest,
+    PendingPermissionsResponse, PermissionBridge, PermissionCapability, PermissionProcessConfig,
+    ProcessEvent, SessionGroup, SessionMeta, SessionStatus, TaskGroups, UiEvent, WorktreeConfig,
+    WorktreeManager, WorktreeMeta, WorktreeStatus, extract_claude_session_id, group_tasks,
+    has_unfinished_tool_use, hook_stdout_for_decision, project_session_tasks,
+    store::SessionListFilter,
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -51,6 +54,7 @@ pub struct SessionInfo {
     pub permission_mode: String,
     pub status: SessionStatus,
     pub runtime_status: SessionRuntimeStatus,
+    pub permission_capability: PermissionCapability,
     pub claude_session_id: Option<String>,
     pub group_id: Option<Uuid>,
     pub worktree: Option<WorktreeMeta>,
@@ -70,6 +74,7 @@ pub struct SessionManager {
     launcher: Vec<String>,
     default_permission_mode: String,
     worktree_manager: WorktreeManager,
+    permission_bridge: PermissionBridge,
     running: Arc<Mutex<HashMap<Uuid, RunningSession>>>,
     starting: Arc<Mutex<HashSet<Uuid>>>,
 }
@@ -81,11 +86,31 @@ impl SessionManager {
         default_permission_mode: String,
         worktree_config: WorktreeConfig,
     ) -> Self {
+        Self::new_with_permission_bridge(
+            store,
+            launcher,
+            default_permission_mode,
+            worktree_config,
+            PermissionBridge::new(
+                "disabled",
+                PermissionCapability::unavailable("permission bridge unavailable"),
+            ),
+        )
+    }
+
+    pub fn new_with_permission_bridge(
+        store: EventStore,
+        launcher: Vec<String>,
+        default_permission_mode: String,
+        worktree_config: WorktreeConfig,
+        permission_bridge: PermissionBridge,
+    ) -> Self {
         Self {
             store,
             launcher,
             default_permission_mode,
             worktree_manager: WorktreeManager::new(worktree_config),
+            permission_bridge,
             running: Arc::new(Mutex::new(HashMap::new())),
             starting: Arc::new(Mutex::new(HashSet::new())),
         }
@@ -329,7 +354,77 @@ impl SessionManager {
     pub async fn stop_session(&self, session_id: Uuid) -> AppResult<()> {
         let _meta = self.load_active_meta(session_id).await?;
         self.stop_running_process(session_id).await?;
+        self.fail_pending_permissions(session_id, "session stopped")
+            .await?;
         self.update_status(session_id, SessionStatus::Stopped).await
+    }
+
+    pub async fn pending_permissions(
+        &self,
+        session_id: Uuid,
+    ) -> AppResult<PendingPermissionsResponse> {
+        let _meta = self.load_active_meta(session_id).await?;
+        Ok(self.permission_bridge.list_response(session_id).await)
+    }
+
+    pub async fn allow_permission(
+        &self,
+        session_id: Uuid,
+        request_id: String,
+        updated_input: Option<serde_json::Value>,
+    ) -> AppResult<PendingPermissionRequest> {
+        let _meta = self.load_active_meta(session_id).await?;
+        let resolved = self
+            .permission_bridge
+            .allow(
+                session_id,
+                &request_id,
+                AllowPermissionRequest { updated_input },
+            )
+            .await?;
+        self.record_permission_event(session_id, "permission_resolved", &resolved)
+            .await?;
+        Ok(resolved)
+    }
+
+    pub async fn deny_permission(
+        &self,
+        session_id: Uuid,
+        request_id: String,
+        message: Option<String>,
+    ) -> AppResult<PendingPermissionRequest> {
+        let _meta = self.load_active_meta(session_id).await?;
+        let resolved = self
+            .permission_bridge
+            .deny(session_id, &request_id, DenyPermissionRequest { message })
+            .await?;
+        self.record_permission_event(session_id, "permission_resolved", &resolved)
+            .await?;
+        Ok(resolved)
+    }
+
+    pub async fn permission_hook_request(
+        &self,
+        request: HookPermissionRequest,
+    ) -> AppResult<serde_json::Value> {
+        let session_id = request.session_id;
+        let _meta = self.load_active_meta(session_id).await?;
+        let wait = self.permission_bridge.register(request).await?;
+        self.record_permission_event(session_id, "permission_request", &wait.request)
+            .await?;
+        let decision = wait.wait().await?;
+        let mut event = UiEvent::new(
+            0,
+            session_id,
+            EventKind::System,
+            json!({
+                "type": "permission_hook_decision",
+                "decision": decision,
+            }),
+        );
+        self.store.append_event_with_next_id(&mut event).await?;
+        let _ = self.broadcast_event(session_id, event).await;
+        Ok(hook_stdout_for_decision(&decision))
     }
 
     pub async fn worktree_status(&self, session_id: Uuid) -> AppResult<WorktreeStatus> {
@@ -373,6 +468,8 @@ impl SessionManager {
             )));
         }
         self.stop_running_process(session_id).await?;
+        self.fail_pending_permissions(session_id, "session stopped")
+            .await?;
         self.update_status(session_id, SessionStatus::Stopped)
             .await?;
         self.worktree_manager.remove(&worktree).await?;
@@ -391,6 +488,8 @@ impl SessionManager {
     pub async fn restart_session(&self, session_id: Uuid) -> AppResult<SessionInfo> {
         let _meta = self.load_active_meta(session_id).await?;
         let _ = self.stop_running_process(session_id).await;
+        self.fail_pending_permissions(session_id, "session restarted")
+            .await?;
         self.update_status(session_id, SessionStatus::Stopped)
             .await?;
         self.resume_session(session_id).await
@@ -407,6 +506,8 @@ impl SessionManager {
     pub async fn archive_session(&self, session_id: Uuid) -> AppResult<SessionInfo> {
         let _meta = self.load_active_meta(session_id).await?;
         self.stop_running_process(session_id).await?;
+        self.fail_pending_permissions(session_id, "session archived")
+            .await?;
         let meta = self
             .store
             .update_meta(session_id, |meta| {
@@ -428,6 +529,8 @@ impl SessionManager {
     pub async fn delete_session(&self, session_id: Uuid) -> AppResult<SessionInfo> {
         let _meta = self.load_active_meta(session_id).await?;
         self.stop_running_process(session_id).await?;
+        self.fail_pending_permissions(session_id, "session deleted")
+            .await?;
         let meta = self
             .store
             .update_meta(session_id, |meta| {
@@ -492,6 +595,8 @@ impl SessionManager {
             )));
         }
         self.stop_running_process(session_id).await?;
+        self.fail_pending_permissions(session_id, "session deleted")
+            .await?;
         self.store.remove_archived_session_dir(session_id).await
     }
 
@@ -535,6 +640,38 @@ impl SessionManager {
     ) -> AppResult<Vec<UiEvent>> {
         let _meta = self.store.load_meta(session_id).await?;
         self.store.load_events_after(session_id, after_id).await
+    }
+
+    async fn fail_pending_permissions(&self, session_id: Uuid, message: &str) -> AppResult<()> {
+        let failed = self
+            .permission_bridge
+            .fail_session_permissions(session_id, message)
+            .await;
+        for request in failed {
+            self.record_permission_event(session_id, "permission_resolved", &request)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn record_permission_event(
+        &self,
+        session_id: Uuid,
+        event_type: &str,
+        request: &PendingPermissionRequest,
+    ) -> AppResult<()> {
+        let mut event = UiEvent::new(
+            0,
+            session_id,
+            EventKind::System,
+            json!({
+                "type": event_type,
+                "permission": request,
+            }),
+        );
+        self.store.append_event_with_next_id(&mut event).await?;
+        let _ = self.broadcast_event(session_id, event).await;
+        Ok(())
     }
 
     async fn stop_running_process(&self, session_id: Uuid) -> AppResult<()> {
@@ -640,6 +777,7 @@ impl SessionManager {
                 permission_mode: meta.permission_mode.clone(),
                 resume_session_id,
                 starting_event_id,
+                permission_process: self.permission_process_config(meta.id),
             },
         )
         .await?;
@@ -686,39 +824,41 @@ impl SessionManager {
             );
         }
 
-        let store = self.store.clone();
-        let running = self.running.clone();
+        let manager = self.clone();
         let session_id = meta.id;
         tokio::spawn(async move {
             while let Some(event) = rx.recv().await {
                 match event {
                     ProcessEvent::StdoutLine(line) => {
-                        let _ = store.append_raw_stdout(session_id, &line).await;
+                        let _ = manager.store.append_raw_stdout(session_id, &line).await;
                     }
                     ProcessEvent::StderrLine(line) => {
-                        let _ = store.append_stderr(session_id, &line).await;
+                        let _ = manager.store.append_stderr(session_id, &line).await;
                         let mut ui_event =
                             UiEvent::new(0, session_id, EventKind::Error, json!({ "line": line }));
-                        let _ = store.append_event_with_next_id(&mut ui_event).await;
-                        let _ = tx.send(ui_event);
+                        let _ = manager.store.append_event_with_next_id(&mut ui_event).await;
+                        let _ = manager.broadcast_event(session_id, ui_event).await;
                     }
                     ProcessEvent::UiEvent(mut ui_event) => {
                         if let Some(claude_session_id) =
                             extract_claude_session_id(&ui_event.payload)
                         {
                             let _ = Self::update_claude_session_id(
-                                &store,
+                                &manager.store,
                                 session_id,
                                 claude_session_id,
                             )
                             .await;
                         }
-                        let _ = store.append_event_with_next_id(&mut ui_event).await;
-                        let _ = tx.send(ui_event);
+                        let _ = manager.store.append_event_with_next_id(&mut ui_event).await;
+                        let _ = manager.broadcast_event(session_id, ui_event).await;
                     }
                     ProcessEvent::Exited(_) => {
-                        let _ = running.lock().await.remove(&session_id);
-                        let _ = store
+                        let _ = manager
+                            .fail_pending_permissions(session_id, "session ended")
+                            .await;
+                        let _ = manager
+                            .store
                             .update_meta(session_id, |meta| {
                                 if meta.status != SessionStatus::Stopped {
                                     meta.status = SessionStatus::Exited;
@@ -733,8 +873,9 @@ impl SessionManager {
                             EventKind::System,
                             json!({ "status": "exited" }),
                         );
-                        let _ = store.append_event_with_next_id(&mut ui_event).await;
-                        let _ = tx.send(ui_event);
+                        let _ = manager.store.append_event_with_next_id(&mut ui_event).await;
+                        let _ = manager.broadcast_event(session_id, ui_event).await;
+                        let _ = manager.running.lock().await.remove(&session_id);
                     }
                 }
             }
@@ -743,10 +884,31 @@ impl SessionManager {
         self.session_info(meta).await
     }
 
+    fn permission_process_config(&self, session_id: Uuid) -> Option<PermissionProcessConfig> {
+        if !self.permission_bridge.capability().can_act() {
+            return None;
+        }
+        let root = self
+            .store
+            .root()
+            .join("permission-bridge")
+            .join(session_id.to_string());
+        Some(PermissionProcessConfig {
+            settings_path: root.join("settings.json"),
+            helper_path: root.join("permission-hook-helper.sh"),
+            daemon_url: "http://127.0.0.1:8787".to_string(),
+            token: self.permission_bridge.token().to_string(),
+        })
+    }
+
     async fn session_info(&self, meta: SessionMeta) -> AppResult<SessionInfo> {
         let events = self.store.load_events_after(meta.id, 0).await?;
         let runtime_status = runtime_status(&meta, &events);
-        Ok(SessionInfo::new(meta, runtime_status))
+        Ok(SessionInfo::new(
+            meta,
+            runtime_status,
+            self.permission_bridge.capability().clone(),
+        ))
     }
 
     async fn update_claude_session_id(
@@ -813,7 +975,11 @@ fn expand_home(path: PathBuf) -> PathBuf {
 }
 
 impl SessionInfo {
-    fn new(meta: SessionMeta, runtime_status: SessionRuntimeStatus) -> Self {
+    fn new(
+        meta: SessionMeta,
+        runtime_status: SessionRuntimeStatus,
+        permission_capability: PermissionCapability,
+    ) -> Self {
         Self {
             id: meta.id,
             name: meta.name,
@@ -821,6 +987,7 @@ impl SessionInfo {
             permission_mode: meta.permission_mode,
             status: meta.status,
             runtime_status,
+            permission_capability,
             claude_session_id: meta.claude_session_id,
             group_id: meta.group_id,
             worktree: meta.worktree,
@@ -2536,6 +2703,138 @@ done
         assert!(matches!(resume_result, Err(AppError::InvalidRequest(_))));
         assert_eq!(final_meta.status, SessionStatus::Stopped);
         assert!(manager.subscribe(session_id).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn available_permission_bridge_passes_settings_to_process() {
+        let temp = tempfile::tempdir().unwrap();
+        let args_log = temp.path().join("args.log");
+        let wrapper = temp.path().join("settings-wrapper.sh");
+        fs::write(
+            &wrapper,
+            format!(
+                "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" > '{}'\nprintf '{{\"type\":\"system\",\"session_id\":\"settings\"}}\\n'\nwhile IFS= read -r line; do sleep 10; done\n",
+                args_log.display()
+            ),
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&wrapper).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&wrapper, permissions).unwrap();
+        let store = EventStore::new(temp.path().join("data")).await.unwrap();
+        let manager = SessionManager::new_with_permission_bridge(
+            store,
+            vec![wrapper.to_string_lossy().to_string()],
+            "default".to_string(),
+            worktree_config(),
+            PermissionBridge::new("test-token".to_string(), PermissionCapability::available()),
+        );
+
+        let session = manager
+            .create_session(CreateSessionRequest {
+                cwd: temp.path().to_path_buf(),
+                name: None,
+                permission_mode: None,
+                worktree: None,
+            })
+            .await
+            .unwrap();
+
+        let args = wait_for_file_contents(&args_log, |contents| contents.contains("--settings"))
+            .await
+            .unwrap_or_default();
+        assert!(args.contains("--settings"));
+        let settings_path = args
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .windows(2)
+            .find_map(|parts| (parts[0] == "--settings").then_some(parts[1]))
+            .unwrap();
+        let settings = fs::read_to_string(settings_path).unwrap();
+        assert!(settings.contains("PermissionRequest"));
+        manager.stop_session(session.id).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn permission_hook_allow_persists_resolved_event_and_updates_session_info() {
+        let temp = tempfile::tempdir().unwrap();
+        let bin = fake_claude(temp.path());
+        let store = EventStore::new(temp.path().join("data")).await.unwrap();
+        let manager = SessionManager::new_with_permission_bridge(
+            store.clone(),
+            vec![bin.to_string_lossy().to_string()],
+            "acceptEdits".to_string(),
+            worktree_config(),
+            PermissionBridge::new("test-token", PermissionCapability::available()),
+        );
+        let session = manager
+            .create_session(CreateSessionRequest {
+                cwd: temp.path().to_path_buf(),
+                name: None,
+                permission_mode: None,
+                worktree: None,
+            })
+            .await
+            .unwrap();
+
+        let hook_request = HookPermissionRequest {
+            token: "test-token".to_string(),
+            session_id: session.id,
+            hook_session_id: Some("hook-session".to_string()),
+            cwd: Some(temp.path().display().to_string()),
+            permission_mode: Some("acceptEdits".to_string()),
+            tool_name: "Bash".to_string(),
+            tool_input: json!({ "command": "npm --prefix web test" }),
+        };
+        let hook = manager.clone();
+        let hook_task =
+            tokio::spawn(async move { hook.permission_hook_request(hook_request).await });
+
+        let pending = wait_for_events(&store, session.id, |events| {
+            events
+                .iter()
+                .any(|event| event.payload["type"] == "permission_request")
+        })
+        .await;
+        assert!(
+            pending
+                .iter()
+                .any(|event| event.payload["type"] == "permission_request")
+        );
+        let pending_permissions = manager
+            .pending_permissions(session.id)
+            .await
+            .unwrap()
+            .pending;
+        assert_eq!(pending_permissions.len(), 1);
+        let request_id = pending_permissions[0].request_id.clone();
+
+        let resolved = manager
+            .allow_permission(session.id, request_id, None)
+            .await
+            .unwrap();
+        assert_eq!(resolved.status, crate::PermissionStatus::Allowed);
+        let hook_stdout = hook_task.await.unwrap().unwrap();
+        assert_eq!(
+            hook_stdout["hookSpecificOutput"]["decision"]["behavior"],
+            "allow"
+        );
+        let events = wait_for_events(&store, session.id, |events| {
+            events
+                .iter()
+                .any(|event| event.payload["type"] == "permission_resolved")
+        })
+        .await;
+        assert!(
+            events
+                .iter()
+                .any(|event| event.payload["type"] == "permission_resolved")
+        );
+        let info = manager.get_session(session.id).await.unwrap();
+        assert_eq!(
+            info.permission_capability.status,
+            crate::PermissionCapabilityStatus::Available
+        );
     }
 
     #[tokio::test]
