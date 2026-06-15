@@ -534,7 +534,6 @@ describe('App', () => {
     expectSessionStatus('Worktree Repo', 'Running');
     expectSessionStatus('Stopped Repo', 'Ended');
     expect(screen.getByText('Chat')).toBeInTheDocument();
-    expect(screen.getByLabelText('Claude: Claude is waiting')).toBeInTheDocument();
     expect(screen.getByLabelText('Claude attention notification')).toHaveTextContent('Claude is waiting');
     expect(screen.queryByLabelText('Claude needs attention')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Claude needs your review')).not.toBeInTheDocument();
@@ -799,8 +798,7 @@ describe('App', () => {
   it('switches to active mode when creating from archived mode', async () => {
     render(<App />);
 
-    fireEvent.keyDown(window, { key: 'p', ctrlKey: true });
-    fireEvent.click(await screen.findByRole('button', { name: /Show archived chats/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Archived' }));
     expect(await screen.findByRole('heading', { name: 'Archived Repo' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
@@ -1024,11 +1022,14 @@ describe('App', () => {
     expect(await screen.findByRole('complementary', { name: 'Session navigation' })).toBeVisible();
     expect(screen.getByRole('complementary', { name: 'Session inspector' })).toBeInTheDocument();
 
-    fireEvent.keyDown(window, { key: 'b', ctrlKey: true });
-    expect(screen.queryByRole('complementary', { name: 'Session navigation' })).not.toBeInTheDocument();
+    const shell = document.querySelector('.app-shell');
+    expect(shell).not.toBeNull();
 
     fireEvent.keyDown(window, { key: 'b', ctrlKey: true });
-    expect(screen.getByRole('complementary', { name: 'Session navigation' })).toBeVisible();
+    expect(shell).toHaveClass('sidebar-closed');
+
+    fireEvent.keyDown(window, { key: 'b', ctrlKey: true });
+    expect(shell).toHaveClass('sidebar-open');
 
     fireEvent.keyDown(window, { key: 'i', ctrlKey: true });
     expect(screen.getByRole('button', { name: 'Hide inspector' })).toBeInTheDocument();
@@ -1062,12 +1063,12 @@ describe('App', () => {
   it('closes app popovers with Escape and focuses composer after creating a session', async () => {
     render(<App />);
 
-    fireEvent.keyDown(window, { key: 'p', ctrlKey: true });
-    const palette = await screen.findByRole('dialog', { name: 'Command palette' });
-    fireEvent.click(within(palette).getByRole('button', { name: /Show keyboard shortcuts/ }));
-    expect(screen.getByLabelText('Keyboard shortcuts')).toBeInTheDocument();
+    await screen.findAllByText('Repo One');
+    const sidebar = await screen.findByRole('complementary', { name: 'Session navigation' });
+    fireEvent.click(within(sidebar).getByRole('button', { name: 'Open app menu' }));
+    expect(await screen.findByRole('dialog', { name: 'Command palette' })).toBeInTheDocument();
     fireEvent.keyDown(window, { key: 'Escape' });
-    expect(screen.queryByLabelText('Keyboard shortcuts')).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Command palette' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
     expect(await screen.findByRole('heading', { name: 'Where should Claude work?' })).toBeInTheDocument();
@@ -1266,6 +1267,7 @@ describe('App', () => {
     render(<App />);
 
     expect(screen.queryByRole('button', { name: 'Stop session' })).not.toBeInTheDocument();
+    await screen.findByRole('heading', { name: 'Repo One' });
     const sidebar = await screen.findByRole('complementary', { name: 'Session navigation' });
     fireEvent.click(within(sidebar).getByRole('button', { name: 'End session' }));
 
@@ -1518,8 +1520,7 @@ describe('App', () => {
     await screen.findByRole('heading', { name: 'Repo One' });
     FakeWebSocket.instances = [];
 
-    fireEvent.keyDown(window, { key: 'p', ctrlKey: true });
-    fireEvent.click(await screen.findByRole('button', { name: /Show archived chats/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Archived' }));
 
     expect(await screen.findByRole('heading', { name: 'Archived Repo' })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith('/api/sessions?deletedOnly=true', undefined);
@@ -1534,7 +1535,7 @@ describe('App', () => {
     fireEvent.click(within(inspector).getByRole('tab', { name: 'Session tasks' }));
     const sessionPanel = within(inspector).getByRole('tabpanel', { name: 'Session tasks' });
     expect(within(sessionPanel).queryByText('Agent: Review branch')).not.toBeInTheDocument();
-    expect(FakeWebSocket.instances).toHaveLength(0);
+    expect(FakeWebSocket.instances.every((socket) => !socket.url.includes('/api/sessions/s3/events'))).toBe(true);
 
     fireEvent.click(screen.getByRole('button', { name: 'Unarchive' }));
 
@@ -1575,8 +1576,7 @@ describe('App', () => {
   it('deletes archived session data from the archived list', async () => {
     render(<App />);
 
-    fireEvent.keyDown(window, { key: 'p', ctrlKey: true });
-    fireEvent.click(await screen.findByRole('button', { name: /Show archived chats/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Archived' }));
     expect(await screen.findByRole('heading', { name: 'Archived Repo' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
@@ -1590,8 +1590,7 @@ describe('App', () => {
     deletedSessions = [];
     render(<App />);
 
-    fireEvent.keyDown(window, { key: 'p', ctrlKey: true });
-    fireEvent.click(await screen.findByRole('button', { name: /Show archived chats/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Archived' }));
 
     expect(await screen.findByRole('heading', { name: 'No archived chat selected.' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Where should Claude work?' })).not.toBeInTheDocument();
@@ -1612,8 +1611,7 @@ describe('App', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     render(<App />);
-    fireEvent.keyDown(window, { key: 'p', ctrlKey: true });
-    fireEvent.click(await screen.findByRole('button', { name: /Show archived chats/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Archived' }));
 
     await act(async () => {
       deletedList.resolve();

@@ -165,6 +165,7 @@ export default function App() {
   kind: 'Command' | 'Chat';
   shortcut?: string;
   run: () => void;
+  keepPaletteOpen?: boolean;
 };
 
 function AttentionToast({
@@ -208,7 +209,7 @@ function CommandPalette({ actions, onClose }: { actions: CommandPaletteAction[];
 
   function runAction(action: CommandPaletteAction) {
     action.run();
-    onClose();
+    if (!action.keepPaletteOpen) onClose();
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLElement>) {
@@ -355,6 +356,11 @@ function focusFallbackAfterSidebarClose() {
     sessionState.openStartSurface();
   }
 
+  function showKeyboardShortcuts() {
+    setIsCommandPaletteOpen(false);
+    queueMicrotask(() => setIsShortcutHelpOpen(true));
+  }
+
   const attentionKey = currentReviewSurface
     ? `${sessionState.activeSession?.id ?? 'session'}:${currentReviewSurface.activity?.id ?? currentReviewSurface.title}`
     : null;
@@ -395,6 +401,25 @@ function focusFallbackAfterSidebarClose() {
     { id: 'active-sessions', title: 'Show active chats', hint: 'Return to active conversations', kind: 'Command', run: showActiveSessions },
     { id: 'archived-sessions', title: 'Show archived chats', hint: 'Browse archived conversations', kind: 'Command', run: showArchivedSessions },
     { id: 'settings', title: 'Open settings', hint: 'View app and runtime configuration', kind: 'Command', run: () => setView('config') },
+    {
+      id: 'diagnostics',
+      title: 'Show diagnostics',
+      hint: 'Open runtime and session diagnostics in the inspector drawer',
+      kind: 'Command',
+      run: () => {
+        setView('sessions');
+        setIsInspectorOpen(true);
+        setInspectorTab('diagnostics');
+      }
+    },
+    {
+      id: 'keyboard-shortcuts',
+      title: 'Show keyboard shortcuts',
+      hint: 'Review app-level shortcuts',
+      kind: 'Command',
+      run: showKeyboardShortcuts,
+      keepPaletteOpen: true
+    },
     { id: 'toggle-sidebar', title: isSidebarOpen ? 'Hide sidebar' : 'Show sidebar', hint: 'Toggle project and chat navigation', kind: 'Command', shortcut: '⌘B', run: toggleSidebar },
     { id: 'toggle-inspector', title: isInspectorOpen ? 'Hide inspector' : 'Show inspector', hint: 'Toggle activity, tasks, plan, and diagnostics', kind: 'Command', shortcut: '⌘I', run: () => setIsInspectorOpen((open) => !open) }
   ];
@@ -616,7 +641,8 @@ function focusFallbackAfterSidebarClose() {
           onCreateGroup={sessionState.onCreateGroup}
           onDeleteGroup={sessionState.onDeleteGroup}
           onMoveSessionToGroup={sessionState.onMoveSessionToGroup}
-          onNewChat={() => sessionState.openStartSurface()}
+          onNewChat={openNewChat}
+          onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
           onRenameGroup={sessionState.onRenameGroup}
           onSelectSession={sessionState.selectSession}
           onSetListMode={sessionState.setListMode}
@@ -735,6 +761,21 @@ function focusFallbackAfterSidebarClose() {
         }}
         onDismiss={() => setDismissedAttentionKey(attentionKey)}
       />
+    )}
+    {isShortcutHelpOpen && (
+      <section id="keyboard-shortcuts-help" className="shortcut-help-popover app-shortcut-help-popover" aria-label="Keyboard shortcuts">
+        <h2>Keyboard shortcuts</h2>
+        <dl>
+          <div><dt>⌘/Ctrl P</dt><dd>Open command palette</dd></div>
+          <div><dt>⌘/Ctrl N</dt><dd>New chat</dd></div>
+          <div><dt>⌘/Ctrl K</dt><dd>Focus composer</dd></div>
+          <div><dt>/</dt><dd>Focus composer</dd></div>
+          <div><dt>⌘/Ctrl B</dt><dd>Toggle sidebar</dd></div>
+          <div><dt>⌘/Ctrl I</dt><dd>Toggle inspector</dd></div>
+          <div><dt>⌥ Up/Down</dt><dd>Switch sessions</dd></div>
+          <div><dt>Esc</dt><dd>Close popovers</dd></div>
+        </dl>
+      </section>
     )}
     {isCommandPaletteOpen && <CommandPalette actions={commandPaletteActions} onClose={() => setIsCommandPaletteOpen(false)} />}
     </>
