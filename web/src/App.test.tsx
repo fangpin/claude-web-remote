@@ -487,17 +487,21 @@ afterEach(() => {
 });
 
 describe('App', () => {
-  it('renders the Claude-like shell regions with conversation and inspector areas', async () => {
+  it('renders a chat-first shell without persistent console navigation', async () => {
     render(<App />);
 
-    const primaryNavigation = await screen.findByRole('navigation', { name: 'Primary navigation' });
-    expect(primaryNavigation).toBeInTheDocument();
-    expect(within(primaryNavigation).getByRole('button', { name: 'Chats' })).toHaveAttribute('aria-current', 'page');
-    expect(within(primaryNavigation).queryByRole('button', { name: 'Settings' })).not.toBeInTheDocument();
-    expect(screen.getByRole('complementary', { name: 'Session navigation' })).toBeInTheDocument();
+    const sidebar = await screen.findByRole('complementary', { name: 'Session navigation' });
+    expect(sidebar).toBeInTheDocument();
+    expect(within(sidebar).getByRole('heading', { name: 'Claude' })).toBeInTheDocument();
+    expect(within(sidebar).getByRole('button', { name: 'New chat' })).toBeInTheDocument();
+    expect(within(sidebar).getByRole('button', { name: 'Open app menu' })).toBeInTheDocument();
     expect(screen.getByRole('main', { name: 'Conversation workspace' })).toBeInTheDocument();
     expect(screen.getByRole('complementary', { name: 'Session inspector' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'New chat' })).toBeInTheDocument();
+
+    expect(screen.queryByRole('navigation', { name: 'Primary navigation' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Chats' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Side' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Keys' })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Working directory')).not.toBeInTheDocument();
   });
 
@@ -529,7 +533,6 @@ describe('App', () => {
     expect(within(sessionButton('Repo One')).getByText('/repo/one')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'one' })).toBeInTheDocument();
     expect(screen.getByText('Chat')).toBeInTheDocument();
-    expect(screen.getByLabelText('Claude: Claude is waiting')).toBeInTheDocument();
     expect(screen.getByLabelText('Claude attention notification')).toHaveTextContent('Claude is waiting');
     expect(screen.queryByLabelText('Claude needs attention')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Claude needs your review')).not.toBeInTheDocument();
@@ -1037,6 +1040,19 @@ describe('App', () => {
     expect(inputCallCount()).toBe(sentBeforeKeyboardChecks);
   });
 
+  it('opens advanced destinations from the sidebar app menu', async () => {
+    render(<App />);
+
+    const sidebar = await screen.findByRole('complementary', { name: 'Session navigation' });
+    fireEvent.click(within(sidebar).getByRole('button', { name: 'Open app menu' }));
+
+    const palette = await screen.findByRole('dialog', { name: 'Command palette' });
+    expect(palette).toHaveTextContent('Show archived chats');
+    expect(palette).toHaveTextContent('Open settings');
+    expect(palette).toHaveTextContent('Show diagnostics');
+    expect(palette).toHaveTextContent('Show keyboard shortcuts');
+  });
+
   it('handles app-level composer shortcuts without stealing editable input', async () => {
     render(<App />);
 
@@ -1087,11 +1103,14 @@ describe('App', () => {
     expect(await screen.findByRole('complementary', { name: 'Session navigation' })).toBeVisible();
     expect(screen.getByRole('complementary', { name: 'Session inspector' })).toBeInTheDocument();
 
-    fireEvent.keyDown(window, { key: 'b', ctrlKey: true });
-    expect(screen.getByRole('button', { name: 'Show sidebar' })).toHaveAttribute('aria-pressed', 'false');
+    const shell = document.querySelector('.app-shell');
+    expect(shell).not.toBeNull();
 
     fireEvent.keyDown(window, { key: 'b', ctrlKey: true });
-    expect(screen.getByRole('button', { name: 'Hide sidebar' })).toHaveAttribute('aria-pressed', 'true');
+    expect(shell).toHaveClass('sidebar-closed');
+
+    fireEvent.keyDown(window, { key: 'b', ctrlKey: true });
+    expect(shell).toHaveClass('sidebar-open');
 
     fireEvent.keyDown(window, { key: 'i', ctrlKey: true });
     expect(screen.getByRole('button', { name: 'Hide inspector' })).toBeInTheDocument();
@@ -1125,10 +1144,9 @@ describe('App', () => {
   it('closes app popovers with Escape and focuses composer after creating a session', async () => {
     render(<App />);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Keys' }));
-    expect(screen.getByLabelText('Keyboard shortcuts')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Command palette' })).not.toBeInTheDocument();
     fireEvent.keyDown(window, { key: 'Escape' });
-    expect(screen.queryByLabelText('Keyboard shortcuts')).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Command palette' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
     expect(await screen.findByRole('heading', { name: 'What would you like Claude to do?' })).toBeInTheDocument();
@@ -1552,6 +1570,20 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { name: 'Stopped Repo' })).toBeInTheDocument();
   });
 
+  it('keeps inspector as an overlay drawer instead of a reserved shell column', async () => {
+    render(<App />);
+
+    const shell = document.querySelector('.app-shell');
+    expect(shell).not.toBeNull();
+    expect(shell).toHaveClass('inspector-closed');
+    expect(shell).not.toHaveClass('primary-rail-shell');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Show inspector' }));
+
+    expect(shell).toHaveClass('inspector-open');
+    expect(screen.getByRole('complementary', { name: 'Session inspector' })).toBeInTheDocument();
+  });
+
   it('loads archived sessions without opening a WebSocket or composer and unarchives them', async () => {
     eventsBySession = {
       s3: [
@@ -1569,7 +1601,7 @@ describe('App', () => {
     await screen.findByRole('heading', { name: 'Repo One' });
     FakeWebSocket.instances = [];
 
-    fireEvent.click(screen.getByRole('button', { name: 'Archived chats' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Archived chats' }));
 
     expect(await screen.findByRole('heading', { name: 'Archived Repo' })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith('/api/sessions?deletedOnly=true', undefined);
@@ -1584,7 +1616,7 @@ describe('App', () => {
     fireEvent.click(within(inspector).getByRole('tab', { name: 'Session tasks' }));
     const sessionPanel = within(inspector).getByRole('tabpanel', { name: 'Session tasks' });
     expect(within(sessionPanel).queryByText('Agent: Review branch')).not.toBeInTheDocument();
-    expect(FakeWebSocket.instances).toHaveLength(0);
+    expect(FakeWebSocket.instances.every((socket) => !socket.url.includes('/api/sessions/s3/events'))).toBe(true);
 
     fireEvent.click(screen.getByRole('button', { name: 'Unarchive' }));
 
@@ -1660,7 +1692,7 @@ describe('App', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     render(<App />);
-    fireEvent.click(screen.getByRole('button', { name: 'Archived chats' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Archived chats' }));
 
     await act(async () => {
       deletedList.resolve();

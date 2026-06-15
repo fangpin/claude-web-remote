@@ -32,6 +32,7 @@ type Props = {
   onDeleteGroup: (groupId: string) => void;
   onMoveSessionToGroup: (sessionId: string, groupId: string | null) => void;
   onNewChat: () => void;
+  onOpenCommandPalette: () => void;
   onRenameGroup: (groupId: string, name: string) => void;
   onSelectSession: (sessionId: string) => void;
   onSetListMode: (mode: SessionListMode) => void;
@@ -333,6 +334,7 @@ export default function SessionSidebar({
   onDeleteGroup,
   onMoveSessionToGroup,
   onNewChat,
+  onOpenCommandPalette,
   onRenameGroup,
   onSelectSession,
   onSetListMode,
@@ -398,11 +400,16 @@ export default function SessionSidebar({
   return (
     <aside className="session-sidebar" aria-label="Session navigation">
       <div className="sidebar-header">
-        <div>
-          <h1>Claude</h1>
-          <p>Chats and remote work</p>
+        <div className="sidebar-title-row">
+          <div>
+            <h1>Claude</h1>
+            <p>Chats and remote work</p>
+          </div>
+          <button type="button" className="sidebar-menu-button" aria-label="Open app menu" title="Open app menu (⌘/Ctrl+P)" onClick={onOpenCommandPalette}>
+            ⋯
+          </button>
         </div>
-        <button type="button" className="primary-action" title="Start a new chat" onClick={onNewChat}>
+        <button type="button" className="primary-action sidebar-new-chat" title="Start a new chat" onClick={onNewChat}>
           New chat
         </button>
       </div>

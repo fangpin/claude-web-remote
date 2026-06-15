@@ -1,4 +1,4 @@
-import { KeyboardEvent, PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { KeyboardEvent, PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import AppShell, { type AppView } from './AppShell';
 import { buildActivityTimeline, latestReviewActivity, reviewSurface, waitingCopy, type ActivityItem } from './activityTimeline';
 import ConversationWorkspace from './ConversationWorkspace';
@@ -165,6 +165,7 @@ export default function App() {
   kind: 'Command' | 'Chat';
   shortcut?: string;
   run: () => void;
+  keepPaletteOpen?: boolean;
 };
 
 function AttentionToast({
@@ -198,6 +199,33 @@ function AttentionToast({
   );
 }
 
+function ShortcutsHelp({ onClose }: { onClose: () => void }) {
+  function onBackdropMouseDown(event: ReactMouseEvent<HTMLDivElement>) {
+    if (event.target === event.currentTarget) onClose();
+  }
+
+  return (
+    <div className="shortcut-help-backdrop" role="presentation" onMouseDown={onBackdropMouseDown}>
+      <section id="keyboard-shortcuts-help" className="shortcut-help-popover app-shortcut-help-popover" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts" tabIndex={-1}>
+        <div className="shortcut-help-header">
+          <h2>Keyboard shortcuts</h2>
+          <button type="button" aria-label="Close keyboard shortcuts" onClick={onClose}>×</button>
+        </div>
+        <dl>
+          <div><dt>⌘/Ctrl P</dt><dd>Open command palette</dd></div>
+          <div><dt>⌘/Ctrl N</dt><dd>New chat</dd></div>
+          <div><dt>⌘/Ctrl K</dt><dd>Focus composer</dd></div>
+          <div><dt>/</dt><dd>Focus composer</dd></div>
+          <div><dt>⌘/Ctrl B</dt><dd>Toggle sidebar</dd></div>
+          <div><dt>⌘/Ctrl I</dt><dd>Toggle inspector</dd></div>
+          <div><dt>⌥ Up/Down</dt><dd>Switch sessions</dd></div>
+          <div><dt>Esc</dt><dd>Close popovers</dd></div>
+        </dl>
+      </section>
+    </div>
+  );
+}
+
 function CommandPalette({ actions, onClose }: { actions: CommandPaletteAction[]; onClose: () => void }) {
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
@@ -208,7 +236,7 @@ function CommandPalette({ actions, onClose }: { actions: CommandPaletteAction[];
 
   function runAction(action: CommandPaletteAction) {
     action.run();
-    onClose();
+    if (!action.keepPaletteOpen) onClose();
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLElement>) {
@@ -290,7 +318,7 @@ function focusFallbackAfterSidebarClose() {
         focusComposer(false);
         return;
       }
-      document.querySelector<HTMLButtonElement>('.primary-rail button')?.focus();
+      document.querySelector<HTMLElement>(view === 'config' ? '.config-workspace' : '.conversation-workspace')?.focus();
     });
   }
 
@@ -355,8 +383,16 @@ function focusFallbackAfterSidebarClose() {
     sessionState.openStartSurface();
   }
 
-  const attentionState = currentReviewSurface ? 'review' : eventState.isAwaitingClaude ? 'working' : 'idle';
-  const attentionLabel = currentReviewSurface?.title ?? (eventState.isAwaitingClaude ? 'Claude is working' : null);
+  function openCommandPalette() {
+    setIsShortcutHelpOpen(false);
+    setIsCommandPaletteOpen(true);
+  }
+
+  function showKeyboardShortcuts() {
+    setIsCommandPaletteOpen(false);
+    setIsShortcutHelpOpen(true);
+  }
+
   const attentionKey = currentReviewSurface
     ? `${sessionState.activeSession?.id ?? 'session'}:${currentReviewSurface.activity?.id ?? currentReviewSurface.title}`
     : null;
@@ -397,6 +433,25 @@ function focusFallbackAfterSidebarClose() {
     { id: 'active-sessions', title: 'Show active chats', hint: 'Return to active conversations', kind: 'Command', run: showActiveSessions },
     { id: 'archived-sessions', title: 'Show archived chats', hint: 'Browse archived conversations', kind: 'Command', run: showArchivedSessions },
     { id: 'settings', title: 'Open settings', hint: 'View app and runtime configuration', kind: 'Command', run: () => setView('config') },
+    {
+      id: 'diagnostics',
+      title: 'Show diagnostics',
+      hint: 'Open runtime and session diagnostics in the inspector drawer',
+      kind: 'Command',
+      run: () => {
+        setView('sessions');
+        setIsInspectorOpen(true);
+        setInspectorTab('diagnostics');
+      }
+    },
+    {
+      id: 'keyboard-shortcuts',
+      title: 'Show keyboard shortcuts',
+      hint: 'Review app-level shortcuts',
+      kind: 'Command',
+      run: showKeyboardShortcuts,
+      keepPaletteOpen: true
+    },
     { id: 'toggle-sidebar', title: isSidebarOpen ? 'Hide sidebar' : 'Show sidebar', hint: 'Toggle project and chat navigation', kind: 'Command', shortcut: '⌘B', run: toggleSidebar },
     { id: 'toggle-inspector', title: isInspectorOpen ? 'Hide inspector' : 'Show inspector', hint: 'Toggle activity, tasks, plan, and diagnostics', kind: 'Command', shortcut: '⌘I', run: () => setIsInspectorOpen((open) => !open) }
   ];
@@ -437,8 +492,11 @@ function focusFallbackAfterSidebarClose() {
 
       if (hasAppModifier(event) && event.key.toLowerCase() === 'p') {
         event.preventDefault();
-        setIsShortcutHelpOpen(false);
-        setIsCommandPaletteOpen((open) => !open);
+        if (isCommandPaletteOpen) {
+          setIsCommandPaletteOpen(false);
+        } else {
+          openCommandPalette();
+        }
         return;
       }
 
@@ -601,17 +659,9 @@ function focusFallbackAfterSidebarClose() {
     <>
     <AppShell
       view={view}
-      listMode={sessionState.listMode}
       isInspectorOpen={isInspectorOpen}
       inspectorWidth={inspectorWidth}
-      isShortcutHelpOpen={isShortcutHelpOpen}
       isSidebarOpen={isSidebarOpen}
-      attentionState={attentionState}
-      attentionLabel={attentionLabel}
-      onSetShortcutHelpOpen={setIsShortcutHelpOpen}
-      onShowActiveSessions={showActiveSessions}
-      onShowArchivedSessions={showArchivedSessions}
-      onToggleSidebar={toggleSidebar}
       sidebar={
         <SessionSidebar
           activeId={sessionState.activeId}
@@ -626,7 +676,8 @@ function focusFallbackAfterSidebarClose() {
           onCreateGroup={sessionState.onCreateGroup}
           onDeleteGroup={sessionState.onDeleteGroup}
           onMoveSessionToGroup={sessionState.onMoveSessionToGroup}
-          onNewChat={() => sessionState.openStartSurface()}
+          onNewChat={openNewChat}
+          onOpenCommandPalette={openCommandPalette}
           onRenameGroup={sessionState.onRenameGroup}
           onSelectSession={sessionState.selectSession}
           onSetListMode={sessionState.setListMode}
@@ -746,6 +797,7 @@ function focusFallbackAfterSidebarClose() {
         onDismiss={() => setDismissedAttentionKey(attentionKey)}
       />
     )}
+    {isShortcutHelpOpen && <ShortcutsHelp onClose={() => setIsShortcutHelpOpen(false)} />}
     {isCommandPaletteOpen && <CommandPalette actions={commandPaletteActions} onClose={() => setIsCommandPaletteOpen(false)} />}
     </>
   );

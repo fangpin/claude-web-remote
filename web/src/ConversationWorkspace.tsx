@@ -329,14 +329,14 @@ export default function ConversationWorkspace({
 }: Props) {
   if (view === 'config') {
     return (
-      <main className="workspace config-workspace" aria-label="Configuration workspace">
+      <main className="workspace config-workspace" aria-label="Configuration workspace" tabIndex={-1}>
         <ConfigView />
       </main>
     );
   }
 
   return (
-    <main className={listMode === 'archived' ? 'workspace conversation-workspace with-deleted-note' : 'workspace conversation-workspace'} aria-label="Conversation workspace">
+    <main className={listMode === 'archived' ? 'workspace conversation-workspace with-deleted-note' : 'workspace conversation-workspace'} aria-label="Conversation workspace" tabIndex={-1}>
       {error && <ApiErrorBanner error={error} onDismiss={onDismissError} />}
       {(!activeSession || isStartSurfaceOpen) && !isSessionListLoading && listMode === 'active' ? (
         startSurface
