@@ -1,7 +1,7 @@
 import { FormEvent, KeyboardEvent, PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from 'react';
 import AppShell, { type AppView } from './AppShell';
 import { buildActivityTimeline, latestReviewActivity, reviewSurface, waitingCopy, type ActivityItem } from './activityTimeline';
-import ConversationWorkspace from './ConversationWorkspace';
+import ConversationWorkspace, { type ConversationHeaderAction } from './ConversationWorkspace';
 import InspectorPanel, { type InspectorTab } from './InspectorPanel';
 import { hasAppModifier, isEditableTarget, isPlainSlash } from './keyboardShortcuts';
 import ProjectHome from './ProjectHome';
@@ -339,6 +339,18 @@ function focusFallbackAfterSidebarClose() {
     onSelectActivity(review.activity);
   }
 
+  function openActivityInspector() {
+    setView('sessions');
+    setIsInspectorOpen(true);
+    setInspectorTab('activity');
+  }
+
+  function openDiagnosticsInspector() {
+    setView('sessions');
+    setIsInspectorOpen(true);
+    setInspectorTab('diagnostics');
+  }
+
   function showActiveSessions() {
     setView('sessions');
     setIsSidebarOpen(true);
@@ -614,6 +626,75 @@ function focusFallbackAfterSidebarClose() {
     );
   }
 
+
+  function buildHeaderActions(): { primary: ConversationHeaderAction | null; menu: ConversationHeaderAction[] } {
+    const activeSession = sessionState.activeSession;
+    if (!activeSession) return { primary: null, menu: [] };
+
+    const menu: ConversationHeaderAction[] = [
+      { id: 'view-activity', label: 'View activity', onClick: openActivityInspector },
+      { id: 'view-diagnostics', label: 'View diagnostics', onClick: openDiagnosticsInspector }
+    ];
+
+    if (sessionState.listMode === 'archived' || activeSession.deletedAt) {
+      return {
+        primary: { id: 'unarchive', label: 'Unarchive', variant: 'primary', onClick: sessionState.onUnarchive },
+        menu: [
+          ...menu,
+          { id: 'delete', label: 'Delete', variant: 'danger', onClick: sessionState.onDelete }
+        ]
+      };
+    }
+
+    const worktreeCleanupAction = (() => {
+      if (!activeSession.worktree?.createdByClaudeRemoteWeb) return null;
+      const status = sessionState.activeWorktreeStatus;
+      const unavailable = sessionState.isWorktreeStatusLoading || sessionState.activeWorktreeStatusError || !status;
+      if (status?.dirty) {
+        return {
+          id: 'review-dirty-worktree',
+          label: 'Review dirty worktree first',
+          disabled: true,
+          title: 'Stop only keeps this dirty worktree so you can review, commit, stash, or clean its changes.',
+          onClick: () => undefined
+        } satisfies ConversationHeaderAction;
+      }
+      return {
+        id: 'stop-remove-worktree',
+        label: 'Stop and remove worktree',
+        disabled: Boolean(unavailable),
+        title: unavailable ? 'Worktree cleanup is available after the clean status check completes.' : undefined,
+        onClick: () => {
+          if (confirm('Stop this session and remove the clean app-created worktree? The source repository will remain.')) {
+            void sessionState.onStop(true);
+          }
+        }
+      } satisfies ConversationHeaderAction;
+    })();
+
+    if (activeSession.status === 'running' || activeSession.status === 'starting') {
+      return {
+        primary: { id: 'stop', label: 'Stop', onClick: () => sessionState.onStop(false) },
+        menu: [
+          ...menu,
+          ...(activeSession.status === 'running' ? [{ id: 'restart', label: 'Restart', onClick: sessionState.onRestart } satisfies ConversationHeaderAction] : []),
+          ...(worktreeCleanupAction ? [worktreeCleanupAction] : []),
+          { id: 'archive', label: 'Archive', variant: 'danger', onClick: sessionState.onArchive }
+        ]
+      };
+    }
+
+    return {
+      primary: { id: 'resume', label: getContinueActionLabel(activeSession), variant: 'primary', onClick: sessionState.onResume },
+      menu: [
+        ...menu,
+        { id: 'archive', label: 'Archive', variant: 'danger', onClick: sessionState.onArchive }
+      ]
+    };
+  }
+
+  const headerActions = buildHeaderActions();
+
   return (
     <>
     <AppShell
@@ -684,6 +765,11 @@ function focusFallbackAfterSidebarClose() {
           isSending={composerState.isSending}
           isSessionListLoading={sessionState.isListLoading}
           isStartSurfaceOpen={sessionState.isStartSurfaceOpen}
+          headerPrimaryAction={headerActions.primary}
+          headerMenuActions={headerActions.menu}
+          isSidebarOpen={isSidebarOpen}
+          onToggleSidebar={toggleSidebar}
+          onOpenActivity={openActivityInspector}
           listMode={sessionState.listMode}
           message={composerState.message}
           messageInputRef={composerState.messageInputRef}

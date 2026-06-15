@@ -277,6 +277,28 @@ async function openActivityDrawer(): Promise<HTMLElement> {
   return screen.getByRole('complementary', { name: 'Activity drawer' });
 }
 
+function conversationHeader(): HTMLElement {
+  const header = screen.getByRole('main', { name: 'Conversation workspace' }).querySelector('header');
+  if (!header) throw new Error('conversation header not found');
+  return header as HTMLElement;
+}
+
+function headerActions(): HTMLElement {
+  return within(conversationHeader()).getByLabelText('Conversation actions');
+}
+
+function sidebarSelectedActions(): HTMLElement {
+  const sidebar = screen.getByRole('complementary', { name: 'Session navigation' });
+  return within(sidebar).getByLabelText('Selected session actions');
+}
+
+function openHeaderMoreMenu(): HTMLElement {
+  fireEvent.click(within(headerActions()).getByRole('button', { name: 'More session actions' }));
+  const menu = conversationHeader().querySelector('.conversation-more-menu > div');
+  if (!menu) throw new Error('header more menu not found');
+  return menu as HTMLElement;
+}
+
 class FakeWebSocket {
   static instances: FakeWebSocket[] = [];
   onopen: (() => void) | null = null;
@@ -531,7 +553,15 @@ describe('App', () => {
     expect(within(sessionButton('Stopped Repo')).queryByText('Ended')).not.toBeInTheDocument();
     expect(within(sessionButton('Repo One')).getByText('/repo/one')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'one' })).toBeInTheDocument();
-    expect(screen.getByText('Chat')).toBeInTheDocument();
+    const conversationHeader = screen.getByRole('heading', { name: 'Repo One' }).closest('header');
+    expect(conversationHeader).not.toBeNull();
+    expect(within(conversationHeader as HTMLElement).queryByText('Chat')).not.toBeInTheDocument();
+    expect(within(conversationHeader as HTMLElement).queryByText('/repo/one')).not.toBeInTheDocument();
+    expect(within(conversationHeader as HTMLElement).getByRole('button', { name: 'one · workspace' })).toBeInTheDocument();
+    expect(within(conversationHeader as HTMLElement).getByRole('button', { name: 'Stop' })).toBeInTheDocument();
+    expect(within(conversationHeader as HTMLElement).getByRole('button', { name: 'Activity' })).toBeInTheDocument();
+    expect(within(conversationHeader as HTMLElement).getByRole('button', { name: 'More session actions' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Claude: Claude is waiting')).toBeInTheDocument();
     expect(screen.getByLabelText('Claude attention notification')).toHaveTextContent('Claude is waiting');
     expect(screen.queryByLabelText('Claude needs attention')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Claude needs your review')).not.toBeInTheDocument();
@@ -1107,9 +1137,11 @@ describe('App', () => {
 
     fireEvent.keyDown(window, { key: 'b', ctrlKey: true });
     expect(shell).toHaveClass('sidebar-closed');
+    expect(within(conversationHeader()).getByRole('button', { name: 'Show sidebar' })).toHaveAttribute('aria-pressed', 'false');
 
     fireEvent.keyDown(window, { key: 'b', ctrlKey: true });
     expect(shell).toHaveClass('sidebar-open');
+    expect(within(conversationHeader()).getByRole('button', { name: 'Hide sidebar' })).toHaveAttribute('aria-pressed', 'true');
 
     fireEvent.keyDown(window, { key: 'i', ctrlKey: true });
     const drawer = screen.getByRole('complementary', { name: 'Activity drawer' });
@@ -1347,11 +1379,10 @@ describe('App', () => {
   it('keeps end session in the sidebar actions instead of the composer', async () => {
     render(<App />);
 
+    expect(await screen.findByRole('heading', { name: 'Repo One' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Stop session' })).not.toBeInTheDocument();
     await screen.findByRole('heading', { name: 'Repo One' });
-    const sidebar = await screen.findByRole('complementary', { name: 'Session navigation' });
-    const selectedActions = await within(sidebar).findByLabelText('Selected session actions');
-    fireEvent.click(within(selectedActions).getByRole('button', { name: 'End session' }));
+    fireEvent.click(within(sidebarSelectedActions()).getByRole('button', { name: 'End session' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/stop', expect.objectContaining({ method: 'POST' })));
   });
@@ -1427,15 +1458,78 @@ describe('App', () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/sessions/s1/input')).toBe(false);
   });
 
-  it('renames the active chat from the header', async () => {
+  it('keeps workspace paths hidden until the header project chip is opened', async () => {
     render(<App />);
 
-    expect(await screen.findByRole('heading', { name: 'Repo One' })).toBeInTheDocument();
-    vi.mocked(window.prompt).mockReturnValueOnce('Renamed Repo');
-    fireEvent.click(screen.getByRole('button', { name: 'Rename chat' }));
+    const header = (await screen.findByRole('heading', { name: 'Repo One' })).closest('header');
+    expect(header).not.toBeNull();
+    expect(within(header as HTMLElement).queryByText('/repo/one')).not.toBeInTheDocument();
+
+    fireEvent.click(within(header as HTMLElement).getByRole('button', { name: 'one · workspace' }));
+
+    expect(await within(header as HTMLElement).findByText('cwd')).toBeInTheDocument();
+    expect(within(header as HTMLElement).getByText('/repo/one')).toBeInTheDocument();
+    expect(within(header as HTMLElement).getByText('permission mode')).toBeInTheDocument();
+    expect(within(header as HTMLElement).getByText('acceptEdits')).toBeInTheDocument();
+    expect(within(header as HTMLElement).getByText('runtime status')).toBeInTheDocument();
+    expect(within(header as HTMLElement).getByText('Waiting for you')).toBeInTheDocument();
+  });
+
+  it('renames the active chat inline from the header menu', async () => {
+    render(<App />);
+
+    const header = (await screen.findByRole('heading', { name: 'Repo One' })).closest('header');
+    expect(header).not.toBeNull();
+    fireEvent.click(within(header as HTMLElement).getByRole('button', { name: 'More session actions' }));
+    fireEvent.click(within(header as HTMLElement).getByRole('button', { name: 'Rename' }));
+
+    const titleInput = within(header as HTMLElement).getByLabelText('Chat title');
+    fireEvent.change(titleInput, { target: { value: 'Renamed Repo' } });
+    fireEvent.keyDown(titleInput, { key: 'Enter' });
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1', expect.objectContaining({ method: 'PATCH' })));
+    const renameCall = fetchMock.mock.calls.find(([url, init]) => url === '/api/sessions/s1' && init?.method === 'PATCH');
+    expect(JSON.parse(String(renameCall?.[1]?.body))).toEqual({ name: 'Renamed Repo' });
     expect(await screen.findByRole('heading', { name: 'Renamed Repo' })).toBeInTheDocument();
+    expect(window.prompt).not.toHaveBeenCalledWith('Rename chat', expect.any(String));
+  });
+
+  it('opens activity and diagnostics from the compact header actions', async () => {
+    render(<App />);
+
+    const header = (await screen.findByRole('heading', { name: 'Repo One' })).closest('header');
+    expect(header).not.toBeNull();
+
+    fireEvent.click(within(header as HTMLElement).getByRole('button', { name: 'Activity' }));
+    const drawer = screen.getByRole('complementary', { name: 'Activity drawer' });
+    expect(within(drawer).getByRole('tab', { name: 'Activity' })).toHaveAttribute('aria-selected', 'true');
+
+    fireEvent.click(within(header as HTMLElement).getByRole('button', { name: 'More session actions' }));
+    fireEvent.click(within(header as HTMLElement).getByRole('button', { name: 'View diagnostics' }));
+    expect(within(drawer).getByRole('tabpanel', { name: 'Diagnostics' })).toBeInTheDocument();
+    expect(await within(drawer).findByText('Daemon health checks are passing.')).toBeInTheDocument();
+  });
+
+  it('copies the session id and opens worktree diff from the More menu', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    dirtyWorktreeStatus = true;
+    render(<App />);
+
+    fireEvent.click(await screen.findByText('Worktree Repo'));
+    const header = (await screen.findByRole('heading', { name: 'Worktree Repo' })).closest('header');
+    expect(header).not.toBeNull();
+
+    fireEvent.click(within(header as HTMLElement).getByRole('button', { name: 'More session actions' }));
+    fireEvent.click(within(header as HTMLElement).getByRole('button', { name: /Copy session ID/ }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('s4'));
+    expect(within(header as HTMLElement).queryByRole('button', { name: 'Open worktree diff' })).not.toBeInTheDocument();
+
+    fireEvent.click(within(header as HTMLElement).getByRole('button', { name: 'More session actions' }));
+    fireEvent.click(within(header as HTMLElement).getByRole('button', { name: 'Open worktree diff' }));
+    expect(await screen.findByLabelText('Header worktree diff')).toBeInTheDocument();
+    expect(await screen.findByText(/diff --git a\/web\/src\/App\.tsx/)).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s4/worktree-diff', undefined);
   });
 
   it('updates an unnamed chat with an auto-generated title after the first message', async () => {
@@ -1464,22 +1558,22 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByRole('heading', { name: 'Repo One' })).toBeInTheDocument();
-    const sidebar = screen.getByRole('complementary', { name: 'Session navigation' });
-    const selectedActions = within(sidebar).getByLabelText('Selected session actions');
+    const selectedActions = sidebarSelectedActions();
     expect(within(selectedActions).getByRole('button', { name: 'End session' })).toBeInTheDocument();
     expect(within(selectedActions).getByRole('button', { name: 'Restart' })).toBeInTheDocument();
     expect(within(selectedActions).getByRole('button', { name: 'Archive' })).toBeInTheDocument();
-    expect(within(screen.getByLabelText('Session continuity')).getByText('Waiting for you')).toBeInTheDocument();
+    expect(within(headerActions()).getByRole('button', { name: 'Stop' })).toBeInTheDocument();
+    expect(within(openHeaderMoreMenu()).queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument();
+    expect(within(screen.getByLabelText('Session continuity')).getByText('Waiting')).toHaveAttribute('title', 'Waiting for you');
 
     fireEvent.click(sessionButton('Stopped Repo'));
     expect(await screen.findByRole('heading', { name: 'Stopped Repo' })).toBeInTheDocument();
-    expect(within(screen.getByLabelText('Session continuity')).getByText('Ended')).toBeInTheDocument();
     expect(within(screen.getByLabelText('Session continuity')).getByText('Can resume')).toBeInTheDocument();
     expect(screen.getByText('This session is stopped. Resume the conversation to continue.')).toBeInTheDocument();
     expect(screen.getByLabelText('Message')).toBeDisabled();
 
     const socketsBeforeResume = FakeWebSocket.instances.length;
-    fireEvent.click(screen.getByRole('button', { name: 'Resume conversation' }));
+    fireEvent.click(within(headerActions()).getByRole('button', { name: 'Resume conversation' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s2/resume', expect.objectContaining({ method: 'POST' })));
     await waitFor(() => expect(FakeWebSocket.instances.length).toBe(socketsBeforeResume + 1));
@@ -1505,10 +1599,11 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { name })).toBeInTheDocument();
     expect(within(screen.getByLabelText('Session continuity')).getByText('Will start fresh')).toBeInTheDocument();
     expect(screen.getByText('This session cannot resume its Claude context. Start fresh from this workspace to continue.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Start fresh from this workspace' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Archive' })).toBeInTheDocument();
+    expect(within(headerActions()).getByRole('button', { name: 'Start fresh from this workspace' })).toBeInTheDocument();
+    expect(within(sidebarSelectedActions()).getByRole('button', { name: 'Start fresh from this workspace' })).toBeInTheDocument();
+    expect(within(sidebarSelectedActions()).getByRole('button', { name: 'Archive' })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Start fresh from this workspace' }));
+    fireEvent.click(within(headerActions()).getByRole('button', { name: 'Start fresh from this workspace' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/resume', expect.objectContaining({ method: 'POST' })));
   });
@@ -1528,8 +1623,9 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByRole('heading', { name: 'Starting Repo' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'End session' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Archive' })).toBeInTheDocument();
+    expect(within(headerActions()).getByRole('button', { name: 'Stop' })).toBeInTheDocument();
+    expect(within(sidebarSelectedActions()).getByRole('button', { name: 'End session' })).toBeInTheDocument();
+    expect(within(sidebarSelectedActions()).getByRole('button', { name: 'Archive' })).toBeInTheDocument();
     expect(screen.getByLabelText('Message')).toBeDisabled();
     expect(screen.getByText('Claude is starting. You can send once the session is ready.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Restart' })).not.toBeInTheDocument();
@@ -1554,8 +1650,9 @@ describe('App', () => {
 
     expect(await screen.findByRole('heading', { name })).toBeInTheDocument();
     expect(within(screen.getByLabelText('Session continuity')).getByText('Can resume')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Resume conversation' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Archive' })).toBeInTheDocument();
+    expect(within(headerActions()).getByRole('button', { name: 'Resume conversation' })).toBeInTheDocument();
+    expect(within(sidebarSelectedActions()).getByRole('button', { name: 'Resume conversation' })).toBeInTheDocument();
+    expect(within(sidebarSelectedActions()).getByRole('button', { name: 'Archive' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'End session' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Restart' })).not.toBeInTheDocument();
   });
@@ -1564,7 +1661,7 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByRole('heading', { name: 'Repo One' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Archive' }));
+    fireEvent.click(within(sidebarSelectedActions()).getByRole('button', { name: 'Archive' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/archive', expect.objectContaining({ method: 'POST' })));
     await waitFor(() => expect(querySessionButton('Repo One')).toBeNull());
@@ -1619,7 +1716,7 @@ describe('App', () => {
     expect(within(sessionPanel).queryByText('Agent: Review branch')).not.toBeInTheDocument();
     expect(FakeWebSocket.instances.every((socket) => !socket.url.includes('/api/sessions/s3/events'))).toBe(true);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Unarchive' }));
+    fireEvent.click(within(headerActions()).getByRole('button', { name: 'Unarchive' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s3/unarchive', expect.objectContaining({ method: 'POST' })));
     await waitFor(() => expect(screen.queryByRole('button', { name: /Archived Repo/ })).not.toBeInTheDocument());
@@ -1648,7 +1745,7 @@ describe('App', () => {
     expect(await screen.findByText('stopped session history')).toBeInTheDocument();
     expect(FakeWebSocket.instances).toHaveLength(0);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Resume conversation' }));
+    fireEvent.click(within(headerActions()).getByRole('button', { name: 'Resume conversation' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s2/resume', expect.objectContaining({ method: 'POST' })));
     await waitFor(() => expect(FakeWebSocket.instances.length).toBe(1));
@@ -1661,7 +1758,7 @@ describe('App', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Archived chats' }));
     expect(await screen.findByRole('heading', { name: 'Archived Repo' })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    fireEvent.click(within(sidebarSelectedActions()).getByRole('button', { name: 'Delete' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s3?permanent=true', expect.objectContaining({ method: 'DELETE' })));
     await waitFor(() => expect(screen.queryByRole('button', { name: /Archived Repo/ })).not.toBeInTheDocument());
@@ -1741,7 +1838,7 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByRole('heading', { name: 'Repo One' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Archive' }));
+    fireEvent.click(within(sidebarSelectedActions()).getByRole('button', { name: 'Archive' }));
     fireEvent.click(sessionButton('Newest Repo'));
 
     await act(async () => {
@@ -1760,8 +1857,13 @@ describe('App', () => {
 
     const activeHeaderBeforeStop = screen.getByRole('heading', { name: 'Worktree Repo' }).closest('header');
     expect(activeHeaderBeforeStop).not.toBeNull();
-    expect(activeHeaderBeforeStop).toHaveTextContent('/repo/one');
-    expect(within(activeHeaderBeforeStop as HTMLElement).getByText('Isolated worktree')).toBeInTheDocument();
+    expect(activeHeaderBeforeStop).not.toHaveTextContent('/repo/one');
+    const worktreeChip = within(activeHeaderBeforeStop as HTMLElement).getByRole('button', { name: 'one · worktree' });
+    expect(worktreeChip).toBeInTheDocument();
+    fireEvent.click(worktreeChip);
+    expect(await within(activeHeaderBeforeStop as HTMLElement).findByText('/repo/one')).toBeInTheDocument();
+    expect(within(activeHeaderBeforeStop as HTMLElement).getAllByText('/repo/one/.claude/worktrees/abc123').length).toBeGreaterThan(0);
+    expect(within(activeHeaderBeforeStop as HTMLElement).getByText('pin/abc123')).toBeInTheDocument();
 
     const worktreeStatus = await screen.findByLabelText('Worktree status');
     expect(within(worktreeStatus).getByText('Clean')).toBeInTheDocument();
@@ -1771,13 +1873,13 @@ describe('App', () => {
     expect(within(worktreeStatus).getByText('/repo/one/.claude/worktrees/abc123')).toBeInTheDocument();
     expect(within(worktreeStatus).getByText('/repo/one')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Copy delivery context' })).toBeInTheDocument();
-    fireEvent.click(screen.getByText('Stop and remove worktree'));
+    fireEvent.click(within(sidebarSelectedActions()).getByRole('button', { name: 'Stop and remove worktree' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s4/stop-and-remove-worktree', expect.objectContaining({ method: 'POST' })));
     await waitFor(() => expect(screen.queryByText('pin/abc123')).not.toBeInTheDocument());
     const activeHeader = screen.getByRole('heading', { name: 'Worktree Repo' }).closest('header');
     expect(activeHeader).not.toBeNull();
-    expect(activeHeader).toHaveTextContent('/repo/one');
+    expect(within(activeHeader as HTMLElement).getByRole('button', { name: 'one · workspace' })).toBeInTheDocument();
   });
 
   it('shows dirty worktree files and blocks destructive cleanup by default', async () => {
@@ -1798,6 +1900,10 @@ describe('App', () => {
     expect(screen.getByText(/diff --git a\/web\/src\/App\.tsx/)).toBeInTheDocument();
     expect(screen.getByText(/cleanup is blocked until you commit, stash, or clean/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Review dirty worktree first' })).toBeDisabled();
+    const header = screen.getByRole('heading', { name: 'Worktree Repo' }).closest('header');
+    expect(header).not.toBeNull();
+    fireEvent.click(within(header as HTMLElement).getByRole('button', { name: 'More session actions' }));
+    expect(within(header as HTMLElement).getByRole('button', { name: 'Review dirty worktree first' })).toBeDisabled();
     expect(screen.getByText('Stop only')).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/sessions/s4/stop-and-remove-worktree')).toBe(false);
   });
