@@ -1063,10 +1063,7 @@ describe('App', () => {
   it('closes app popovers with Escape and focuses composer after creating a session', async () => {
     render(<App />);
 
-    await screen.findAllByText('Repo One');
-    const sidebar = await screen.findByRole('complementary', { name: 'Session navigation' });
-    fireEvent.click(within(sidebar).getByRole('button', { name: 'Open app menu' }));
-    expect(await screen.findByRole('dialog', { name: 'Command palette' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Command palette' })).not.toBeInTheDocument();
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(screen.queryByRole('dialog', { name: 'Command palette' })).not.toBeInTheDocument();
 

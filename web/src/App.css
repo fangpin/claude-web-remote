@@ -264,12 +264,34 @@ label {
   box-shadow: var(--shadow-popover);
 }
 
+.shortcut-help-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: transparent;
+}
+
 .app-shortcut-help-popover {
   position: fixed;
   top: 18px;
   right: 18px;
   left: auto;
-  z-index: 90;
+  z-index: 91;
+}
+
+.shortcut-help-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.shortcut-help-header button {
+  width: 28px;
+  height: 28px;
+  border-color: transparent;
+  background: transparent;
+  padding: 0;
 }
 
 .shortcut-help-popover h2 {

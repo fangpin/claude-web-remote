@@ -1,4 +1,4 @@
-import { FormEvent, KeyboardEvent, PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { FormEvent, KeyboardEvent, PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import AppShell, { type AppView } from './AppShell';
 import { buildActivityTimeline, latestReviewActivity, reviewSurface, waitingCopy, type ActivityItem } from './activityTimeline';
 import ConversationWorkspace from './ConversationWorkspace';
@@ -199,6 +199,33 @@ function AttentionToast({
   );
 }
 
+function ShortcutsHelp({ onClose }: { onClose: () => void }) {
+  function onBackdropMouseDown(event: ReactMouseEvent<HTMLDivElement>) {
+    if (event.target === event.currentTarget) onClose();
+  }
+
+  return (
+    <div className="shortcut-help-backdrop" role="presentation" onMouseDown={onBackdropMouseDown}>
+      <section id="keyboard-shortcuts-help" className="shortcut-help-popover app-shortcut-help-popover" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts" tabIndex={-1}>
+        <div className="shortcut-help-header">
+          <h2>Keyboard shortcuts</h2>
+          <button type="button" aria-label="Close keyboard shortcuts" onClick={onClose}>×</button>
+        </div>
+        <dl>
+          <div><dt>⌘/Ctrl P</dt><dd>Open command palette</dd></div>
+          <div><dt>⌘/Ctrl N</dt><dd>New chat</dd></div>
+          <div><dt>⌘/Ctrl K</dt><dd>Focus composer</dd></div>
+          <div><dt>/</dt><dd>Focus composer</dd></div>
+          <div><dt>⌘/Ctrl B</dt><dd>Toggle sidebar</dd></div>
+          <div><dt>⌘/Ctrl I</dt><dd>Toggle inspector</dd></div>
+          <div><dt>⌥ Up/Down</dt><dd>Switch sessions</dd></div>
+          <div><dt>Esc</dt><dd>Close popovers</dd></div>
+        </dl>
+      </section>
+    </div>
+  );
+}
+
 function CommandPalette({ actions, onClose }: { actions: CommandPaletteAction[]; onClose: () => void }) {
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
@@ -356,9 +383,14 @@ function focusFallbackAfterSidebarClose() {
     sessionState.openStartSurface();
   }
 
+  function openCommandPalette() {
+    setIsShortcutHelpOpen(false);
+    setIsCommandPaletteOpen(true);
+  }
+
   function showKeyboardShortcuts() {
     setIsCommandPaletteOpen(false);
-    queueMicrotask(() => setIsShortcutHelpOpen(true));
+    setIsShortcutHelpOpen(true);
   }
 
   const attentionKey = currentReviewSurface
@@ -460,8 +492,11 @@ function focusFallbackAfterSidebarClose() {
 
       if (hasAppModifier(event) && event.key.toLowerCase() === 'p') {
         event.preventDefault();
-        setIsShortcutHelpOpen(false);
-        setIsCommandPaletteOpen((open) => !open);
+        if (isCommandPaletteOpen) {
+          setIsCommandPaletteOpen(false);
+        } else {
+          openCommandPalette();
+        }
         return;
       }
 
@@ -642,7 +677,7 @@ function focusFallbackAfterSidebarClose() {
           onDeleteGroup={sessionState.onDeleteGroup}
           onMoveSessionToGroup={sessionState.onMoveSessionToGroup}
           onNewChat={openNewChat}
-          onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+          onOpenCommandPalette={openCommandPalette}
           onRenameGroup={sessionState.onRenameGroup}
           onSelectSession={sessionState.selectSession}
           onSetListMode={sessionState.setListMode}
@@ -762,21 +797,7 @@ function focusFallbackAfterSidebarClose() {
         onDismiss={() => setDismissedAttentionKey(attentionKey)}
       />
     )}
-    {isShortcutHelpOpen && (
-      <section id="keyboard-shortcuts-help" className="shortcut-help-popover app-shortcut-help-popover" aria-label="Keyboard shortcuts">
-        <h2>Keyboard shortcuts</h2>
-        <dl>
-          <div><dt>⌘/Ctrl P</dt><dd>Open command palette</dd></div>
-          <div><dt>⌘/Ctrl N</dt><dd>New chat</dd></div>
-          <div><dt>⌘/Ctrl K</dt><dd>Focus composer</dd></div>
-          <div><dt>/</dt><dd>Focus composer</dd></div>
-          <div><dt>⌘/Ctrl B</dt><dd>Toggle sidebar</dd></div>
-          <div><dt>⌘/Ctrl I</dt><dd>Toggle inspector</dd></div>
-          <div><dt>⌥ Up/Down</dt><dd>Switch sessions</dd></div>
-          <div><dt>Esc</dt><dd>Close popovers</dd></div>
-        </dl>
-      </section>
-    )}
+    {isShortcutHelpOpen && <ShortcutsHelp onClose={() => setIsShortcutHelpOpen(false)} />}
     {isCommandPaletteOpen && <CommandPalette actions={commandPaletteActions} onClose={() => setIsCommandPaletteOpen(false)} />}
     </>
   );
