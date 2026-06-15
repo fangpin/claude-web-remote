@@ -12,7 +12,7 @@ export type TranscriptSummaryTarget =
       type: 'task';
       title: string;
       source: string;
-      status: 'running' | 'completed' | 'failed';
+      status: 'pending' | 'running' | 'completed' | 'failed';
       summary: string;
     };
 
@@ -172,28 +172,45 @@ export function summarizeToolInput(name: string, input: unknown): string {
   );
 }
 
-function bashCommand(inputSummary: string): string {
-  const command = inputSummary.includes('$ ') ? inputSummary.slice(inputSummary.lastIndexOf('$ ') + 2) : inputSummary;
-  return command.trim();
+function bashCommand(inputSummary: string): string | null {
+  const commandMatch = inputSummary.match(/(?:^| · )\$\s+(.+)$/);
+  return commandMatch?.[1]?.trim() || null;
 }
 
-function primaryPath(inputSummary: string): string {
-  return inputSummary.split(' · ')[0].trim();
+function conciseCommand(command: string): string {
+  const npmPrefixMatch = command.match(/^npm\s+--prefix\s+\S+\s+(.+)$/);
+  if (npmPrefixMatch?.[1]) return `npm ${npmPrefixMatch[1].trim()}`;
+  return command;
+}
+
+function primaryPath(inputSummary: string): string | null {
+  return inputSummary.split(' · ')[0]?.trim() || null;
 }
 
 export function transcriptToolSummaryLabel(target: TranscriptSummaryTarget): string {
-  if (target.type === 'task') return target.title;
+  const failed = target.status === 'failed';
+
+  if (target.type === 'task') return failed ? `Failed ${target.title}` : target.title;
+
+  if (target.name === 'Read') {
+    const path = primaryPath(target.inputSummary) ?? 'file';
+    return failed ? `Failed reading ${path}` : `Read ${path}`;
+  }
+
+  if (target.name === 'Edit' || target.name === 'MultiEdit' || target.name === 'Write' || target.name === 'NotebookEdit') {
+    const path = primaryPath(target.inputSummary) ?? 'file';
+    return failed ? `Failed editing ${path}` : `Edited ${path}`;
+  }
 
   if (target.name === 'Bash') {
     const command = bashCommand(target.inputSummary);
-    return `${target.status === 'failed' ? 'Failed' : 'Ran'} ${command}`.trim();
+    const commandLabel = command ? conciseCommand(command) : 'command';
+    return `${failed ? 'Failed' : 'Ran'} ${commandLabel}`;
   }
 
-  if (target.name === 'Edit' || target.name === 'MultiEdit' || target.name === 'Write') {
-    const verb = target.name === 'Write' ? 'Wrote' : 'Edited';
-    const path = primaryPath(target.inputSummary);
-    return path ? `${verb} ${path}` : verb;
-  }
+  if (target.name === 'Glob') return failed ? 'Failed file search' : 'Searched files';
+  if (target.name === 'Grep') return failed ? 'Failed text search' : 'Searched text';
+  if (/permission|review/i.test(target.name)) return failed ? 'Failed review' : 'Reviewed changes';
 
-  return `${target.name} ${target.inputSummary}`.trim();
+  return failed ? `Failed ${target.name}` : target.name;
 }
