@@ -498,7 +498,7 @@ afterEach(() => {
 });
 
 describe('App', () => {
-  it('renders the Claude-like shell regions with conversation and inspector areas', async () => {
+  it('renders the Claude-like shell regions with conversation and activity drawer entry', async () => {
     render(<App />);
 
     const primaryNavigation = await screen.findByRole('navigation', { name: 'Primary navigation' });
@@ -507,7 +507,7 @@ describe('App', () => {
     expect(within(primaryNavigation).queryByRole('button', { name: 'Settings' })).not.toBeInTheDocument();
     expect(screen.getByRole('complementary', { name: 'Session navigation' })).toBeInTheDocument();
     expect(screen.getByRole('main', { name: 'Conversation workspace' })).toBeInTheDocument();
-    expect(screen.getByRole('complementary', { name: 'Session inspector' })).toBeInTheDocument();
+    expect(screen.queryByRole('complementary', { name: 'Activity drawer' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'New chat' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Working directory')).not.toBeInTheDocument();
   });
@@ -544,10 +544,10 @@ describe('App', () => {
     expect(screen.queryByRole('button', { name: 'Copy review' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Allow' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Deny' })).not.toBeInTheDocument();
-    const inspector = openInspector();
-    expect(within(inspector).getByRole('tab', { name: 'Session tasks' })).toBeInTheDocument();
-    fireEvent.click(within(inspector).getByRole('tab', { name: 'Session tasks' }));
-    const sessionPanel = within(inspector).getByRole('tabpanel', { name: 'Session tasks' });
+    const drawer = await openActivityDrawer();
+    expect(within(drawer).getByRole('tab', { name: 'Tasks' })).toBeInTheDocument();
+    fireEvent.click(within(drawer).getByRole('tab', { name: 'Tasks' }));
+    const sessionPanel = within(drawer).getByRole('tabpanel', { name: 'Tasks' });
     expect(await within(sessionPanel).findByText('Agent: Review branch')).toBeInTheDocument();
 
     await waitFor(() => expect(FakeWebSocket.instances.length).toBe(1));
@@ -1004,14 +1004,14 @@ describe('App', () => {
     expect(palette).toHaveTextContent('Open slash commands');
     expect(palette).toHaveTextContent('Repo One');
     expect(palette).toHaveTextContent('Open settings');
-    expect(palette).toHaveTextContent('Show inspector');
+    expect(palette).toHaveTextContent('Show activity');
   });
 
   it('toggles panels and cycles sessions with app-level shortcuts', async () => {
     render(<App />);
 
     expect(await screen.findByRole('complementary', { name: 'Session navigation' })).toBeVisible();
-    expect(screen.getByRole('complementary', { name: 'Session inspector' })).toBeInTheDocument();
+    expect(screen.queryByRole('complementary', { name: 'Activity drawer' })).not.toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: 'b', ctrlKey: true });
     expect(screen.getByRole('button', { name: 'Show sidebar' })).toHaveAttribute('aria-pressed', 'false');
@@ -1020,10 +1020,12 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: 'Hide sidebar' })).toHaveAttribute('aria-pressed', 'true');
 
     fireEvent.keyDown(window, { key: 'i', ctrlKey: true });
-    expect(screen.getByRole('button', { name: 'Hide inspector' })).toBeInTheDocument();
+    const drawer = screen.getByRole('complementary', { name: 'Activity drawer' });
+    expect(drawer).toBeInTheDocument();
+    expect(within(drawer).getByRole('button', { name: 'Close activity drawer' })).toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: 'i', ctrlKey: true });
-    expect(screen.getByRole('button', { name: 'Show inspector' })).toBeInTheDocument();
+    expect(screen.queryByRole('complementary', { name: 'Activity drawer' })).not.toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: 'ArrowDown', altKey: true });
     expect(await screen.findByRole('heading', { name: 'Stopped Repo' })).toBeInTheDocument();
@@ -1034,18 +1036,18 @@ describe('App', () => {
     expect(screen.getByRole('heading', { name: 'Stopped Repo' })).toBeInTheDocument();
   });
 
-  it('toggles the inspector from the visible edge controls on the first click', async () => {
+  it('toggles the Activity drawer from the header trigger and close button on the first click', async () => {
     render(<App />);
 
-    await screen.findByRole('complementary', { name: 'Session inspector' });
+    const trigger = await screen.findByRole('button', { name: 'Open activity drawer' });
+    fireEvent.click(trigger);
+    const drawer = screen.getByRole('complementary', { name: 'Activity drawer' });
+    expect(drawer).toBeInTheDocument();
+    const closeButton = within(drawer).getByRole('button', { name: 'Close activity drawer' });
+    expect(closeButton).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Show inspector' }));
-    expect(screen.getByRole('button', { name: 'Hide inspector' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Show inspector' })).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Hide inspector' }));
-    expect(screen.getByRole('button', { name: 'Show inspector' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Hide inspector' })).not.toBeInTheDocument();
+    fireEvent.click(closeButton);
+    expect(screen.queryByRole('complementary', { name: 'Activity drawer' })).not.toBeInTheDocument();
   });
 
   it('closes app popovers with Escape and focuses composer after creating a session', async () => {
@@ -1060,12 +1062,12 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { name: 'Where should Claude work?' })).toBeInTheDocument();
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(screen.getByRole('heading', { name: 'Where should Claude work?' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Show inspector' })).toBeInTheDocument();
+    expect(screen.queryByRole('complementary', { name: 'Activity drawer' })).not.toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: 'i', ctrlKey: true });
-    expect(screen.getByRole('button', { name: 'Hide inspector' })).toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: 'Activity drawer' })).toBeInTheDocument();
     fireEvent.keyDown(window, { key: 'Escape' });
-    expect(screen.getByRole('button', { name: 'Show inspector' })).toBeInTheDocument();
+    expect(screen.queryByRole('complementary', { name: 'Activity drawer' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
     fireEvent.change(await screen.findByLabelText('Workspace context'), { target: { value: '/repo/two' } });
@@ -1502,9 +1504,9 @@ describe('App', () => {
     expect(await screen.findByText('archived session history')).toBeInTheDocument();
     expect(screen.getByText('This session is archived and read-only. Unarchive it before resuming work or sending messages.')).toBeInTheDocument();
     expect(screen.getByLabelText('Message')).toBeDisabled();
-    const inspector = openInspector();
-    fireEvent.click(within(inspector).getByRole('tab', { name: 'Session tasks' }));
-    const sessionPanel = within(inspector).getByRole('tabpanel', { name: 'Session tasks' });
+    const drawer = await openActivityDrawer();
+    fireEvent.click(within(drawer).getByRole('tab', { name: 'Tasks' }));
+    const sessionPanel = within(drawer).getByRole('tabpanel', { name: 'Tasks' });
     expect(within(sessionPanel).queryByText('Agent: Review branch')).not.toBeInTheDocument();
     expect(FakeWebSocket.instances).toHaveLength(0);
 

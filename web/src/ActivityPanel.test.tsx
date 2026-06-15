@@ -53,7 +53,7 @@ describe('ActivityPanel', () => {
       />
     );
 
-    expect(screen.getByRole('heading', { name: 'Activity' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Current run' })).toBeInTheDocument();
     expect(screen.getByText('1 running · 0 waiting · 1 failed · 0 done')).toBeInTheDocument();
     expect(screen.getByText('Read')).toBeInTheDocument();
     expect(screen.getByText('Waiting for tool result')).toBeInTheDocument();
