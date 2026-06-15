@@ -660,6 +660,7 @@ function focusFallbackAfterSidebarClose() {
           canLoadOlderEvents={eventState.canLoadOlderEvents}
           hiddenEventCount={eventState.hiddenEventCount}
           reviewSurface={currentReviewSurface}
+          isActivityDrawerOpen={isInspectorOpen}
           isAwaitingClaude={eventState.isAwaitingClaude}
           isComposerSession={isComposerSession}
           isSending={composerState.isSending}
@@ -695,6 +696,7 @@ function focusFallbackAfterSidebarClose() {
           onRemoveContextAttachment={composerState.removeContextAttachment}
           onSend={composerState.onSend}
           onSetActiveSuggestionIndex={composerState.setActiveSuggestionIndex}
+          onToggleActivityDrawer={() => setIsInspectorOpen((open) => !open)}
           onUsePrompt={composerState.usePrompt}
           onDismissError={() => reportApiError(null)}
           onRetryEvents={eventState.retryActiveEvents}
