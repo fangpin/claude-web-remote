@@ -16,6 +16,17 @@ type ApiError = {
   detail: string | null;
 };
 
+export type ConversationHeaderActionVariant = 'normal' | 'primary' | 'danger';
+
+export type ConversationHeaderAction = {
+  id: string;
+  label: string;
+  variant?: ConversationHeaderActionVariant;
+  disabled?: boolean;
+  title?: string;
+  onClick: () => void;
+};
+
 type Props = {
   activeBlocks: ConversationBlock[];
   activeSession: SessionInfo | null;
@@ -43,6 +54,11 @@ type Props = {
   isSending: boolean;
   isSessionListLoading: boolean;
   isStartSurfaceOpen: boolean;
+  headerPrimaryAction: ConversationHeaderAction | null;
+  headerMenuActions: ConversationHeaderAction[];
+  isSidebarOpen: boolean;
+  onToggleSidebar: () => void;
+  onOpenActivity: () => void;
   listMode: SessionListMode;
   message: string;
   messageInputRef: RefObject<HTMLTextAreaElement | null>;
@@ -98,15 +114,22 @@ function workspacePathForSession(session: SessionInfo): string {
   return session.worktree?.sourceCwd ?? session.cwd;
 }
 
-function workspaceBadgeForSession(session: SessionInfo): string | null {
-  return session.worktree ? 'Isolated worktree' : null;
-}
-
 function shortWorkspaceName(session: SessionInfo): string {
   const path = workspacePathForSession(session);
   const normalized = path.replace(/\/+$/, '');
   const parts = normalized.split('/').filter(Boolean);
   return parts.at(-1) ?? (normalized || 'Workspace');
+}
+
+function runtimeLabelForHeader(session: SessionInfo, listMode: SessionListMode): string | null {
+  const runtimeStatus = session.runtimeStatus ?? session.status;
+  if (listMode === 'archived' || session.deletedAt) return getSessionRuntimeLabel(session, listMode);
+  if (['starting', 'running', 'waiting', 'failed'].includes(runtimeStatus)) return getSessionRuntimeLabel(session, listMode);
+  return null;
+}
+
+function projectChipLabel(session: SessionInfo): string {
+  return `${shortWorkspaceName(session)} · ${session.worktree ? 'worktree' : 'workspace'}`;
 }
 
 function WorktreeStatusPanel({
@@ -240,38 +263,185 @@ function ApiErrorBanner({
   );
 }
 
-function EditableSessionTitle({ session, onRename }: { session: SessionInfo; onRename: (sessionId: string, name: string | null) => void }) {
+function EditableSessionTitle({
+  session,
+  isRenaming,
+  value,
+  onValueChange,
+  onStartRename,
+  onFinishRename,
+  onCancelRename
+}: {
+  session: SessionInfo;
+  isRenaming: boolean;
+  value: string;
+  onValueChange: (value: string) => void;
+  onStartRename: () => void;
+  onFinishRename: () => void;
+  onCancelRename: () => void;
+}) {
   const title = session.name || shortWorkspaceName(session);
 
-  function rename() {
-    const nextName = window.prompt('Rename chat', title);
-    if (nextName === null) return;
-    onRename(session.id, nextName.trim() || null);
+  if (isRenaming) {
+    return (
+      <input
+        className="editable-session-title-input"
+        autoFocus
+        value={value}
+        aria-label="Chat title"
+        onChange={(event) => onValueChange(event.target.value)}
+        onBlur={onFinishRename}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            onFinishRename();
+          }
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            onCancelRename();
+          }
+        }}
+      />
+    );
   }
 
   return (
-    <span className="editable-session-title">
+    <button type="button" className="editable-session-title" onClick={onStartRename} aria-label="Rename chat">
       <h2>{title}</h2>
-      <button type="button" onClick={rename} aria-label="Rename chat">Rename</button>
-    </span>
+    </button>
   );
 }
 
-function SessionContinuitySummary({
-  session,
-  listMode
-}: {
-  session: SessionInfo;
-  listMode: SessionListMode;
-}) {
-  const runtimeLabel = getSessionRuntimeLabel(session, listMode);
-  const continuityLabel = getContinuityLabel(session, listMode);
+function SessionAttentionSummary({ session, listMode }: { session: SessionInfo; listMode: SessionListMode }) {
+  const runtimeLabel = runtimeLabelForHeader(session, listMode);
+  const continuityLabel = ['failed', 'stopped', 'exited'].includes(session.status) ? getContinuityLabel(session, listMode) : null;
+  if (!runtimeLabel && !continuityLabel) return null;
+  const runtimeStatus = session.runtimeStatus ?? session.status;
+  const compactRuntimeLabel = runtimeStatus === 'waiting' ? 'Waiting' : runtimeLabel;
 
   return (
     <div className="session-continuity-summary" aria-label="Session continuity">
-      <span>{runtimeLabel}</span>
+      {compactRuntimeLabel && <span title={runtimeLabel ?? undefined}>{compactRuntimeLabel}</span>}
       {continuityLabel && <span>{continuityLabel}</span>}
     </div>
+  );
+}
+
+function SessionContextPopover({ session, status, listMode }: { session: SessionInfo; status: WorktreeStatus | null; listMode: SessionListMode }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const runtimeLabel = getSessionRuntimeLabel(session, listMode);
+  const branch = status?.branch ?? session.worktree?.branch;
+
+  return (
+    <div className="session-context-popover">
+      <button type="button" aria-expanded={isOpen} onClick={() => setIsOpen((open) => !open)}>{projectChipLabel(session)}</button>
+      {isOpen && (
+        <dl>
+          <div>
+            <dt>cwd</dt>
+            <dd title={session.cwd}>{session.cwd}</dd>
+          </div>
+          {session.worktree && (
+            <>
+              <div>
+                <dt>source cwd</dt>
+                <dd title={session.worktree.sourceCwd}>{session.worktree.sourceCwd}</dd>
+              </div>
+              <div>
+                <dt>worktree cwd</dt>
+                <dd title={session.worktree.worktreeCwd}>{session.worktree.worktreeCwd}</dd>
+              </div>
+            </>
+          )}
+          {branch && (
+            <div>
+              <dt>branch</dt>
+              <dd title={branch}>{branch}</dd>
+            </div>
+          )}
+          <div>
+            <dt>permission mode</dt>
+            <dd>{session.permissionMode}</dd>
+          </div>
+          <div>
+            <dt>runtime status</dt>
+            <dd>{runtimeLabel}</dd>
+          </div>
+        </dl>
+      )}
+    </div>
+  );
+}
+
+function HeaderActionButton({ action }: { action: ConversationHeaderAction }) {
+  return (
+    <button
+      type="button"
+      className={action.variant === 'primary' ? 'primary-action' : action.variant === 'danger' ? 'danger' : undefined}
+      disabled={action.disabled}
+      title={action.title}
+      onClick={action.onClick}
+    >
+      {action.label}
+    </button>
+  );
+}
+
+function SessionMoreMenu({
+  session,
+  actions,
+  onRename,
+  onCopySessionId,
+  onOpenWorktreeDiff,
+  copyStatus
+}: {
+  session: SessionInfo;
+  actions: ConversationHeaderAction[];
+  onRename: () => void;
+  onCopySessionId: () => void;
+  onOpenWorktreeDiff: (() => void) | null;
+  copyStatus: string | null;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  return (
+    <div className="action-menu conversation-more-menu">
+      <button type="button" aria-label="More session actions" aria-expanded={isOpen} onClick={() => setIsOpen((open) => !open)}>•••</button>
+      {isOpen && (
+        <div>
+          <button type="button" onClick={onRename}>Rename</button>
+          <button type="button" onClick={onCopySessionId}>Copy session ID{copyStatus ? ` · ${copyStatus}` : ''}</button>
+          {onOpenWorktreeDiff && <button type="button" onClick={onOpenWorktreeDiff}>Open worktree diff</button>}
+          {actions.map((action) => <HeaderActionButton key={`${session.id}:${action.id}`} action={action} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HeaderWorktreeDiff({
+  sessionId,
+  diff,
+  error,
+  isLoading,
+  onClose
+}: {
+  sessionId: string;
+  diff: string | null;
+  error: string | null;
+  isLoading: boolean;
+  onClose: () => void;
+}) {
+  return (
+    <section className="header-worktree-diff" aria-label="Header worktree diff">
+      <div className="header-worktree-diff-heading">
+        <span>Worktree diff</span>
+        <button type="button" onClick={onClose}>Close</button>
+      </div>
+      {isLoading && <p>Loading diff for {sessionId}...</p>}
+      {error && <p className="worktree-warning">Unable to load diff: {error}</p>}
+      {diff && <pre>{diff}</pre>}
+    </section>
   );
 }
 
@@ -302,6 +472,11 @@ export default function ConversationWorkspace({
   isSending,
   isSessionListLoading,
   isStartSurfaceOpen,
+  headerPrimaryAction,
+  headerMenuActions,
+  isSidebarOpen,
+  onToggleSidebar,
+  onOpenActivity,
   listMode,
   message,
   messageInputRef,
@@ -327,6 +502,59 @@ export default function ConversationWorkspace({
   onRenameSession,
   onUseEmptyStatePrompt
 }: Props) {
+  const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [copyStatus, setCopyStatus] = useState<string | null>(null);
+  const [headerDiffSessionId, setHeaderDiffSessionId] = useState<string | null>(null);
+  const [headerDiff, setHeaderDiff] = useState<string | null>(null);
+  const [headerDiffError, setHeaderDiffError] = useState<string | null>(null);
+  const [isHeaderDiffLoading, setIsHeaderDiffLoading] = useState(false);
+
+  function startRename(session: SessionInfo) {
+    setRenamingSessionId(session.id);
+    setRenameValue(session.name || shortWorkspaceName(session));
+  }
+
+  function finishRename(session: SessionInfo) {
+    const trimmed = renameValue.trim();
+    setRenamingSessionId(null);
+    onRenameSession(session.id, trimmed || null);
+  }
+
+  function cancelRename() {
+    setRenamingSessionId(null);
+    setRenameValue('');
+  }
+
+  async function copySessionId(sessionId: string) {
+    if (!navigator.clipboard?.writeText) return;
+    await navigator.clipboard.writeText(sessionId);
+    setCopyStatus('Copied');
+    window.setTimeout(() => setCopyStatus(null), 1400);
+  }
+
+  async function openHeaderWorktreeDiff(sessionId: string) {
+    setHeaderDiffSessionId(sessionId);
+    setHeaderDiff(null);
+    setHeaderDiffError(null);
+    setIsHeaderDiffLoading(true);
+    try {
+      const result = await getWorktreeDiff(sessionId);
+      setHeaderDiff(result.diff || 'No unstaged diff.');
+    } catch (err: unknown) {
+      setHeaderDiffError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsHeaderDiffLoading(false);
+    }
+  }
+
+  function closeHeaderWorktreeDiff() {
+    setHeaderDiffSessionId(null);
+    setHeaderDiff(null);
+    setHeaderDiffError(null);
+    setIsHeaderDiffLoading(false);
+  }
+
   if (view === 'config') {
     return (
       <main className="workspace config-workspace" aria-label="Configuration workspace">
@@ -343,45 +571,56 @@ export default function ConversationWorkspace({
       ) : activeSession ? (
         <>
           <header className="conversation-header">
+            <button
+              type="button"
+              className="conversation-header-icon-button"
+              aria-label={isSidebarOpen ? 'Hide sidebar' : 'Show sidebar'}
+              aria-pressed={isSidebarOpen}
+              onClick={onToggleSidebar}
+            >
+              ☰
+            </button>
             <div className="conversation-title-group">
               <div className="conversation-title-row">
-                <span className="eyebrow">{listMode === 'archived' ? 'Archived' : 'Chat'}</span>
-                <EditableSessionTitle session={activeSession} onRename={onRenameSession} />
-                <SessionContinuitySummary session={activeSession} listMode={listMode} />
-                {workspaceBadgeForSession(activeSession) && <span className="session-context-badge">{workspaceBadgeForSession(activeSession)}</span>}
-                <details className="session-context-popover">
-                  <summary>Details</summary>
-                  <dl>
-                    <div>
-                      <dt>Workspace</dt>
-                      <dd title={activeSession.cwd}>{activeSession.cwd}</dd>
-                    </div>
-                    <div>
-                      <dt>Permission</dt>
-                      <dd>{activeSession.permissionMode}</dd>
-                    </div>
-                    {activeSession.worktree && (
-                      <>
-                        <div>
-                          <dt>Worktree</dt>
-                          <dd title={activeSession.worktree.worktreeCwd}>{activeSession.worktree.worktreeCwd}</dd>
-                        </div>
-                        <div>
-                          <dt>Source</dt>
-                          <dd title={activeSession.worktree.sourceCwd}>{activeSession.worktree.sourceCwd}</dd>
-                        </div>
-                        <div>
-                          <dt>Branch</dt>
-                          <dd>{activeWorktreeStatus?.branch ?? activeSession.worktree.branch}</dd>
-                        </div>
-                      </>
-                    )}
-                  </dl>
-                </details>
+                <EditableSessionTitle
+                  session={activeSession}
+                  isRenaming={renamingSessionId === activeSession.id}
+                  value={renameValue}
+                  onValueChange={setRenameValue}
+                  onStartRename={() => startRename(activeSession)}
+                  onFinishRename={() => finishRename(activeSession)}
+                  onCancelRename={cancelRename}
+                />
+                <SessionAttentionSummary session={activeSession} listMode={listMode} />
               </div>
-              <p title={workspacePathForSession(activeSession)}>{workspacePathForSession(activeSession)}</p>
+              <SessionContextPopover
+                session={activeSession}
+                status={activeWorktreeStatus}
+                listMode={listMode}
+              />
+            </div>
+            <div className="conversation-header-actions" aria-label="Conversation actions">
+              {headerPrimaryAction && <HeaderActionButton action={headerPrimaryAction} />}
+              <button type="button" onClick={onOpenActivity}>Activity</button>
+              <SessionMoreMenu
+                session={activeSession}
+                actions={headerMenuActions}
+                onRename={() => startRename(activeSession)}
+                onCopySessionId={() => copySessionId(activeSession.id)}
+                onOpenWorktreeDiff={activeSession.worktree ? () => openHeaderWorktreeDiff(activeSession.id) : null}
+                copyStatus={copyStatus}
+              />
             </div>
           </header>
+          {headerDiffSessionId === activeSession.id && activeSession.worktree && (
+            <HeaderWorktreeDiff
+              sessionId={activeSession.id}
+              diff={headerDiff}
+              error={headerDiffError}
+              isLoading={isHeaderDiffLoading}
+              onClose={closeHeaderWorktreeDiff}
+            />
+          )}
           {listMode === 'archived' && (
             <p className="deleted-note">This session is archived and read-only. Unarchive it before resuming work or sending messages.</p>
           )}
