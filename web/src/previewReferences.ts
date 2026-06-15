@@ -13,7 +13,7 @@ type ToolUse = {
 const SNIPPET_LIMIT = 2000;
 
 export function extractPreviewFileReferences(events: PreviewSourceEvent[]): PreviewFileReference[] {
-  const toolUses = events.flatMap((event) => parseToolUse(event));
+  const toolUses = [...events.flatMap((event) => parseToolUse(event)), ...parseStreamedToolUses(events)];
   const resultByToolUseId = buildResultMap(events);
   const references: PreviewFileReference[] = [];
 
@@ -96,6 +96,78 @@ function buildResultMap(events: PreviewSourceEvent[]): Map<string, string> {
   }
 
   return results;
+}
+
+type StreamedToolUseState = {
+  eventId: number;
+  name: string;
+  toolUseId?: string;
+  input: Record<string, unknown>;
+  inputJson: string;
+};
+
+function parseStreamedToolUses(events: PreviewSourceEvent[]): ToolUse[] {
+  const states = new Map<number, StreamedToolUseState>();
+  const toolUses: ToolUse[] = [];
+
+  for (const event of events) {
+    const payload = event.payload;
+    if (!isRecord(payload)) continue;
+
+    if (payload.type === 'content_block_start') {
+      const index = numberValue(payload.index);
+      const contentBlock = isRecord(payload.content_block) ? payload.content_block : undefined;
+      if (index === undefined || !contentBlock || contentBlock.type !== 'tool_use') continue;
+      const name = stringValue(contentBlock.name);
+      if (!name) continue;
+      states.set(index, {
+        eventId: event.id,
+        name,
+        toolUseId: stringValue(contentBlock.id) ?? stringValue(contentBlock.tool_use_id),
+        input: isRecord(contentBlock.input) ? contentBlock.input : {},
+        inputJson: ''
+      });
+      continue;
+    }
+
+    if (payload.type === 'content_block_delta') {
+      const index = numberValue(payload.index);
+      const delta = isRecord(payload.delta) ? payload.delta : undefined;
+      const state = index === undefined ? undefined : states.get(index);
+      if (!state || !delta || delta.type !== 'input_json_delta') continue;
+      state.inputJson += typeof delta.partial_json === 'string' ? delta.partial_json : '';
+      continue;
+    }
+
+    if (payload.type === 'content_block_stop') {
+      const index = numberValue(payload.index);
+      const state = index === undefined ? undefined : states.get(index);
+      if (!state) continue;
+      toolUses.push({
+        eventId: state.eventId,
+        name: state.name,
+        toolUseId: state.toolUseId,
+        input: mergeInputJson(state.input, state.inputJson)
+      });
+      states.delete(index);
+    }
+  }
+
+  return toolUses;
+}
+
+function mergeInputJson(input: Record<string, unknown>, inputJson: string): Record<string, unknown> {
+  if (!inputJson) return input;
+  try {
+    const parsed = JSON.parse(inputJson);
+    return isRecord(parsed) ? { ...input, ...parsed } : input;
+  } catch {
+    return input;
+  }
+}
+
+function numberValue(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
 function resultContent(content: unknown): string | undefined {

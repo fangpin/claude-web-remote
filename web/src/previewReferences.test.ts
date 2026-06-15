@@ -173,6 +173,115 @@ describe('extractPreviewFileReferences', () => {
     ]);
   });
 
+  it('extracts streamed Read tool input JSON and merges the matching result snippet', () => {
+    const events: PreviewRawEventRef[] = [
+      {
+        id: 50,
+        kind: 'assistant',
+        payload: {
+          type: 'message_start',
+          message: { id: 'msg_streamed_read', role: 'assistant', content: [] }
+        }
+      },
+      {
+        id: 51,
+        kind: 'assistant',
+        payload: {
+          type: 'content_block_start',
+          index: 0,
+          content_block: { type: 'tool_use', id: 'toolu_streamed_read', name: 'Read', input: {} }
+        }
+      },
+      {
+        id: 52,
+        kind: 'assistant',
+        payload: {
+          type: 'content_block_delta',
+          index: 0,
+          delta: { type: 'input_json_delta', partial_json: '{"file_path":"web/src/previewReferences.ts"' }
+        }
+      },
+      {
+        id: 53,
+        kind: 'assistant',
+        payload: {
+          type: 'content_block_delta',
+          index: 0,
+          delta: { type: 'input_json_delta', partial_json: '}' }
+        }
+      },
+      {
+        id: 54,
+        kind: 'assistant',
+        payload: { type: 'content_block_stop', index: 0 }
+      },
+      {
+        id: 55,
+        kind: 'assistant',
+        payload: { type: 'message_stop' }
+      },
+      {
+        id: 56,
+        kind: 'user',
+        payload: {
+          type: 'user',
+          message: {
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'toolu_streamed_read',
+                content: '1\tconst streamed = true;'
+              }
+            ]
+          }
+        }
+      }
+    ];
+
+    expect(extractPreviewFileReferences(events)).toEqual<PreviewFileReference[]>([
+      {
+        path: 'web/src/previewReferences.ts',
+        kind: 'read',
+        eventId: 51,
+        title: 'Read web/src/previewReferences.ts',
+        snippet: '1\tconst streamed = true;'
+      }
+    ]);
+  });
+
+  it('truncates long snippets without splitting astral-plane characters', () => {
+    const content = `${'a'.repeat(1999)}💡${'b'.repeat(20)}`;
+    const events: PreviewRawEventRef[] = [
+      {
+        id: 60,
+        kind: 'tool',
+        payload: {
+          type: 'tool_use',
+          id: 'toolu_long_read',
+          name: 'Read',
+          input: { file_path: 'web/src/long.ts' }
+        }
+      },
+      {
+        id: 61,
+        kind: 'tool',
+        payload: {
+          type: 'tool_result',
+          tool_use_id: 'toolu_long_read',
+          content
+        }
+      }
+    ];
+
+    const [reference] = extractPreviewFileReferences(events);
+
+    expect(reference.snippet?.endsWith('…')).toBe(true);
+    expect(reference.snippet?.length).toBeLessThanOrEqual(2001);
+    expect(reference.snippet).not.toContain('�');
+    expect(reference.snippet).not.toContain('\ud83d');
+    expect(reference.snippet).not.toContain('\udca1');
+  });
+
   it('deduplicates by path and kind while preserving the earliest event id', () => {
     const events: PreviewRawEventRef[] = [
       {
