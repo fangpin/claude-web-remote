@@ -267,10 +267,6 @@ function querySessionButton(name: string): HTMLElement | null {
   return (matches.find((element) => element.closest('button.session'))?.closest('button') as HTMLElement | null) ?? null;
 }
 
-function expectSessionStatus(name: string, status: string) {
-  expect(within(sessionButton(name)).getByText(status)).toBeInTheDocument();
-}
-
 function openInspector(): HTMLElement {
   const inspector = screen.getByRole('complementary', { name: 'Session inspector' });
   if (!within(inspector).queryByRole('tab', { name: 'Session tasks' })) {
@@ -520,15 +516,17 @@ describe('App', () => {
     render(<App />);
 
     expect((await screen.findAllByText('Repo One')).length).toBeGreaterThan(0);
-    expect(screen.getAllByText('/repo/one').length).toBeGreaterThan(0);
+    const sidebar = screen.getByRole('complementary', { name: 'Session navigation' });
+    expect(within(sidebar).getByRole('heading', { name: 'Recent chats' })).toBeInTheDocument();
+    expect(within(sessionButton('Repo One')).getByText(/one · waiting ·/)).toBeInTheDocument();
+    expect(within(sessionButton('Worktree Repo')).getByText(/one · running ·/)).toBeInTheDocument();
+    expect(within(sessionButton('Stopped Repo')).getByText(/stopped ·/)).toBeInTheDocument();
+    expect(within(sessionButton('Repo One')).queryByText('Ready for your reply')).not.toBeInTheDocument();
+    expect(within(sessionButton('Worktree Repo')).queryByText('Claude is working')).not.toBeInTheDocument();
+    expect(within(sessionButton('Stopped Repo')).queryByText('Ended')).not.toBeInTheDocument();
+    expect(within(sessionButton('Repo One')).getByText('/repo/one')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'one' })).toBeInTheDocument();
-    expect(screen.getAllByText('/repo · Active this week').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Ready for your reply').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Claude is working').length).toBeGreaterThan(0);
     expect(screen.getByText('Can resume')).toBeInTheDocument();
-    expectSessionStatus('Repo One', 'Waiting for you');
-    expectSessionStatus('Worktree Repo', 'Running');
-    expectSessionStatus('Stopped Repo', 'Ended');
     expect(screen.getByText('Chat')).toBeInTheDocument();
     expect(screen.getByLabelText('Claude: Claude is waiting')).toBeInTheDocument();
     expect(screen.getByLabelText('Claude attention notification')).toHaveTextContent('Claude is waiting');
@@ -795,7 +793,7 @@ describe('App', () => {
   it('switches to active mode when creating from archived mode', async () => {
     render(<App />);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Archived' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Archived chats' }));
     expect(await screen.findByRole('heading', { name: 'Archived Repo' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
@@ -803,8 +801,8 @@ describe('App', () => {
     fireEvent.click(screen.getByText('Start chat'));
 
     expect(await screen.findByRole('heading', { name: 'two', level: 2 })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Active' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('button', { name: 'Archived' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: 'Archived chats' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Recent chats' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Archived Repo/ })).not.toBeInTheDocument();
   });
 
@@ -1484,7 +1482,7 @@ describe('App', () => {
     await screen.findByRole('heading', { name: 'Repo One' });
     FakeWebSocket.instances = [];
 
-    fireEvent.click(screen.getByRole('button', { name: 'Archived' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Archived chats' }));
 
     expect(await screen.findByRole('heading', { name: 'Archived Repo' })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith('/api/sessions?deletedOnly=true', undefined);
@@ -1540,7 +1538,7 @@ describe('App', () => {
   it('deletes archived session data from the archived list', async () => {
     render(<App />);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Archived' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Archived chats' }));
     expect(await screen.findByRole('heading', { name: 'Archived Repo' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
@@ -1554,7 +1552,7 @@ describe('App', () => {
     deletedSessions = [];
     render(<App />);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Archived' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Archived chats' }));
 
     expect(await screen.findByRole('heading', { name: 'No archived chat selected.' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Where should Claude work?' })).not.toBeInTheDocument();
@@ -1575,7 +1573,7 @@ describe('App', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     render(<App />);
-    fireEvent.click(screen.getByRole('button', { name: 'Archived' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Archived chats' }));
 
     await act(async () => {
       deletedList.resolve();
@@ -1816,19 +1814,19 @@ describe('App', () => {
     expect(within(allTasksPanel).queryByText('Stale global task')).not.toBeInTheDocument();
   });
 
-  it('exposes selected state on the active and archived list mode buttons', async () => {
+  it('uses a quiet toolbar action to switch between recent and archived chats', async () => {
     render(<App />);
 
-    const activeButton = screen.getByRole('button', { name: 'Active' });
-    const archivedButton = screen.getByRole('button', { name: 'Archived' });
+    const sidebar = await screen.findByRole('complementary', { name: 'Session navigation' });
+    expect(within(sidebar).getByRole('heading', { name: 'Recent chats' })).toBeInTheDocument();
+    expect(within(sidebar).getByRole('button', { name: 'Archived chats' })).toBeInTheDocument();
+    expect(within(sidebar).queryByRole('button', { name: 'Active' })).not.toBeInTheDocument();
 
-    expect(activeButton).toHaveAttribute('aria-pressed', 'true');
-    expect(archivedButton).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(within(sidebar).getByRole('button', { name: 'Archived chats' }));
 
-    fireEvent.click(archivedButton);
-
-    expect(activeButton).toHaveAttribute('aria-pressed', 'false');
-    expect(archivedButton).toHaveAttribute('aria-pressed', 'true');
+    expect(await within(sidebar).findByRole('heading', { name: 'Archived chats' })).toBeInTheDocument();
+    expect(within(sidebar).getByRole('button', { name: 'Recent chats' })).toBeInTheDocument();
+    expect(within(sidebar).queryByRole('button', { name: 'Archived chats' })).not.toBeInTheDocument();
   });
 
   it('keeps settings accessible from the command palette', async () => {
