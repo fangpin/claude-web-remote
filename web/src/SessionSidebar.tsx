@@ -407,25 +407,6 @@ export default function SessionSidebar({
         </button>
       </div>
 
-      <div className="session-modes" role="group" aria-label="Session list mode">
-        <button
-          type="button"
-          className={listMode === 'active' ? 'selected' : undefined}
-          aria-pressed={listMode === 'active'}
-          onClick={() => onSetListMode('active')}
-        >
-          Active
-        </button>
-        <button
-          type="button"
-          className={listMode === 'archived' ? 'selected' : undefined}
-          aria-pressed={listMode === 'archived'}
-          onClick={() => onSetListMode('archived')}
-        >
-          Archived
-        </button>
-      </div>
-
       {sessionActions && (
         <section className="session-management-actions" aria-label="Selected session actions">
           <span className="state-kicker">Selected chat</span>
@@ -440,9 +421,16 @@ export default function SessionSidebar({
             <p>{toolbarSummary(sessionSearch, sessions, visibleSessions)}</p>
           </div>
           <div className="session-list-toolbar-actions">
-            <button type="button" onClick={onAddGroup}>New group</button>
+            <button type="button" className="quiet-action" onClick={onAddGroup}>New group</button>
+            <button
+              type="button"
+              className="quiet-action"
+              onClick={() => onSetListMode(listMode === 'archived' ? 'active' : 'archived')}
+            >
+              {listMode === 'archived' ? 'Recent chats' : 'Archived chats'}
+            </button>
             {sessionSearch && (
-              <button type="button" onClick={() => onSetSessionSearch('')}>Clear</button>
+              <button type="button" className="quiet-action" onClick={() => onSetSessionSearch('')}>Clear</button>
             )}
           </div>
         </div>
