@@ -303,24 +303,34 @@ impl PermissionBridge {
         decision: PermissionDecision,
     ) -> AppResult<PendingPermissionRequest> {
         let mut requests = self.requests.lock().await;
-        let mut entry = requests
-            .remove(request_id)
+        let entry = requests
+            .get_mut(request_id)
             .ok_or_else(|| AppError::NotFound(format!("permission request {request_id}")))?;
 
         if entry.request.session_id != session_id {
-            requests.insert(request_id.to_string(), entry);
             return Err(AppError::NotFound(format!(
                 "permission request {request_id}"
             )));
         }
 
-        entry.request.status = status;
-        entry.request.decision = Some(decision.clone());
-        entry.request.resolved_at = Some(Utc::now());
-
-        if let Some(waiter) = entry.waiter.take() {
-            let _ = waiter.send(decision);
+        let waiter = entry.waiter.take().ok_or_else(|| {
+            AppError::Process(format!(
+                "permission request {request_id} has no waiting receiver"
+            ))
+        })?;
+        if waiter.send(decision.clone()).is_err() {
+            requests.remove(request_id);
+            return Err(AppError::Process(format!(
+                "permission request {request_id} could not deliver decision"
+            )));
         }
+
+        let mut entry = requests
+            .remove(request_id)
+            .expect("permission request should exist after decision delivery");
+        entry.request.status = status;
+        entry.request.decision = Some(decision);
+        entry.request.resolved_at = Some(Utc::now());
 
         Ok(entry.request)
     }
@@ -409,6 +419,26 @@ mod tests {
             permission_mode: Some("default".to_string()),
             tool_name: "Bash".to_string(),
             tool_input,
+        }
+    }
+
+    async fn wait_for_pending(
+        bridge: &PermissionBridge,
+        session_id: Uuid,
+        expected_count: usize,
+    ) -> Vec<PendingPermissionRequest> {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            let pending = bridge.pending_for_session(session_id).await;
+            if pending.len() == expected_count {
+                return pending;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "timed out waiting for {expected_count} pending permission requests; saw {}",
+                pending.len()
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
     }
 
@@ -595,10 +625,7 @@ mod tests {
         let handle =
             tokio::spawn(async move { bridge_for_task.register_and_wait(request_for_task).await });
 
-        tokio::task::yield_now().await;
-
-        let pending = bridge.pending_for_session(session_id).await;
-        assert_eq!(pending.len(), 1);
+        let pending = wait_for_pending(&bridge, session_id, 1).await;
         let request_id = pending[0].request_id.clone();
         assert_eq!(pending[0].status, PermissionStatus::Pending);
 
@@ -647,6 +674,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn resolve_errors_when_waiter_has_dropped() {
+        let bridge = PermissionBridge::new("bridge-token", PermissionCapability::available());
+        let request = hook_request(json!({ "command": "pwd" }));
+        let session_id = request.session_id;
+        let pending = PendingPermissionRequest::from_hook_request("req-1".to_string(), request);
+        let (sender, receiver) = oneshot::channel();
+        drop(receiver);
+
+        {
+            let mut requests = bridge.requests.lock().await;
+            requests.insert(
+                "req-1".to_string(),
+                PendingPermissionEntry {
+                    request: pending,
+                    waiter: Some(sender),
+                },
+            );
+        }
+
+        let err = bridge
+            .allow(
+                session_id,
+                "req-1",
+                AllowPermissionRequest {
+                    updated_input: None,
+                },
+            )
+            .await
+            .expect_err("resolve should fail when decision cannot be delivered");
+        assert!(matches!(err, crate::error::AppError::Process(_)));
+        assert!(bridge.pending_for_session(session_id).await.is_empty());
+    }
+
+    #[tokio::test]
     async fn register_and_wait_denies_when_capability_is_unavailable() {
         let bridge = PermissionBridge::new(
             "bridge-token",
@@ -691,7 +752,7 @@ mod tests {
         let handle =
             tokio::spawn(async move { bridge_for_task.register_and_wait(request_for_task).await });
 
-        tokio::task::yield_now().await;
+        let _pending = wait_for_pending(&bridge, session_id, 1).await;
 
         let failed = bridge
             .fail_session_permissions(session_id, "session ended")
