@@ -695,6 +695,41 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator('.task-block')).toHaveCount(2);
 });
 
+test('Claude shell tokens are applied to the document', async ({ page }) => {
+  const tokens = await page.evaluate(() => {
+    const styles = getComputedStyle(document.documentElement);
+    return {
+      canvas: styles.getPropertyValue('--claude-canvas').trim(),
+      surface: styles.getPropertyValue('--claude-surface').trim(),
+      radiusLg: styles.getPropertyValue('--claude-radius-lg').trim(),
+      shadowComposer: styles.getPropertyValue('--claude-shadow-composer').trim()
+    };
+  });
+
+  expect(tokens.canvas).toBe('#f7f3ec');
+  expect(tokens.surface).toBe('#fffaf3');
+  expect(tokens.radiusLg).toBe('22px');
+  expect(tokens.shadowComposer).toContain('rgba');
+
+  const surfaces = await page.evaluate(() => {
+    const shell = document.querySelector('.app-shell');
+    const sidebar = document.querySelector('.session-sidebar');
+    const workspace = document.querySelector('.workspace');
+    if (!shell || !sidebar || !workspace) throw new Error('Missing shell surfaces');
+    return {
+      shellBackground: getComputedStyle(shell).backgroundColor,
+      sidebarBackground: getComputedStyle(sidebar).backgroundColor,
+      workspaceBackground: getComputedStyle(workspace).backgroundColor,
+      workspaceBorderRadius: getComputedStyle(workspace).borderRadius
+    };
+  });
+
+  expect(surfaces.shellBackground).toBe('rgb(247, 243, 236)');
+  expect(surfaces.sidebarBackground).toBe('rgb(255, 250, 243)');
+  expect(surfaces.workspaceBackground).toBe('rgb(255, 250, 243)');
+  expect(surfaces.workspaceBorderRadius).toContain('28px');
+});
+
 test('Claude-like UI stays readable across key viewports', async ({ page }) => {
   const sidebar = page.getByRole('complementary', { name: 'Session navigation' });
   const workspace = page.getByRole('main', { name: 'Conversation workspace' });
