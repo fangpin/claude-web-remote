@@ -84,6 +84,24 @@ impl SessionManager {
         launcher: Vec<String>,
         default_permission_mode: String,
         worktree_config: WorktreeConfig,
+    ) -> Self {
+        Self::new_with_permission_bridge(
+            store,
+            launcher,
+            default_permission_mode,
+            worktree_config,
+            PermissionBridge::new(
+                "disabled",
+                PermissionCapability::unavailable("permission bridge unavailable"),
+            ),
+        )
+    }
+
+    pub fn new_with_permission_bridge(
+        store: EventStore,
+        launcher: Vec<String>,
+        default_permission_mode: String,
+        worktree_config: WorktreeConfig,
         permission_bridge: PermissionBridge,
     ) -> Self {
         Self {
@@ -389,6 +407,7 @@ impl SessionManager {
         request: HookPermissionRequest,
     ) -> AppResult<serde_json::Value> {
         let session_id = request.session_id;
+        let _meta = self.load_active_meta(session_id).await?;
         let wait = self.permission_bridge.register(request).await?;
         self.record_permission_event(session_id, "permission_request", &wait.request)
             .await?;
@@ -448,6 +467,8 @@ impl SessionManager {
             )));
         }
         self.stop_running_process(session_id).await?;
+        self.fail_pending_permissions(session_id, "session stopped")
+            .await?;
         self.update_status(session_id, SessionStatus::Stopped)
             .await?;
         self.worktree_manager.remove(&worktree).await?;
@@ -466,6 +487,8 @@ impl SessionManager {
     pub async fn restart_session(&self, session_id: Uuid) -> AppResult<SessionInfo> {
         let _meta = self.load_active_meta(session_id).await?;
         let _ = self.stop_running_process(session_id).await;
+        self.fail_pending_permissions(session_id, "session restarted")
+            .await?;
         self.update_status(session_id, SessionStatus::Stopped)
             .await?;
         self.resume_session(session_id).await
@@ -482,6 +505,8 @@ impl SessionManager {
     pub async fn archive_session(&self, session_id: Uuid) -> AppResult<SessionInfo> {
         let _meta = self.load_active_meta(session_id).await?;
         self.stop_running_process(session_id).await?;
+        self.fail_pending_permissions(session_id, "session archived")
+            .await?;
         let meta = self
             .store
             .update_meta(session_id, |meta| {
@@ -503,6 +528,8 @@ impl SessionManager {
     pub async fn delete_session(&self, session_id: Uuid) -> AppResult<SessionInfo> {
         let _meta = self.load_active_meta(session_id).await?;
         self.stop_running_process(session_id).await?;
+        self.fail_pending_permissions(session_id, "session deleted")
+            .await?;
         let meta = self
             .store
             .update_meta(session_id, |meta| {
@@ -567,6 +594,8 @@ impl SessionManager {
             )));
         }
         self.stop_running_process(session_id).await?;
+        self.fail_pending_permissions(session_id, "session deleted")
+            .await?;
         self.store.remove_archived_session_dir(session_id).await
     }
 
@@ -793,40 +822,41 @@ impl SessionManager {
             );
         }
 
-        let store = self.store.clone();
-        let running = self.running.clone();
+        let manager = self.clone();
         let session_id = meta.id;
         tokio::spawn(async move {
             while let Some(event) = rx.recv().await {
                 match event {
                     ProcessEvent::StdoutLine(line) => {
-                        let _ = store.append_raw_stdout(session_id, &line).await;
+                        let _ = manager.store.append_raw_stdout(session_id, &line).await;
                     }
                     ProcessEvent::StderrLine(line) => {
-                        let _ = store.append_stderr(session_id, &line).await;
+                        let _ = manager.store.append_stderr(session_id, &line).await;
                         let mut ui_event =
                             UiEvent::new(0, session_id, EventKind::Error, json!({ "line": line }));
-                        let _ = store.append_event_with_next_id(&mut ui_event).await;
-                        let _ = tx.send(ui_event);
+                        let _ = manager.store.append_event_with_next_id(&mut ui_event).await;
+                        let _ = manager.broadcast_event(session_id, ui_event).await;
                     }
                     ProcessEvent::UiEvent(mut ui_event) => {
                         if let Some(claude_session_id) =
                             extract_claude_session_id(&ui_event.payload)
                         {
                             let _ = Self::update_claude_session_id(
-                                &store,
+                                &manager.store,
                                 session_id,
                                 claude_session_id,
                             )
                             .await;
                         }
-                        let _ = store.append_event_with_next_id(&mut ui_event).await;
-                        let _ = tx.send(ui_event);
+                        let _ = manager.store.append_event_with_next_id(&mut ui_event).await;
+                        let _ = manager.broadcast_event(session_id, ui_event).await;
                     }
                     ProcessEvent::Exited(_) => {
-                        let _ = running.lock().await.remove(&session_id);
-                        // Pending permission hooks cannot continue after the Claude process exits.
-                        let _ = store
+                        let _ = manager
+                            .fail_pending_permissions(session_id, "session ended")
+                            .await;
+                        let _ = manager
+                            .store
                             .update_meta(session_id, |meta| {
                                 if meta.status != SessionStatus::Stopped {
                                     meta.status = SessionStatus::Exited;
@@ -841,8 +871,9 @@ impl SessionManager {
                             EventKind::System,
                             json!({ "status": "exited" }),
                         );
-                        let _ = store.append_event_with_next_id(&mut ui_event).await;
-                        let _ = tx.send(ui_event);
+                        let _ = manager.store.append_event_with_next_id(&mut ui_event).await;
+                        let _ = manager.broadcast_event(session_id, ui_event).await;
+                        let _ = manager.running.lock().await.remove(&session_id);
                     }
                 }
             }
@@ -1058,13 +1089,6 @@ mod tests {
             branch_prefix: "pin".to_string(),
             base_ref: crate::WorktreeBaseRef::Head,
         }
-    }
-
-    fn permission_bridge() -> PermissionBridge {
-        PermissionBridge::new(
-            "test-token",
-            PermissionCapability::unavailable("permission bridge disabled in tests"),
-        )
     }
 
     fn fake_claude(dir: &std::path::Path) -> PathBuf {
@@ -1429,7 +1453,6 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
-            permission_bridge(),
         );
 
         let created = manager
@@ -1462,7 +1485,6 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
-            permission_bridge(),
         );
         let created = manager
             .create_session(CreateSessionRequest {
@@ -1494,7 +1516,6 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
-            permission_bridge(),
         );
         let created = manager
             .create_session(CreateSessionRequest {
@@ -1528,7 +1549,6 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
-            permission_bridge(),
         );
 
         let created = manager
@@ -1563,7 +1583,6 @@ done
             ],
             "acceptEdits".to_string(),
             worktree_config(),
-            permission_bridge(),
         );
 
         let result = manager
@@ -1603,7 +1622,6 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
-            permission_bridge(),
         );
         let session = manager
             .create_session(CreateSessionRequest {
@@ -1637,7 +1655,6 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
-            permission_bridge(),
         );
         let session = manager
             .create_session(CreateSessionRequest {
@@ -1675,7 +1692,6 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
-            permission_bridge(),
         );
         let now = Utc::now();
         let meta = SessionMeta {
@@ -1727,7 +1743,6 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
-            permission_bridge(),
         );
 
         let created = manager
@@ -1753,7 +1768,6 @@ done
             vec!["claude".to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
-            permission_bridge(),
         );
 
         let result = manager
@@ -1778,7 +1792,6 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
-            permission_bridge(),
         );
 
         let created = manager
@@ -1805,7 +1818,6 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
-            permission_bridge(),
         );
         let session = manager
             .create_session(CreateSessionRequest {
@@ -1846,7 +1858,6 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
-            permission_bridge(),
         );
 
         let created = manager
@@ -1890,7 +1901,6 @@ done
             vec![bin.to_string_lossy().to_string()],
             "auto".to_string(),
             worktree_config(),
-            permission_bridge(),
         );
 
         let created = manager
@@ -1916,7 +1926,6 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
-            permission_bridge(),
         );
 
         let session = manager
@@ -1943,7 +1952,6 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
-            permission_bridge(),
         );
 
         let session = manager
@@ -1985,7 +1993,6 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
-            permission_bridge(),
         );
 
         let session = manager
@@ -2068,7 +2075,6 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
-            permission_bridge(),
         );
 
         manager.restore_active_sessions().await.unwrap();
@@ -2118,7 +2124,6 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
-            permission_bridge(),
         );
 
         manager.restore_active_sessions().await.unwrap();
@@ -2152,7 +2157,6 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
-            permission_bridge(),
         );
 
         let session = manager
@@ -2193,7 +2197,6 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
-            permission_bridge(),
         );
 
         let session = manager
@@ -2251,7 +2254,6 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
-            permission_bridge(),
         );
 
         let session = manager
@@ -2287,7 +2289,6 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
-            permission_bridge(),
         );
         let session = manager
             .create_session(CreateSessionRequest {
@@ -2341,7 +2342,6 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
-            permission_bridge(),
         );
         let session = manager
             .create_session(CreateSessionRequest {
@@ -2383,7 +2383,6 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
-            permission_bridge(),
         );
         let session = manager
             .create_session(CreateSessionRequest {
@@ -2433,7 +2432,6 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
-            permission_bridge(),
         );
         let session = manager
             .create_session(CreateSessionRequest {
@@ -2470,7 +2468,6 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
-            permission_bridge(),
         );
         let session = manager
             .create_session(CreateSessionRequest {
@@ -2519,7 +2516,6 @@ done
             vec![wrapper.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
-            permission_bridge(),
         );
         let session = manager
             .create_session(CreateSessionRequest {
@@ -2560,7 +2556,6 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
-            permission_bridge(),
         );
         let session_id = Uuid::new_v4();
         let now = Utc::now();
@@ -2602,7 +2597,6 @@ done
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
-            permission_bridge(),
         );
         let session_id = Uuid::new_v4();
         let now = Utc::now();
@@ -2637,7 +2631,7 @@ done
         let temp = tempfile::tempdir().unwrap();
         let bin = fake_claude(temp.path());
         let store = EventStore::new(temp.path().join("data")).await.unwrap();
-        let manager = SessionManager::new(
+        let manager = SessionManager::new_with_permission_bridge(
             store.clone(),
             vec![bin.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
@@ -2736,7 +2730,6 @@ done
             vec![wrapper.to_string_lossy().to_string()],
             "acceptEdits".to_string(),
             worktree_config(),
-            permission_bridge(),
         );
         let session = manager
             .create_session(CreateSessionRequest {

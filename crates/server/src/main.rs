@@ -45,7 +45,7 @@ async fn main() -> anyhow::Result<()> {
             "permission hook injection has not been verified for this Claude Code version",
         ),
     );
-    let manager = SessionManager::new(
+    let manager = SessionManager::new_with_permission_bridge(
         store.clone(),
         config.launcher.clone(),
         config.default_permission_mode.clone(),

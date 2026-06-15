@@ -516,7 +516,7 @@ done
     async fn test_state(temp: &tempfile::TempDir) -> AppState {
         let bin = fake_claude(temp.path());
         let store = EventStore::new(temp.path().join("data")).await.unwrap();
-        let manager = SessionManager::new(
+        let manager = SessionManager::new_with_permission_bridge(
             store.clone(),
             vec![bin.to_string_lossy().to_string()],
             "bypassPermissions".to_string(),
@@ -1103,20 +1103,37 @@ done
         let session_id = session.id;
         let cwd = temp.path().display().to_string();
 
-        let allow_hook = state.manager.clone();
+        let app_for_allow_hook = app.clone();
         let allow_task = tokio::spawn(async move {
-            allow_hook
-                .permission_hook_request(crate::HookPermissionRequest {
-                    token: "test-token".to_string(),
-                    session_id,
-                    hook_session_id: Some("hook-allow".to_string()),
-                    cwd: Some(cwd),
-                    permission_mode: Some("bypassPermissions".to_string()),
-                    tool_name: "Bash".to_string(),
-                    tool_input: json!({ "command": "npm test" }),
-                })
+            let response = app_for_allow_hook
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/internal/permission-hooks/request")
+                        .header("content-type", "application/json")
+                        .body(Body::from(
+                            json!({
+                                "token": "test-token",
+                                "sessionId": session_id,
+                                "hookSessionId": "hook-allow",
+                                "cwd": cwd,
+                                "permissionMode": "bypassPermissions",
+                                "toolName": "Bash",
+                                "toolInput": { "command": "npm test" }
+                            })
+                            .to_string(),
+                        ))
+                        .unwrap(),
+                )
                 .await
-                .unwrap()
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            serde_json::from_slice::<serde_json::Value>(
+                &axum::body::to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .unwrap(),
+            )
+            .unwrap()
         });
 
         for _ in 0..100 {
@@ -1182,20 +1199,36 @@ done
             "allow"
         );
 
-        let deny_hook = state.manager.clone();
+        let app_for_deny_hook = app.clone();
         let deny_task = tokio::spawn(async move {
-            deny_hook
-                .permission_hook_request(crate::HookPermissionRequest {
-                    token: "test-token".to_string(),
-                    session_id,
-                    hook_session_id: Some("hook-deny".to_string()),
-                    cwd: None,
-                    permission_mode: Some("bypassPermissions".to_string()),
-                    tool_name: "Bash".to_string(),
-                    tool_input: json!({ "command": "cargo test" }),
-                })
+            let response = app_for_deny_hook
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/internal/permission-hooks/request")
+                        .header("content-type", "application/json")
+                        .body(Body::from(
+                            json!({
+                                "token": "test-token",
+                                "sessionId": session_id,
+                                "hookSessionId": "hook-deny",
+                                "permissionMode": "bypassPermissions",
+                                "toolName": "Bash",
+                                "toolInput": { "command": "cargo test" }
+                            })
+                            .to_string(),
+                        ))
+                        .unwrap(),
+                )
                 .await
-                .unwrap()
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            serde_json::from_slice::<serde_json::Value>(
+                &axum::body::to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .unwrap(),
+            )
+            .unwrap()
         });
         for _ in 0..100 {
             let pending = state
