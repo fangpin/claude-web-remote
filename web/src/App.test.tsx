@@ -271,14 +271,6 @@ function expectSessionStatus(name: string, status: string) {
   expect(within(sessionButton(name)).getByText(status)).toBeInTheDocument();
 }
 
-function openInspector(): HTMLElement {
-  const inspector = screen.getByRole('complementary', { name: 'Session inspector' });
-  if (!within(inspector).queryByRole('tab', { name: 'Session tasks' })) {
-    fireEvent.click(screen.getByRole('button', { name: 'Show inspector' }));
-  }
-  return inspector;
-}
-
 async function openActivityDrawer(): Promise<HTMLElement> {
   const button = await screen.findByRole('button', { name: 'Open activity drawer' });
   fireEvent.click(button);
@@ -1716,7 +1708,6 @@ describe('App', () => {
 
     await screen.findByRole('heading', { name: 'Repo One' });
     expect(screen.queryByRole('complementary', { name: 'Activity drawer' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('complementary', { name: 'Session inspector' })).not.toBeInTheDocument();
 
     const drawer = await openActivityDrawer();
     expect(within(drawer).getByRole('heading', { name: 'Activity' })).toBeInTheDocument();
