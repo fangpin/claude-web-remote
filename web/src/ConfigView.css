@@ -230,6 +230,56 @@
   padding-top: 16px;
 }
 
+@media (prefers-color-scheme: dark) {
+  .settings-panel,
+  .settings-status-card,
+  .settings-notice {
+    border-color: var(--border-subtle);
+    color: var(--text-soft);
+    background: var(--surface-raised);
+  }
+
+  .settings-field,
+  .settings-chip,
+  .settings-value-pair div {
+    border-color: var(--border-subtle);
+    color: var(--text-soft);
+    background: var(--surface-2);
+  }
+
+  .settings-status-card.tone-success,
+  .settings-chip.tone-success {
+    border-color: color-mix(in srgb, var(--success) 34%, transparent);
+    color: var(--success);
+    background: var(--success-soft);
+  }
+
+  .settings-status-card.tone-warning,
+  .settings-chip.tone-warning {
+    border-color: color-mix(in srgb, var(--warning) 34%, transparent);
+    color: var(--warning);
+    background: var(--warning-soft);
+  }
+
+  .settings-loading,
+  .settings-eyebrow,
+  .settings-header p,
+  .settings-group p,
+  .settings-field-heading p,
+  .settings-status-card span,
+  .settings-status-card small,
+  .settings-value-pair dt {
+    color: var(--muted);
+  }
+
+  .settings-header h2,
+  .settings-group h3,
+  .settings-status-card strong,
+  .settings-label {
+    color: var(--text);
+  }
+}
+
 @media (max-width: 1180px) {
   .settings-header {
     grid-template-columns: 1fr;
