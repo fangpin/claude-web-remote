@@ -733,6 +733,15 @@ test('Claude-like UI stays readable across key viewports', async ({ page }) => {
   ).toBeLessThanOrEqual(1);
 });
 
+test('session actions live in the session row overflow menu', async ({ page }) => {
+  const row = page.locator('.session-row', { hasText: 'Visual Regression Session' }).first();
+  await expect(page.getByRole('main', { name: 'Conversation workspace' }).getByRole('button', { name: 'More session actions' })).toHaveCount(0);
+  await row.getByRole('button', { name: 'More session actions' }).click();
+  await expect(row.getByRole('menu', { name: 'Session actions' })).toBeVisible();
+  await expect(row.getByRole('menuitem', { name: 'Rename' })).toBeVisible();
+  await expect(row.getByRole('menuitem', { name: 'Archive' })).toBeVisible();
+});
+
 test('conversation content can scroll to the final block without composer obstruction', async ({ page }) => {
   const events = page.locator('.events');
   const finalMessage = page.locator('.message-block.assistant').last();

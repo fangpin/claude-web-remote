@@ -287,16 +287,16 @@ function headerActions(): HTMLElement {
   return within(conversationHeader()).getByLabelText('Conversation actions');
 }
 
-function sidebarSelectedActions(): HTMLElement {
-  const sidebar = screen.getByRole('complementary', { name: 'Session navigation' });
-  return within(sidebar).getByLabelText('Selected session actions');
+function sessionRowElement(name: string): HTMLElement {
+  const row = sessionButton(name).closest('.session-row');
+  if (!row) throw new Error(`session row not found: ${name}`);
+  return row as HTMLElement;
 }
 
-function openHeaderMoreMenu(): HTMLElement {
-  fireEvent.click(within(headerActions()).getByRole('button', { name: 'More session actions' }));
-  const menu = conversationHeader().querySelector('.conversation-more-menu > div');
-  if (!menu) throw new Error('header more menu not found');
-  return menu as HTMLElement;
+function openSessionRowMenu(name: string): HTMLElement {
+  const row = sessionRowElement(name);
+  fireEvent.click(within(row).getByRole('button', { name: 'More session actions' }));
+  return within(row).getByRole('menu', { name: 'Session actions' });
 }
 
 class FakeWebSocket {
@@ -569,9 +569,9 @@ describe('App', () => {
     expect(within(conversationHeader as HTMLElement).queryByText('Chat')).not.toBeInTheDocument();
     expect(within(conversationHeader as HTMLElement).queryByText('/repo/one')).not.toBeInTheDocument();
     expect(within(conversationHeader as HTMLElement).getByRole('button', { name: 'one · workspace' })).toBeInTheDocument();
-    expect(within(conversationHeader as HTMLElement).getByRole('button', { name: 'Stop' })).toBeInTheDocument();
+    expect(within(conversationHeader as HTMLElement).queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument();
     expect(within(conversationHeader as HTMLElement).getByRole('button', { name: 'Activity' })).toBeInTheDocument();
-    expect(within(conversationHeader as HTMLElement).getByRole('button', { name: 'More session actions' })).toBeInTheDocument();
+    expect(within(conversationHeader as HTMLElement).queryByRole('button', { name: 'More session actions' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Chat view' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: 'Debug view' })).toHaveAttribute('aria-pressed', 'false');
     expect(screen.queryByLabelText('Claude: Claude is waiting')).not.toBeInTheDocument();
@@ -686,17 +686,17 @@ describe('App', () => {
     const { unmount } = render(<App />);
 
     await screen.findAllByText('Repo One');
-    fireEvent.click(screen.getByRole('button', { name: 'Pin Stopped Repo' }));
+    fireEvent.click(within(openSessionRowMenu('Stopped Repo')).getByRole('menuitem', { name: 'Pin' }));
 
     expect(screen.getByRole('heading', { name: 'Pinned' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Unpin Stopped Repo' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(openSessionRowMenu('Stopped Repo')).getByRole('menuitem', { name: 'Unpin' })).toBeInTheDocument();
 
     unmount();
     cleanup();
     render(<App />);
 
     expect(await screen.findByRole('heading', { name: 'Pinned' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Unpin Stopped Repo' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(openSessionRowMenu('Stopped Repo')).getByRole('menuitem', { name: 'Unpin' })).toBeInTheDocument();
   });
 
   it('creates custom groups and moves sessions with the accessible move control', async () => {
@@ -1549,23 +1549,18 @@ describe('App', () => {
     expect(within(header as HTMLElement).getByText('Waiting for you')).toBeInTheDocument();
   });
 
-  it('renames the active chat inline from the header menu', async () => {
+  it('renames the active chat from the session row menu', async () => {
+    vi.mocked(window.prompt).mockReturnValueOnce('Renamed Repo');
     render(<App />);
 
-    const header = (await screen.findByRole('heading', { name: 'Repo One' })).closest('header');
-    expect(header).not.toBeNull();
-    fireEvent.click(within(header as HTMLElement).getByRole('button', { name: 'More session actions' }));
-    fireEvent.click(within(header as HTMLElement).getByRole('button', { name: 'Rename' }));
-
-    const titleInput = within(header as HTMLElement).getByLabelText('Chat title');
-    fireEvent.change(titleInput, { target: { value: 'Renamed Repo' } });
-    fireEvent.keyDown(titleInput, { key: 'Enter' });
+    expect(await screen.findByRole('heading', { name: 'Repo One' })).toBeInTheDocument();
+    fireEvent.click(within(openSessionRowMenu('Repo One')).getByRole('menuitem', { name: 'Rename' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1', expect.objectContaining({ method: 'PATCH' })));
     const renameCall = fetchMock.mock.calls.find(([url, init]) => url === '/api/sessions/s1' && init?.method === 'PATCH');
     expect(JSON.parse(String(renameCall?.[1]?.body))).toEqual({ name: 'Renamed Repo' });
     expect(await screen.findByRole('heading', { name: 'Renamed Repo' })).toBeInTheDocument();
-    expect(window.prompt).not.toHaveBeenCalledWith('Rename chat', expect.any(String));
+    expect(window.prompt).toHaveBeenCalledWith('Rename chat', 'Repo One');
   });
 
   it('opens activity and diagnostics from the compact header actions', async () => {
@@ -1578,8 +1573,7 @@ describe('App', () => {
     const drawer = screen.getByRole('complementary', { name: 'Activity drawer' });
     expect(within(drawer).getByRole('tab', { name: 'Activity' })).toHaveAttribute('aria-selected', 'true');
 
-    fireEvent.click(within(header as HTMLElement).getByRole('button', { name: 'More session actions' }));
-    fireEvent.click(within(header as HTMLElement).getByRole('button', { name: 'View diagnostics' }));
+    fireEvent.click(within(drawer).getByText('Diagnostics'));
     expect(within(drawer).getByRole('tabpanel', { name: 'Diagnostics' })).toBeInTheDocument();
     expect(await within(drawer).findByText('Daemon health checks are passing.')).toBeInTheDocument();
   });
@@ -1594,13 +1588,11 @@ describe('App', () => {
     const header = (await screen.findByRole('heading', { name: 'Worktree Repo' })).closest('header');
     expect(header).not.toBeNull();
 
-    fireEvent.click(within(header as HTMLElement).getByRole('button', { name: 'More session actions' }));
-    fireEvent.click(within(header as HTMLElement).getByRole('button', { name: /Copy session ID/ }));
+    fireEvent.click(within(openSessionRowMenu('Worktree Repo')).getByRole('menuitem', { name: /Copy session ID/ }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('s4'));
-    expect(within(header as HTMLElement).queryByRole('button', { name: 'Open worktree diff' })).not.toBeInTheDocument();
+    fireEvent.click(within(openSessionRowMenu('Worktree Repo')).getByRole('menuitem', { name: 'Open worktree diff' }));
 
-    const drawer = await openActivityDrawer();
-    fireEvent.click(within(drawer).getByRole('tab', { name: 'Preview' }));
+    const drawer = screen.getByRole('complementary', { name: 'Activity drawer' });
     const previewPanel = within(drawer).getByRole('tabpanel', { name: 'Preview' });
     expect(await within(previewPanel).findByText('Worktree diff')).toBeInTheDocument();
     expect(within(previewPanel).getByText(/diff --git a\/web\/src\/App\.tsx/)).toBeInTheDocument();
@@ -1633,12 +1625,10 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByRole('heading', { name: 'Repo One' })).toBeInTheDocument();
-    const selectedActions = sidebarSelectedActions();
-    expect(within(selectedActions).getByRole('button', { name: 'End session' })).toBeInTheDocument();
-    expect(within(selectedActions).getByRole('button', { name: 'Restart' })).toBeInTheDocument();
-    expect(within(selectedActions).getByRole('button', { name: 'Archive' })).toBeInTheDocument();
-    expect(within(headerActions()).getByRole('button', { name: 'Stop' })).toBeInTheDocument();
-    expect(within(openHeaderMoreMenu()).queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument();
+    const selectedActions = openSessionRowMenu('Repo One');
+    expect(within(selectedActions).getByRole('menuitem', { name: 'End session' })).toBeInTheDocument();
+    expect(within(selectedActions).getByRole('menuitem', { name: 'Restart' })).toBeInTheDocument();
+    expect(within(selectedActions).getByRole('menuitem', { name: 'Archive' })).toBeInTheDocument();
     expect(within(screen.getByLabelText('Session continuity')).getByText('Waiting')).toHaveAttribute('title', 'Waiting for you');
 
     fireEvent.click(sessionButton('Stopped Repo'));
@@ -1655,12 +1645,12 @@ describe('App', () => {
     expect(within(stoppedContext).getByText('acceptEdits')).toBeInTheDocument();
 
     const socketsBeforeResume = FakeWebSocket.instances.length;
-    fireEvent.click(within(headerActions()).getByRole('button', { name: 'Resume conversation' }));
+    fireEvent.click(within(openSessionRowMenu('Stopped Repo')).getByRole('menuitem', { name: 'Resume conversation' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s2/resume', expect.objectContaining({ method: 'POST' })));
     await waitFor(() => expect(FakeWebSocket.instances.length).toBe(socketsBeforeResume + 1));
     expect(FakeWebSocket.instances.at(-1)?.url).toContain('/api/sessions/s2/events?afterId=0');
-    expect(within(selectedActions).getByRole('button', { name: 'End session' })).toBeInTheDocument();
+    expect(within(selectedActions).getByRole('menuitem', { name: 'End session' })).toBeInTheDocument();
   });
 
   it.each<SessionStatus>(['stopped', 'exited', 'failed'])('explains fresh-start continuation for %s sessions without Claude context', async (status) => {
@@ -1681,11 +1671,11 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { name })).toBeInTheDocument();
     expect(within(screen.getByLabelText('Session continuity')).getByText('Will start fresh')).toBeInTheDocument();
     expect(screen.getByText('This session cannot resume its Claude context. Start fresh from this workspace to continue.')).toBeInTheDocument();
-    expect(within(headerActions()).getByRole('button', { name: 'Start fresh from this workspace' })).toBeInTheDocument();
-    expect(within(sidebarSelectedActions()).getByRole('button', { name: 'Start fresh from this workspace' })).toBeInTheDocument();
-    expect(within(sidebarSelectedActions()).getByRole('button', { name: 'Archive' })).toBeInTheDocument();
+    const rowMenu = openSessionRowMenu(name);
+    expect(within(rowMenu).getByRole('menuitem', { name: 'Start fresh from this workspace' })).toBeInTheDocument();
+    expect(within(rowMenu).getByRole('menuitem', { name: 'Archive' })).toBeInTheDocument();
 
-    fireEvent.click(within(headerActions()).getByRole('button', { name: 'Start fresh from this workspace' }));
+    fireEvent.click(within(rowMenu).getByRole('menuitem', { name: 'Start fresh from this workspace' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/resume', expect.objectContaining({ method: 'POST' })));
   });
@@ -1705,9 +1695,9 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByRole('heading', { name: 'Starting Repo' })).toBeInTheDocument();
-    expect(within(headerActions()).getByRole('button', { name: 'Stop' })).toBeInTheDocument();
-    expect(within(sidebarSelectedActions()).getByRole('button', { name: 'End session' })).toBeInTheDocument();
-    expect(within(sidebarSelectedActions()).getByRole('button', { name: 'Archive' })).toBeInTheDocument();
+    const rowMenu = openSessionRowMenu('Starting Repo');
+    expect(within(rowMenu).getByRole('menuitem', { name: 'End session' })).toBeInTheDocument();
+    expect(within(rowMenu).getByRole('menuitem', { name: 'Archive' })).toBeInTheDocument();
     expect(screen.getByLabelText('Message')).toBeDisabled();
     expect(screen.getByText('Claude is starting. You can send once the session is ready.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Restart' })).not.toBeInTheDocument();
@@ -1732,9 +1722,9 @@ describe('App', () => {
 
     expect(await screen.findByRole('heading', { name })).toBeInTheDocument();
     expect(within(screen.getByLabelText('Session continuity')).getByText('Can resume')).toBeInTheDocument();
-    expect(within(headerActions()).getByRole('button', { name: 'Resume conversation' })).toBeInTheDocument();
-    expect(within(sidebarSelectedActions()).getByRole('button', { name: 'Resume conversation' })).toBeInTheDocument();
-    expect(within(sidebarSelectedActions()).getByRole('button', { name: 'Archive' })).toBeInTheDocument();
+    const rowMenu = openSessionRowMenu(name);
+    expect(within(rowMenu).getByRole('menuitem', { name: 'Resume conversation' })).toBeInTheDocument();
+    expect(within(rowMenu).getByRole('menuitem', { name: 'Archive' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'End session' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Restart' })).not.toBeInTheDocument();
   });
@@ -1743,7 +1733,7 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByRole('heading', { name: 'Repo One' })).toBeInTheDocument();
-    fireEvent.click(within(sidebarSelectedActions()).getByRole('button', { name: 'Archive' }));
+    fireEvent.click(within(openSessionRowMenu('Repo One')).getByRole('menuitem', { name: 'Archive' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/archive', expect.objectContaining({ method: 'POST' })));
     await waitFor(() => expect(querySessionButton('Repo One')).toBeNull());
@@ -1798,7 +1788,7 @@ describe('App', () => {
     expect(within(sessionPanel).queryByText('Agent: Review branch')).not.toBeInTheDocument();
     expect(FakeWebSocket.instances.every((socket) => !socket.url.includes('/api/sessions/s3/events'))).toBe(true);
 
-    fireEvent.click(within(headerActions()).getByRole('button', { name: 'Unarchive' }));
+    fireEvent.click(within(openSessionRowMenu('Archived Repo')).getByRole('menuitem', { name: 'Unarchive' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s3/unarchive', expect.objectContaining({ method: 'POST' })));
     await waitFor(() => expect(screen.queryByRole('button', { name: /Archived Repo/ })).not.toBeInTheDocument());
@@ -1827,7 +1817,7 @@ describe('App', () => {
     expect(await screen.findByText('stopped session history')).toBeInTheDocument();
     expect(FakeWebSocket.instances).toHaveLength(0);
 
-    fireEvent.click(within(headerActions()).getByRole('button', { name: 'Resume conversation' }));
+    fireEvent.click(within(openSessionRowMenu('Stopped Repo')).getByRole('menuitem', { name: 'Resume conversation' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s2/resume', expect.objectContaining({ method: 'POST' })));
     await waitFor(() => expect(FakeWebSocket.instances.length).toBe(1));
@@ -1840,7 +1830,7 @@ describe('App', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Archived chats' }));
     expect(await screen.findByRole('heading', { name: 'Archived Repo' })).toBeInTheDocument();
 
-    fireEvent.click(within(sidebarSelectedActions()).getByRole('button', { name: 'Delete' }));
+    fireEvent.click(within(openSessionRowMenu('Archived Repo')).getByRole('menuitem', { name: 'Delete' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s3?permanent=true', expect.objectContaining({ method: 'DELETE' })));
     await waitFor(() => expect(screen.queryByRole('button', { name: /Archived Repo/ })).not.toBeInTheDocument());
@@ -1920,7 +1910,7 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByRole('heading', { name: 'Repo One' })).toBeInTheDocument();
-    fireEvent.click(within(sidebarSelectedActions()).getByRole('button', { name: 'Archive' }));
+    fireEvent.click(within(openSessionRowMenu('Repo One')).getByRole('menuitem', { name: 'Archive' }));
     fireEvent.click(sessionButton('Newest Repo'));
 
     await act(async () => {
@@ -1955,7 +1945,7 @@ describe('App', () => {
     expect(within(worktreeStatus).getByText('/repo/one/.claude/worktrees/abc123')).toBeInTheDocument();
     expect(within(worktreeStatus).getByText('/repo/one')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Copy delivery context' })).toBeInTheDocument();
-    fireEvent.click(within(sidebarSelectedActions()).getByRole('button', { name: 'Stop and remove worktree' }));
+    fireEvent.click(within(openSessionRowMenu('Worktree Repo')).getByRole('menuitem', { name: 'Stop and remove worktree' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s4/stop-and-remove-worktree', expect.objectContaining({ method: 'POST' })));
     await waitFor(() => expect(screen.queryByText('pin/abc123')).not.toBeInTheDocument());
@@ -1983,12 +1973,10 @@ describe('App', () => {
     expect(await within(previewPanel).findByText('Worktree diff')).toBeInTheDocument();
     expect(within(previewPanel).getByText(/diff --git a\/web\/src\/App\.tsx/)).toBeInTheDocument();
     expect(screen.getByText(/cleanup is blocked until you commit, stash, or clean/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Review dirty worktree first' })).toBeDisabled();
+    expect(within(openSessionRowMenu('Worktree Repo')).getByRole('menuitem', { name: 'Review dirty worktree first' })).toBeDisabled();
     const header = screen.getByRole('heading', { name: 'Worktree Repo' }).closest('header');
     expect(header).not.toBeNull();
-    fireEvent.click(within(header as HTMLElement).getByRole('button', { name: 'More session actions' }));
-    expect(within(header as HTMLElement).getByRole('button', { name: 'Review dirty worktree first' })).toBeDisabled();
-    expect(screen.getByText('Stop only')).toBeInTheDocument();
+    expect(within(openSessionRowMenu('External Worktree Repo')).getByRole('menuitem', { name: 'Stop only' })).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/sessions/s4/stop-and-remove-worktree')).toBe(false);
   });
 
@@ -2007,7 +1995,7 @@ describe('App', () => {
     fireEvent.click(await screen.findByText('External Worktree Repo'));
 
     expect(screen.queryByText('Stop and remove worktree')).not.toBeInTheDocument();
-    expect(screen.getByText('Stop only')).toBeInTheDocument();
+    expect(within(openSessionRowMenu('External Worktree Repo')).getByRole('menuitem', { name: 'Stop only' })).toBeInTheDocument();
   });
 
   it('opens the Activity drawer from the conversation header and defaults to activity', async () => {

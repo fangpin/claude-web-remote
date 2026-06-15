@@ -1,5 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
-import { getWorktreeDiff } from './api';
+import { useEffect, useState, type FormEvent, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import ConfigView from './ConfigView';
 import PermissionActionCard from './PermissionActionCard';
 import ConversationBlockList from './ConversationBlockList';
@@ -16,17 +15,6 @@ import type { ComposerContextAttachment, PendingPermissionRequest, PermissionCap
 type ApiError = {
   message: string;
   detail: string | null;
-};
-
-export type ConversationHeaderActionVariant = 'normal' | 'primary' | 'danger';
-
-export type ConversationHeaderAction = {
-  id: string;
-  label: string;
-  variant?: ConversationHeaderActionVariant;
-  disabled?: boolean;
-  title?: string;
-  onClick: () => void;
 };
 
 type Props = {
@@ -60,8 +48,6 @@ type Props = {
   isSending: boolean;
   isSessionListLoading: boolean;
   isStartSurfaceOpen: boolean;
-  headerPrimaryAction: ConversationHeaderAction | null;
-  headerMenuActions: ConversationHeaderAction[];
   isSidebarOpen: boolean;
   onToggleSidebar: () => void;
   onOpenActivity: () => void;
@@ -363,98 +349,6 @@ function SessionContextPopover({ session, status, listMode }: { session: Session
   );
 }
 
-function HeaderActionButton({ action }: { action: ConversationHeaderAction }) {
-  return (
-    <button
-      type="button"
-      className={action.variant === 'primary' ? 'primary-action' : action.variant === 'danger' ? 'danger' : undefined}
-      disabled={action.disabled}
-      title={action.title}
-      onClick={action.onClick}
-    >
-      {action.label}
-    </button>
-  );
-}
-
-function SessionMoreMenu({
-  session,
-  actions,
-  onRename,
-  onCopySessionId,
-  onOpenWorktreeDiff,
-  copyStatus
-}: {
-  session: SessionInfo;
-  actions: ConversationHeaderAction[];
-  onRename: () => void;
-  onCopySessionId: () => void;
-  onOpenWorktreeDiff: (() => void) | null;
-  copyStatus: string | null;
-}) {
-  const [isOpen, setIsOpen] = useState(false);
-
-  useEffect(() => {
-    setIsOpen(false);
-  }, [session.id]);
-
-  function selectAction(action: () => void) {
-    setIsOpen(false);
-    action();
-  }
-
-  return (
-    <div className="action-menu conversation-more-menu">
-      <button type="button" aria-label="More session actions" aria-expanded={isOpen} onClick={() => setIsOpen((open) => !open)}>•••</button>
-      {isOpen && (
-        <div>
-          <button type="button" onClick={() => selectAction(onRename)}>Rename</button>
-          <button type="button" onClick={() => selectAction(onCopySessionId)}>Copy session ID{copyStatus ? ` · ${copyStatus}` : ''}</button>
-          {onOpenWorktreeDiff && <button type="button" onClick={() => selectAction(onOpenWorktreeDiff)}>Open worktree diff</button>}
-          {actions.map((action) => (
-            <button
-              key={`${session.id}:${action.id}`}
-              type="button"
-              className={action.variant === 'primary' ? 'primary-action' : action.variant === 'danger' ? 'danger' : undefined}
-              disabled={action.disabled}
-              title={action.title}
-              onClick={() => selectAction(action.onClick)}
-            >
-              {action.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function HeaderWorktreeDiff({
-  sessionId,
-  diff,
-  error,
-  isLoading,
-  onClose
-}: {
-  sessionId: string;
-  diff: string | null;
-  error: string | null;
-  isLoading: boolean;
-  onClose: () => void;
-}) {
-  return (
-    <section className="header-worktree-diff" aria-label="Header worktree diff">
-      <div className="header-worktree-diff-heading">
-        <span>Worktree diff</span>
-        <button type="button" onClick={onClose}>Close</button>
-      </div>
-      {isLoading && <p>Loading diff for {sessionId}...</p>}
-      {error && <p className="worktree-warning">Unable to load diff: {error}</p>}
-      {diff && <pre>{diff}</pre>}
-    </section>
-  );
-}
-
 export default function ConversationWorkspace({
   activeBlocks,
   activeSession,
@@ -486,8 +380,6 @@ export default function ConversationWorkspace({
   isSending,
   isSessionListLoading,
   isStartSurfaceOpen,
-  headerPrimaryAction,
-  headerMenuActions,
   isSidebarOpen,
   onToggleSidebar,
   onOpenActivity,
@@ -523,12 +415,6 @@ export default function ConversationWorkspace({
 }: Props) {
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
-  const [copyStatus, setCopyStatus] = useState<string | null>(null);
-  const [headerDiffSessionId, setHeaderDiffSessionId] = useState<string | null>(null);
-  const [headerDiff, setHeaderDiff] = useState<string | null>(null);
-  const [headerDiffError, setHeaderDiffError] = useState<string | null>(null);
-  const [isHeaderDiffLoading, setIsHeaderDiffLoading] = useState(false);
-  const headerDiffRequestRef = useRef(0);
 
   function startRename(session: SessionInfo) {
     setRenamingSessionId(session.id);
@@ -544,42 +430,6 @@ export default function ConversationWorkspace({
   function cancelRename() {
     setRenamingSessionId(null);
     setRenameValue('');
-  }
-
-  async function copySessionId(sessionId: string) {
-    if (!navigator.clipboard?.writeText) return;
-    await navigator.clipboard.writeText(sessionId);
-    setCopyStatus('Copied');
-    window.setTimeout(() => setCopyStatus(null), 1400);
-  }
-
-  async function openHeaderWorktreeDiff(sessionId: string) {
-    const requestId = headerDiffRequestRef.current + 1;
-    headerDiffRequestRef.current = requestId;
-    setHeaderDiffSessionId(sessionId);
-    setHeaderDiff(null);
-    setHeaderDiffError(null);
-    setIsHeaderDiffLoading(true);
-    try {
-      const result = await getWorktreeDiff(sessionId);
-      if (headerDiffRequestRef.current !== requestId) return;
-      setHeaderDiff(result.diff || 'No unstaged diff.');
-    } catch (err: unknown) {
-      if (headerDiffRequestRef.current !== requestId) return;
-      setHeaderDiffError(err instanceof Error ? err.message : String(err));
-    } finally {
-      if (headerDiffRequestRef.current === requestId) {
-        setIsHeaderDiffLoading(false);
-      }
-    }
-  }
-
-  function closeHeaderWorktreeDiff() {
-    headerDiffRequestRef.current += 1;
-    setHeaderDiffSessionId(null);
-    setHeaderDiff(null);
-    setHeaderDiffError(null);
-    setIsHeaderDiffLoading(false);
   }
 
   if (view === 'config') {
@@ -627,16 +477,7 @@ export default function ConversationWorkspace({
               />
             </div>
             <div className="conversation-header-actions" aria-label="Conversation actions">
-              {headerPrimaryAction && <HeaderActionButton action={headerPrimaryAction} />}
               <button type="button" onClick={onOpenActivity}>Activity</button>
-              <SessionMoreMenu
-                session={activeSession}
-                actions={headerMenuActions}
-                onRename={() => startRename(activeSession)}
-                onCopySessionId={() => copySessionId(activeSession.id)}
-                onOpenWorktreeDiff={activeSession.worktree ? () => openHeaderWorktreeDiff(activeSession.id) : null}
-                copyStatus={copyStatus}
-              />
             </div>
             <button
               type="button"
@@ -648,15 +489,6 @@ export default function ConversationWorkspace({
               Activity
             </button>
           </header>
-          {headerDiffSessionId === activeSession.id && activeSession.worktree && (
-            <HeaderWorktreeDiff
-              sessionId={activeSession.id}
-              diff={headerDiff}
-              error={headerDiffError}
-              isLoading={isHeaderDiffLoading}
-              onClose={closeHeaderWorktreeDiff}
-            />
-          )}
           {listMode === 'archived' && (
             <p className="deleted-note">This session is archived and read-only. Unarchive it before resuming work or sending messages.</p>
           )}

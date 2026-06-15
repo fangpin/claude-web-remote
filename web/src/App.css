@@ -676,26 +676,6 @@ label {
   background: rgb(255 253 250 / 0.62);
 }
 
-.session-management-actions {
-  display: grid;
-  gap: 8px;
-  border-bottom: 1px solid var(--border);
-  background: linear-gradient(180deg, rgb(255 253 250 / 0.72), rgb(242 236 228 / 0.72));
-  padding: 11px 16px 12px;
-}
-
-.session-actions {
-  display: grid;
-  grid-template-columns: 1fr;
-  justify-content: stretch;
-  gap: 6px;
-}
-
-.session-actions button {
-  width: 100%;
-  justify-content: center;
-}
-
 button.danger,
 .composer-stop-button {
   border-color: transparent;
@@ -1052,10 +1032,14 @@ button.danger:hover,
   opacity: 1;
 }
 
-.session-pin-button {
+.session-action-menu {
   position: absolute;
   top: 8px;
   right: 7px;
+  z-index: 8;
+}
+
+.session-action-menu-button {
   display: grid;
   place-items: center;
   width: 26px;
@@ -1068,24 +1052,48 @@ button.danger:hover,
   opacity: 0;
 }
 
-.session-row:hover .session-pin-button,
-.session-row:focus-within .session-pin-button,
-.session-row.active .session-pin-button,
-.session-pin-button:focus-visible,
-.session-pin-button.pinned {
+.session-row:hover .session-action-menu-button,
+.session-row:focus-within .session-action-menu-button,
+.session-row.active .session-action-menu-button,
+.session-action-menu-button:focus-visible {
   opacity: 1;
 }
 
-.session-pin-button:hover,
-.session-pin-button.pinned {
+.session-action-menu-button:hover,
+.session-action-menu-button[aria-expanded='true'] {
   border-color: var(--border);
   color: var(--accent-strong);
   background: rgb(255 253 250 / 0.74);
 }
 
-.session-pin-button svg {
-  width: 15px;
-  height: 15px;
+.session-action-menu-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  display: grid;
+  gap: 3px;
+  min-width: 180px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 6px;
+  box-shadow: var(--shadow-popover);
+}
+
+.session-action-menu-popover button {
+  justify-content: flex-start;
+  width: 100%;
+  border-color: transparent;
+  background: transparent;
+  padding: 7px 9px;
+  text-align: left;
+}
+
+.session-action-menu-popover button:hover,
+.session-action-menu-popover button:focus-visible {
+  border-color: var(--border);
+  background: var(--surface-hover);
 }
 
 .status {
@@ -1358,18 +1366,11 @@ button.danger:hover,
   min-width: 0;
 }
 
-.conversation-header-actions > button,
-.conversation-more-menu > button {
+.conversation-header-actions > button {
   min-height: 30px;
   border-radius: 9px;
   padding: 5px 10px;
   font-size: 12px;
-}
-
-.conversation-more-menu > button {
-  min-width: 30px;
-  justify-content: center;
-  padding-inline: 8px;
 }
 
 .worktree-meta,
@@ -1608,44 +1609,6 @@ button.danger:hover,
   padding: 3px 8px;
   font-size: 11px;
   line-height: 1.25;
-}
-
-.header-worktree-diff {
-  display: grid;
-  gap: 8px;
-  border-bottom: 1px solid var(--border);
-  background: rgb(255 253 250 / 0.64);
-  padding: 8px 16px;
-}
-
-.header-worktree-diff-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  color: var(--accent-strong);
-  font-size: 12px;
-  font-weight: 720;
-}
-
-.header-worktree-diff p {
-  margin: 0;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.header-worktree-diff pre {
-  max-height: 320px;
-  overflow: auto;
-  margin: 0;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  color: var(--text);
-  background: var(--surface);
-  padding: 10px;
-  font-size: 12px;
-  line-height: 1.45;
-  white-space: pre-wrap;
 }
 
 .worktree-diff-viewer {
@@ -5138,7 +5101,6 @@ textarea {
 
   .attention-toast,
   .command-palette,
-  .session-management-actions,
   .session-empty,
   .empty-state,
   .connection-state,
@@ -5225,8 +5187,6 @@ textarea {
   .session-section-heading-actions > span,
   .session-group-empty,
   .session-move-select,
-  .session-pin-button:hover,
-  .session-pin-button.pinned,
   .session-continuity-summary span,
   .session-context-badge,
   .session-context-popover summary,

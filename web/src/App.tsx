@@ -2,15 +2,15 @@ import { FormEvent, KeyboardEvent, PointerEvent as ReactPointerEvent, useCallbac
 import AppShell, { type AppView } from './AppShell';
 import { allowPermission, denyPermission, listPendingPermissions } from './api';
 import { buildActivityTimeline, latestReviewActivity, reviewSurface, waitingCopy, type ActivityItem } from './activityTimeline';
-import ConversationWorkspace, { type ConversationHeaderAction } from './ConversationWorkspace';
+import ConversationWorkspace from './ConversationWorkspace';
 import InspectorPanel, { type InspectorTab } from './InspectorPanel';
 import { hasAppModifier, isEditableTarget, isPlainSlash } from './keyboardShortcuts';
 import { mergePendingPermissions, permissionsFromEvents } from './permissionEvents';
 import type { ConversationDisplayMode } from './presentationPolicy';
 import ProjectHome from './ProjectHome';
-import SessionSidebar from './SessionSidebar';
+import SessionSidebar, { type SessionRowAction } from './SessionSidebar';
 import { getContinueActionLabel } from './sessionContinuity';
-import type { PendingPermissionRequest, PermissionCapability, TaskInfo } from './types';
+import type { PendingPermissionRequest, PermissionCapability, SessionInfo, TaskInfo } from './types';
 import { useComposerState } from './useComposerState';
 import { useDiagnostics } from './useDiagnostics';
 import { useSessionEvents } from './useSessionEvents';
@@ -641,144 +641,74 @@ function focusFallbackAfterSidebarClose() {
     }
   }, [inspectorTab, isDeveloperMode]);
 
-  function renderRemoveWorktreeButton() {
+  function openWorktreePreview(session: SessionInfo) {
+    setView('sessions');
+    sessionState.selectSession(session.id);
+    setInspectorTab('preview');
+    setIsInspectorOpen(true);
+  }
+
+  function removeWorktreeActionForSession(session: SessionInfo): SessionRowAction | null {
+    if (!session.worktree?.createdByClaudeRemoteWeb) return null;
+    if (session.id !== sessionState.activeId) {
+      return {
+        id: 'remove-worktree-unavailable',
+        label: 'Stop and remove worktree',
+        disabled: true,
+        title: 'Select this chat to check clean worktree status before cleanup.',
+        onClick: () => undefined
+      };
+    }
     const status = sessionState.activeWorktreeStatus;
     const unavailable = sessionState.isWorktreeStatusLoading || sessionState.activeWorktreeStatusError || !status;
     if (status?.dirty) {
-      return <button disabled title="Stop only keeps this dirty worktree so you can review, commit, stash, or clean its changes.">Review dirty worktree first</button>;
-    }
-    return (
-      <button
-        disabled={Boolean(unavailable)}
-        title={unavailable ? 'Worktree cleanup is available after the clean status check completes.' : undefined}
-        onClick={() => {
-          if (confirm('Stop this session and remove the clean app-created worktree? The source repository will remain.')) {
-            void sessionState.onStop(true);
-          }
-        }}
-      >
-        Stop and remove worktree
-      </button>
-    );
-  }
-
-  function renderWorktreeStopActions() {
-    const activeSession = sessionState.activeSession;
-    return (
-      <>
-        <button onClick={() => sessionState.onStop(false)}>Stop only</button>
-        {activeSession?.worktree?.createdByClaudeRemoteWeb && renderRemoveWorktreeButton()}
-      </>
-    );
-  }
-
-  function renderActions() {
-    const activeSession = sessionState.activeSession;
-    if (!activeSession) return null;
-    if (sessionState.listMode === 'archived' || activeSession.deletedAt) {
-      return (
-        <div className="actions session-actions">
-          <button onClick={sessionState.onUnarchive}>Unarchive</button>
-          <button className="danger" onClick={sessionState.onDelete}>Delete</button>
-        </div>
-      );
-    }
-
-    if (activeSession.status === 'running') {
-      return (
-        <div className="actions session-actions">
-          {activeSession.worktree ? renderWorktreeStopActions() : <button onClick={() => sessionState.onStop(false)}>End session</button>}
-          <button onClick={sessionState.onRestart}>Restart</button>
-          <button className="danger" onClick={sessionState.onArchive}>Archive</button>
-        </div>
-      );
-    }
-
-    if (activeSession.status === 'starting') {
-      return (
-        <div className="actions session-actions">
-          {activeSession.worktree ? renderWorktreeStopActions() : <button onClick={() => sessionState.onStop(false)}>End session</button>}
-          <button className="danger" onClick={sessionState.onArchive}>Archive</button>
-        </div>
-      );
-    }
-
-    return (
-      <div className="actions session-actions">
-        <button className="primary-action" onClick={sessionState.onResume}>{getContinueActionLabel(activeSession)}</button>
-        <button className="danger" onClick={sessionState.onArchive}>Archive</button>
-      </div>
-    );
-  }
-
-
-  function buildHeaderActions(): { primary: ConversationHeaderAction | null; menu: ConversationHeaderAction[] } {
-    const activeSession = sessionState.activeSession;
-    if (!activeSession) return { primary: null, menu: [] };
-
-    const menu: ConversationHeaderAction[] = [
-      { id: 'view-activity', label: 'View activity', onClick: openActivityInspector },
-      { id: 'view-diagnostics', label: 'View diagnostics', onClick: openDiagnosticsInspector }
-    ];
-
-    if (sessionState.listMode === 'archived' || activeSession.deletedAt) {
       return {
-        primary: { id: 'unarchive', label: 'Unarchive', variant: 'primary', onClick: sessionState.onUnarchive },
-        menu: [
-          ...menu,
-          { id: 'delete', label: 'Delete', variant: 'danger', onClick: sessionState.onDelete }
-        ]
+        id: 'remove-worktree-dirty',
+        label: 'Review dirty worktree first',
+        disabled: true,
+        title: 'Stop only keeps this dirty worktree so you can review, commit, stash, or clean its changes.',
+        onClick: () => undefined
       };
     }
-
-    const worktreeCleanupAction = (() => {
-      if (!activeSession.worktree?.createdByClaudeRemoteWeb) return null;
-      const status = sessionState.activeWorktreeStatus;
-      const unavailable = sessionState.isWorktreeStatusLoading || sessionState.activeWorktreeStatusError || !status;
-      if (status?.dirty) {
-        return {
-          id: 'review-dirty-worktree',
-          label: 'Review dirty worktree first',
-          disabled: true,
-          title: 'Stop only keeps this dirty worktree so you can review, commit, stash, or clean its changes.',
-          onClick: () => undefined
-        } satisfies ConversationHeaderAction;
-      }
-      return {
-        id: 'stop-remove-worktree',
-        label: 'Stop and remove worktree',
-        disabled: Boolean(unavailable),
-        title: unavailable ? 'Worktree cleanup is available after the clean status check completes.' : undefined,
-        onClick: () => {
-          if (confirm('Stop this session and remove the clean app-created worktree? The source repository will remain.')) {
-            void sessionState.onStop(true);
-          }
-        }
-      } satisfies ConversationHeaderAction;
-    })();
-
-    if (activeSession.status === 'running' || activeSession.status === 'starting') {
-      return {
-        primary: { id: 'stop', label: 'Stop', onClick: () => sessionState.onStop(false) },
-        menu: [
-          ...menu,
-          ...(activeSession.status === 'running' ? [{ id: 'restart', label: 'Restart', onClick: sessionState.onRestart } satisfies ConversationHeaderAction] : []),
-          ...(worktreeCleanupAction ? [worktreeCleanupAction] : []),
-          { id: 'archive', label: 'Archive', variant: 'danger', onClick: sessionState.onArchive }
-        ]
-      };
-    }
-
     return {
-      primary: { id: 'resume', label: getContinueActionLabel(activeSession), variant: 'primary', onClick: sessionState.onResume },
-      menu: [
-        ...menu,
-        { id: 'archive', label: 'Archive', variant: 'danger', onClick: sessionState.onArchive }
-      ]
+      id: 'remove-worktree',
+      label: 'Stop and remove worktree',
+      disabled: Boolean(unavailable),
+      title: unavailable ? 'Worktree cleanup is available after the clean status check completes.' : undefined,
+      onClick: () => {
+        if (confirm('Stop this session and remove the clean app-created worktree? The source repository will remain.')) {
+          void sessionState.onStopSession(session.id, true);
+        }
+      }
     };
   }
 
-  const headerActions = buildHeaderActions();
+  function getSessionActions(session: SessionInfo): SessionRowAction[] {
+    if (session.deletedAt || sessionState.listMode === 'archived') {
+      return [
+        { id: 'unarchive', label: 'Unarchive', title: 'Restore this archived chat', onClick: () => void sessionState.onUnarchiveSession(session.id) },
+        { id: 'delete', label: 'Delete', variant: 'danger', title: 'Delete archived metadata and event log', onClick: () => void sessionState.onDeleteSession(session.id) }
+      ];
+    }
+
+    if (session.status === 'running' || session.status === 'starting' || session.runtimeStatus === 'running' || session.runtimeStatus === 'starting') {
+      return [
+        ...(session.worktree ? [{ id: 'open-worktree-diff', label: 'Open worktree diff', onClick: () => openWorktreePreview(session) } satisfies SessionRowAction] : []),
+        { id: 'stop', label: session.worktree ? 'Stop only' : 'End session', onClick: () => void sessionState.onStopSession(session.id, false) },
+        ...(session.worktree ? [removeWorktreeActionForSession(session)].filter((action): action is SessionRowAction => Boolean(action)) : []),
+        ...(session.status === 'running' || session.runtimeStatus === 'running'
+          ? [{ id: 'restart', label: 'Restart', title: 'Resume with the persisted Claude session id when available', onClick: () => void sessionState.onRestartSession(session.id) } satisfies SessionRowAction]
+          : []),
+        { id: 'archive', label: 'Archive', variant: 'danger', title: 'Stop if needed and archive this chat', onClick: () => void sessionState.onArchiveSession(session.id) }
+      ];
+    }
+
+    return [
+      { id: 'continue', label: getContinueActionLabel(session), variant: 'primary', title: 'Resume with the persisted Claude session id when available', onClick: () => void sessionState.onResumeSession(session.id) },
+      { id: 'archive', label: 'Archive', variant: 'danger', title: 'Archive this chat', onClick: () => void sessionState.onArchiveSession(session.id) }
+    ];
+  }
+
 
   return (
     <>
@@ -797,13 +727,14 @@ function focusFallbackAfterSidebarClose() {
           sessions={sessionState.sessions}
           sessionGroups={sessionState.sessionGroups}
           visibleSessions={sessionState.visibleSessions}
-          sessionActions={renderActions()}
+          getSessionActions={getSessionActions}
           onCreateGroup={sessionState.onCreateGroup}
           onDeleteGroup={sessionState.onDeleteGroup}
           onMoveSessionToGroup={sessionState.onMoveSessionToGroup}
           onNewChat={openNewChat}
           onOpenCommandPalette={openCommandPalette}
           onRenameGroup={sessionState.onRenameGroup}
+          onRenameSession={sessionState.onRename}
           onSelectSession={sessionState.selectSession}
           onSetListMode={sessionState.setListMode}
           onSetSessionSearch={sessionState.setSessionSearch}
@@ -845,8 +776,6 @@ function focusFallbackAfterSidebarClose() {
           isSending={composerState.isSending}
           isSessionListLoading={sessionState.isListLoading}
           isStartSurfaceOpen={sessionState.isStartSurfaceOpen}
-          headerPrimaryAction={headerActions.primary}
-          headerMenuActions={headerActions.menu}
           isSidebarOpen={isSidebarOpen}
           onToggleSidebar={toggleSidebar}
           onOpenActivity={openActivityInspector}

@@ -317,9 +317,17 @@ export function useSessions({
     }
   }
 
-  async function onStop(removeWorktree = false) {
-    if (!activeId) return;
-    const sessionId = activeId;
+  async function onRename(sessionId: string, name: string | null) {
+    setError(null);
+    try {
+      const updated = await updateSession(sessionId, { name });
+      setSessions((current) => current.map((session) => session.id === sessionId ? updated : session));
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function onStopSession(sessionId: string, removeWorktree = false) {
     setError(null);
     try {
       if (removeWorktree) {
@@ -330,8 +338,10 @@ export function useSessions({
       setSessions((current) => current.map((session) => {
         if (session.id !== sessionId) return session;
         if (removeWorktree && session.worktree) {
-          setActiveWorktreeStatus(null);
-          setActiveWorktreeStatusError(null);
+          if (session.id === activeId) {
+            setActiveWorktreeStatus(null);
+            setActiveWorktreeStatusError(null);
+          }
           return { ...session, cwd: session.worktree.sourceCwd, status: 'stopped', runtimeStatus: 'stopped', worktree: null };
         }
         return { ...session, status: 'stopped', runtimeStatus: 'stopped' };
@@ -341,18 +351,13 @@ export function useSessions({
     } finally {
       callbacksRef.current.onTasksChanged?.();
       callbacksRef.current.onSessionTasksChanged?.(sessionId);
-      if (!removeWorktree) void refreshActiveWorktreeStatus();
+      if (sessionId === activeId && !removeWorktree) void refreshActiveWorktreeStatus();
     }
   }
 
-  async function onRename(sessionId: string, name: string | null) {
-    setError(null);
-    try {
-      const updated = await updateSession(sessionId, { name });
-      setSessions((current) => current.map((session) => session.id === sessionId ? updated : session));
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
+  async function onStop(removeWorktree = false) {
+    if (!activeId) return;
+    await onStopSession(activeId, removeWorktree);
   }
 
   async function onCreateGroup(name: string) {
@@ -400,9 +405,7 @@ export function useSessions({
     }
   }
 
-  async function onRestart() {
-    if (!activeId) return;
-    const sessionId = activeId;
+  async function onRestartSession(sessionId: string) {
     setError(null);
     try {
       const restarted = await restartSession(sessionId);
@@ -415,9 +418,7 @@ export function useSessions({
     }
   }
 
-  async function onResume() {
-    if (!activeId) return;
-    const sessionId = activeId;
+  async function onResumeSession(sessionId: string) {
     setError(null);
     try {
       const resumed = await resumeSession(sessionId);
@@ -430,42 +431,36 @@ export function useSessions({
     }
   }
 
-  async function onArchive() {
-    if (!activeId) return;
-    const archivedId = activeId;
+  async function onArchiveSession(sessionId: string) {
     if (!confirm('Archive this session? It will be hidden from active sessions while keeping local data.')) return;
     setError(null);
     try {
-      await archiveSession(archivedId);
-      removeSessionFromCurrentList(archivedId);
+      await archiveSession(sessionId);
+      removeSessionFromCurrentList(sessionId);
       callbacksRef.current.onTasksChanged?.();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
     }
   }
 
-  async function onUnarchive() {
-    if (!activeId) return;
-    const unarchivedId = activeId;
+  async function onUnarchiveSession(sessionId: string) {
     setError(null);
     try {
-      await unarchiveSession(unarchivedId);
-      removeSessionFromCurrentList(unarchivedId);
+      await unarchiveSession(sessionId);
+      removeSessionFromCurrentList(sessionId);
       callbacksRef.current.onTasksChanged?.();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
     }
   }
 
-  async function onDelete() {
-    if (!activeId) return;
-    const removedId = activeId;
+  async function onDeleteSession(sessionId: string) {
     if (!confirm('Delete this archived session and its local event logs? This cannot be undone.')) return;
     setError(null);
     try {
-      await deleteSession(removedId);
-      removeSessionFromCurrentList(removedId);
-      callbacksRef.current.onDeleteSessionEvents?.(removedId);
+      await deleteSession(sessionId);
+      removeSessionFromCurrentList(sessionId);
+      callbacksRef.current.onDeleteSessionEvents?.(sessionId);
       callbacksRef.current.onTasksChanged?.();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
@@ -493,19 +488,20 @@ export function useSessions({
     sessionSearch,
     useWorktree,
     visibleSessions,
-    onArchive,
+    onArchiveSession,
     onCreateSession,
     onStartSession,
     onCreateGroup,
-    onDelete,
+    onDeleteSession,
     onDeleteGroup,
     onMoveSessionToGroup,
     onRename,
     onRenameGroup,
-    onRestart,
-    onResume,
+    onRestartSession,
+    onResumeSession,
     onStop,
-    onUnarchive,
+    onStopSession,
+    onUnarchiveSession,
     openStartSurface,
     refreshSessions,
     selectSession,

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type DragEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type DragEvent } from 'react';
 import { getRuntimeStatus } from './sessionContinuity';
 import type { SessionGroup, SessionInfo, SessionListMode, SessionRuntimeStatus, SessionStatus } from './types';
 
@@ -17,6 +17,17 @@ type SessionSection = {
   isCustomGroup?: boolean;
 };
 
+export type SessionRowAction = {
+  id: string;
+  label: string;
+  title?: string;
+  disabled?: boolean;
+  variant?: 'primary' | 'danger';
+  onClick: () => void;
+};
+
+export type SessionRowActionProvider = (session: SessionInfo) => SessionRowAction[];
+
 type Props = {
   activeId: string | null;
   isListLoading: boolean;
@@ -26,13 +37,14 @@ type Props = {
   sessions: SessionInfo[];
   sessionGroups: SessionGroup[];
   visibleSessions: SessionInfo[];
-  sessionActions: ReactNode;
+  getSessionActions: SessionRowActionProvider;
   onCreateGroup: (name: string) => void;
   onDeleteGroup: (groupId: string) => void;
   onMoveSessionToGroup: (sessionId: string, groupId: string | null) => void;
   onNewChat: () => void;
   onOpenCommandPalette: () => void;
   onRenameGroup: (groupId: string, name: string) => void;
+  onRenameSession: (sessionId: string, name: string | null) => void;
   onSelectSession: (sessionId: string) => void;
   onSetListMode: (mode: SessionListMode) => void;
   onSetSessionSearch: (search: string) => void;
@@ -52,13 +64,6 @@ function pathBasename(path: string): string {
   if (!normalized) return path || 'Repository';
   const parts = normalized.split('/').filter(Boolean);
   return parts.at(-1) ?? normalized;
-}
-
-function parentPath(path: string): string {
-  const normalized = path.replace(/\/+$/, '');
-  const parts = normalized.split('/').filter(Boolean);
-  if (parts.length <= 1) return normalized || path;
-  return `/${parts.slice(0, -1).join('/')}`;
 }
 
 function countLabel(count: number): string {
@@ -200,11 +205,14 @@ function branchLabel(session: SessionInfo): string | null {
 
 type SessionListItemProps = {
   activeId: string | null;
+  getSessionActions: SessionRowActionProvider;
   listMode: SessionListMode;
   pinnedSessionIds: Set<string>;
   session: SessionInfo;
   sessionGroups: SessionGroup[];
+  onCopySessionId: (sessionId: string) => void;
   onMoveSessionToGroup: (sessionId: string, groupId: string | null) => void;
+  onRenameSession: (session: SessionInfo) => void;
   onSelectSession: (sessionId: string) => void;
   onSessionDragStart: (event: DragEvent<HTMLDivElement>, sessionId: string) => void;
   onTogglePinned: (sessionId: string) => void;
@@ -231,26 +239,76 @@ function compactSubtitleForSession(session: SessionInfo, listMode: SessionListMo
   return runtimeLabel ? `${projectName} · ${runtimeLabel} · ${timeLabel}` : `${projectName} · ${timeLabel}`;
 }
 
-function PinIcon({ filled }: { filled: boolean }) {
+function SessionActionMenu({
+  session,
+  actions,
+  isPinned,
+  onCopySessionId,
+  onRenameSession,
+  onTogglePinned
+}: {
+  session: SessionInfo;
+  actions: SessionRowAction[];
+  isPinned: boolean;
+  onCopySessionId: (sessionId: string) => void;
+  onRenameSession: (session: SessionInfo) => void;
+  onTogglePinned: (sessionId: string) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const sessionTitle = session.name || pathBasename(projectPathForSession(session));
+
+  function choose(action: () => void) {
+    setIsOpen(false);
+    action();
+  }
+
   return (
-    <svg aria-hidden="true" viewBox="0 0 16 16" focusable="false">
-      <path
-        d="M5.6 1.5h4.8l-.7 4.1 2.3 2.1v1H8.7l-.5 5.8h-.4l-.5-5.8H4v-1l2.3-2.1-.7-4.1Z"
-        fill={filled ? 'currentColor' : 'none'}
-        stroke="currentColor"
-        strokeLinejoin="round"
-      />
-    </svg>
+    <div className="session-action-menu">
+      <button
+        type="button"
+        className="session-action-menu-button"
+        aria-label="More session actions"
+        aria-expanded={isOpen}
+        aria-haspopup="menu"
+        title={`More actions for ${sessionTitle}`}
+        onClick={() => setIsOpen((open) => !open)}
+      >
+        ⋯
+      </button>
+      {isOpen && (
+        <div className="session-action-menu-popover" role="menu" aria-label="Session actions">
+          <button type="button" role="menuitem" onClick={() => choose(() => onRenameSession(session))}>Rename</button>
+          <button type="button" role="menuitem" onClick={() => choose(() => onCopySessionId(session.id))}>Copy session ID</button>
+          <button type="button" role="menuitem" onClick={() => choose(() => onTogglePinned(session.id))}>{isPinned ? 'Unpin' : 'Pin'}</button>
+          {actions.map((action) => (
+            <button
+              key={`${session.id}:${action.id}`}
+              type="button"
+              role="menuitem"
+              className={action.variant === 'primary' ? 'primary-action' : action.variant === 'danger' ? 'danger' : undefined}
+              disabled={action.disabled}
+              title={action.title}
+              onClick={() => choose(action.onClick)}
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
 function SessionListItem({
   activeId,
+  getSessionActions,
   listMode,
   pinnedSessionIds,
   session,
   sessionGroups,
+  onCopySessionId,
   onMoveSessionToGroup,
+  onRenameSession,
   onSelectSession,
   onSessionDragStart,
   onTogglePinned
@@ -263,6 +321,7 @@ function SessionListItem({
   const branch = branchLabel(session);
   const isActive = session.id === activeId;
   const worktreeLabel = session.worktree ? 'worktree' : null;
+  const rowActions = getSessionActions(session);
 
   return (
     <div
@@ -305,16 +364,14 @@ function SessionListItem({
         <option value="">Ungrouped</option>
         {sessionGroups.map((group) => <option value={group.id} key={group.id}>{group.name}</option>)}
       </select>
-      <button
-        type="button"
-        className={isPinned ? 'session-pin-button pinned' : 'session-pin-button'}
-        aria-label={`${isPinned ? 'Unpin' : 'Pin'} ${sessionTitle}`}
-        aria-pressed={isPinned}
-        title={isPinned ? 'Unpin conversation' : 'Pin conversation'}
-        onClick={() => onTogglePinned(session.id)}
-      >
-        <PinIcon filled={isPinned} />
-      </button>
+      <SessionActionMenu
+        session={session}
+        actions={rowActions}
+        isPinned={isPinned}
+        onCopySessionId={onCopySessionId}
+        onRenameSession={onRenameSession}
+        onTogglePinned={onTogglePinned}
+      />
     </div>
   );
 }
@@ -328,13 +385,14 @@ export default function SessionSidebar({
   sessions,
   sessionGroups,
   visibleSessions,
-  sessionActions,
+  getSessionActions,
   onCreateGroup,
   onDeleteGroup,
   onMoveSessionToGroup,
   onNewChat,
   onOpenCommandPalette,
   onRenameGroup,
+  onRenameSession,
   onSelectSession,
   onSetListMode,
   onSetSessionSearch,
@@ -396,6 +454,17 @@ export default function SessionSidebar({
     onMoveSessionToGroup(sessionId, groupId);
   }
 
+  async function copySessionId(sessionId: string) {
+    if (!navigator.clipboard?.writeText) return;
+    await navigator.clipboard.writeText(sessionId);
+  }
+
+  function renameSessionFromRow(session: SessionInfo) {
+    const name = window.prompt('Rename chat', session.name || pathBasename(projectPathForSession(session)));
+    if (name === null) return;
+    onRenameSession(session.id, name.trim() || null);
+  }
+
   return (
     <aside className="session-sidebar" aria-label="Session navigation">
       <div className="sidebar-header">
@@ -412,13 +481,6 @@ export default function SessionSidebar({
           New chat
         </button>
       </div>
-
-      {sessionActions && (
-        <section className="session-management-actions" aria-label="Selected session actions">
-          <span className="state-kicker">Selected chat</span>
-          {sessionActions}
-        </section>
-      )}
 
       <section className="sessions" aria-label={listMode === 'archived' ? 'Archived sessions' : 'Active sessions'}>
         <div className="session-list-toolbar">
@@ -516,22 +578,23 @@ export default function SessionSidebar({
                   onDrop={(event) => section.isCustomGroup && section.groupId ? onGroupDrop(event, section.groupId) : onGroupDrop(event, null)}
                 >
                   {section.isCustomGroup && section.sessions.length === 0 && <p className="session-group-empty">Drop a chat here or use Move.</p>}
-                  {section.sessions.map((session) => {
-                    return (
-                      <SessionListItem
-                        activeId={activeId}
-                        key={session.id}
-                        listMode={listMode}
-                        pinnedSessionIds={pinnedSessionIds}
-                        session={session}
-                        sessionGroups={sessionGroups}
-                        onMoveSessionToGroup={onMoveSessionToGroup}
-                        onSelectSession={onSelectSession}
-                        onSessionDragStart={onSessionDragStart}
-                        onTogglePinned={onTogglePinned}
-                      />
-                    );
-                  })}
+                  {section.sessions.map((session) => (
+                    <SessionListItem
+                      activeId={activeId}
+                      getSessionActions={getSessionActions}
+                      key={session.id}
+                      listMode={listMode}
+                      pinnedSessionIds={pinnedSessionIds}
+                      session={session}
+                      sessionGroups={sessionGroups}
+                      onCopySessionId={copySessionId}
+                      onMoveSessionToGroup={onMoveSessionToGroup}
+                      onRenameSession={renameSessionFromRow}
+                      onSelectSession={onSelectSession}
+                      onSessionDragStart={onSessionDragStart}
+                      onTogglePinned={onTogglePinned}
+                    />
+                  ))}
                 </div>
               </div>
             ))}
