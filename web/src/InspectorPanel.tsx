@@ -7,6 +7,8 @@ import type {
   DiagnosticStatus,
   DiagnosticsResponse,
   PathDiagnostics,
+  PendingPermissionRequest,
+  PermissionCapability,
   SessionDiagnosticsResponse,
   SessionInfo,
   TaskGroups,
@@ -32,9 +34,13 @@ type Props = {
   tasks: TaskGroups;
   waitingMessage: string | null;
   reviewSurface: ReviewSurface | null;
+  pendingPermissions: PendingPermissionRequest[];
+  permissionCapability: PermissionCapability | null;
   onInspectorTabKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
   onRefreshDiagnostics: () => void;
   onSelectActivity: (activity: ActivityItem) => void;
+  onAllowPermission: (permission: PendingPermissionRequest, updatedInput?: unknown) => void;
+  onDenyPermission: (permission: PendingPermissionRequest, message: string) => void;
   onSelectTask: (task: TaskInfo) => void;
   onResizeInspectorStart: (event: PointerEvent<HTMLButtonElement>) => void;
   onSetInspectorOpen: (isOpen: boolean) => void;
@@ -59,9 +65,13 @@ export default function InspectorPanel({
   tasks,
   waitingMessage,
   reviewSurface,
+  pendingPermissions,
+  permissionCapability,
   onInspectorTabKeyDown,
   onRefreshDiagnostics,
   onSelectActivity,
+  onAllowPermission,
+  onDenyPermission,
   onSelectTask,
   onResizeInspectorStart,
   onSetInspectorTab,
@@ -121,6 +131,10 @@ export default function InspectorPanel({
               activities={activities}
               activeSession={activeSession}
               waitingMessage={waitingMessage}
+              pendingPermissions={pendingPermissions}
+              permissionCapability={permissionCapability}
+              onAllowPermission={onAllowPermission}
+              onDenyPermission={onDenyPermission}
               onSelectActivity={onSelectActivity}
             />
           </div>

@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import ActivityPanel from './ActivityPanel';
 import type { ActivityItem } from './activityTimeline';
-import type { SessionInfo } from './types';
+import type { PendingPermissionRequest, SessionInfo } from './types';
 
 const session: SessionInfo = {
   id: 's1',
@@ -37,21 +37,44 @@ function activity(overrides: Partial<ActivityItem>): ActivityItem {
   };
 }
 
+const pendingPermission: PendingPermissionRequest = {
+  requestId: 'req-1',
+  sessionId: 's1',
+  toolName: 'Bash',
+  toolInput: { command: 'npm test' },
+  summary: 'Run: npm test',
+  status: 'pending',
+  editable: 'bashCommand',
+  createdAt: '2026-06-13T00:00:00Z'
+};
+
+function renderActivityPanel(props: Partial<Parameters<typeof ActivityPanel>[0]> = {}) {
+  return render(
+    <ActivityPanel
+      activeSession={session}
+      waitingMessage={null}
+      activities={[]}
+      pendingPermissions={[]}
+      permissionCapability={null}
+      onAllowPermission={vi.fn()}
+      onDenyPermission={vi.fn()}
+      onSelectActivity={vi.fn()}
+      {...props}
+    />
+  );
+}
+
 describe('ActivityPanel', () => {
   beforeEach(() => cleanup());
 
   it('renders status counts and recent activity cards', () => {
-    render(
-      <ActivityPanel
-        activeSession={session}
-        waitingMessage={null}
-        activities={[
-          activity({ id: 'activity-running', status: 'running', name: 'Read', summary: '/repo/a.ts', resultSummary: undefined }),
-          activity({ id: 'activity-failed', status: 'failed', name: 'Bash', resultSummary: 'exit code 1', transcriptHidden: true })
-        ]}
-        onSelectActivity={() => undefined}
-      />
-    );
+    renderActivityPanel({
+      activities: [
+        activity({ id: 'activity-running', status: 'running', name: 'Read', summary: '/repo/a.ts', resultSummary: undefined }),
+        activity({ id: 'activity-failed', status: 'failed', name: 'Bash', resultSummary: 'exit code 1', transcriptHidden: true })
+      ],
+      onSelectActivity: () => undefined
+    });
 
     expect(screen.getByRole('heading', { name: 'Activity' })).toBeInTheDocument();
     expect(screen.getByText('1 running · 0 waiting · 1 failed · 0 done')).toBeInTheDocument();
@@ -70,14 +93,11 @@ describe('ActivityPanel', () => {
       resultSummary: undefined
     });
 
-    render(
-      <ActivityPanel
-        activeSession={session}
-        waitingMessage="Claude appears to be waiting on a permission or review-style event. This build can show the payload, but approval controls are not wired yet."
-        activities={[permissionActivity]}
-        onSelectActivity={onSelectActivity}
-      />
-    );
+    renderActivityPanel({
+      waitingMessage: 'Claude appears to be waiting on a permission or review-style event. This build can show the payload, but approval controls are not wired yet.',
+      activities: [permissionActivity],
+      onSelectActivity
+    });
 
     const waitingSurface = screen.getByLabelText('Waiting status');
     expect(within(waitingSurface).getByText(/approval controls are not wired yet/)).toBeInTheDocument();
@@ -85,5 +105,19 @@ describe('ActivityPanel', () => {
     expect(screen.queryByRole('button', { name: /^deny$/i })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Review payload' }));
     expect(onSelectActivity).toHaveBeenCalledWith(permissionActivity);
+  });
+
+  it('renders compact pending permission controls', () => {
+    const onAllowPermission = vi.fn();
+    renderActivityPanel({
+      activities: [],
+      pendingPermissions: [pendingPermission],
+      permissionCapability: { status: 'available' },
+      onAllowPermission
+    });
+
+    expect(screen.getByLabelText('Pending permissions')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
+    expect(onAllowPermission).toHaveBeenCalledWith(pendingPermission);
   });
 });
