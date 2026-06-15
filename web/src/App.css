@@ -2102,6 +2102,26 @@ button.danger:hover {
     display: grid;
     gap: 3px;
   }
+
+  .conversation-header {
+    gap: 8px;
+    padding-inline: 10px;
+  }
+
+  .conversation-title-group {
+    align-items: start;
+  }
+
+  .session-context-popover summary {
+    max-width: 46vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .conversation-header-actions > button:not(.primary-action) {
+    padding-inline: 8px;
+  }
 }
 
 .event-limit-note {
