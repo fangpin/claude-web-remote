@@ -253,6 +253,16 @@ PATCH /api/sessions/<session-id>
 
 Send `null` or an empty string as `name` to clear the custom name and fall back to the workspace-derived title. Send `"groupId": null` to move a session back to the ungrouped project sections.
 
+Permission controls are capability-gated and only appear when backed by the daemon's real Claude Code hook bridge:
+
+```text
+GET /api/sessions/<session-id>/permissions/pending
+POST /api/sessions/<session-id>/permissions/<request-id>/allow
+POST /api/sessions/<session-id>/permissions/<request-id>/deny
+```
+
+If the installed Claude Code version or launcher cannot support the hook bridge, the Web UI still shows waiting/review context but does not render fake approval buttons.
+
 Session transcripts can be read without attaching to a running Claude process:
 
 ```text
@@ -315,5 +325,5 @@ Expected current coverage:
 - Keep `bind` set to `127.0.0.1` unless there is a separate trusted reverse proxy/auth layer.
 - Prefer SSH local port forwarding for access.
 - `launcher` is argv-based and is not executed through a shell.
-- The first version does not include multi-user authentication or interactive allow/deny permission prompts.
-- The current raw Claude Code CLI `stream-json` control path does not expose documented browser-side stop-generating or permission approve/deny frames. The Web UI may highlight risky or permission-like actions, but approval/denial still has to happen in the terminal until the daemon adopts a real permission decision control API.
+- The first version does not include multi-user authentication.
+- The current raw Claude Code CLI `stream-json` control path does not expose documented browser-side stop-generating or permission approve/deny frames. Permission controls must use the daemon's hook-backed permission bridge and stay hidden when that capability is unavailable.
