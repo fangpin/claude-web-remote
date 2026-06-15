@@ -1246,7 +1246,8 @@ describe('App', () => {
 
     expect(screen.queryByRole('button', { name: 'Stop session' })).not.toBeInTheDocument();
     const sidebar = await screen.findByRole('complementary', { name: 'Session navigation' });
-    fireEvent.click(within(sidebar).getByRole('button', { name: 'End session' }));
+    const selectedActions = await within(sidebar).findByLabelText('Selected session actions');
+    fireEvent.click(within(selectedActions).getByRole('button', { name: 'End session' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/stop', expect.objectContaining({ method: 'POST' })));
   });
