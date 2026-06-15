@@ -170,7 +170,7 @@ describe('ConversationBlockList', () => {
     expect(within(articles[1]).getByText('Session resumed')).toHaveProperty('tagName', 'P');
   });
 
-  it('renders tool activity with compact input and result sections', () => {
+  it('renders tool activity with compact input and result sections in debug mode', () => {
     const blocks: ConversationBlock[] = [
       {
         id: 'tool-1',
@@ -187,7 +187,7 @@ describe('ConversationBlockList', () => {
       }
     ];
 
-    renderConversation(blocks);
+    renderConversation(blocks, 'debug');
 
     const article = screen.getByRole('article');
     expect(article).toHaveClass('conversation-block', 'tool-block', 'completed');
@@ -197,7 +197,7 @@ describe('ConversationBlockList', () => {
     expect(within(article).getByText('$ git status')).toBeInTheDocument();
     expect(within(article).getByText('Result shown (14 chars)')).toBeInTheDocument();
     expect(within(article).getByText('On branch main')).toBeInTheDocument();
-    expect(within(article).queryByText('Raw events')).not.toBeInTheDocument();
+    expect(within(article).getByText('Raw events')).toBeInTheDocument();
   });
 
   it('hides hidden tool result output and raw payload from the main card', () => {
@@ -217,7 +217,7 @@ describe('ConversationBlockList', () => {
       }
     ];
 
-    renderConversation(blocks);
+    renderConversation(blocks, 'debug');
 
     const article = screen.getByRole('article');
     expect(within(article).getByText('Read')).toBeInTheDocument();
@@ -225,7 +225,7 @@ describe('ConversationBlockList', () => {
     expect(within(article).getByText('Read output hidden (20 chars)')).toBeInTheDocument();
     expect(within(article).queryByText('Result')).not.toBeInTheDocument();
     expect(within(article).queryByText('secret file contents')).not.toBeInTheDocument();
-    expect(within(article).queryByText('Raw events')).not.toBeInTheDocument();
+    expect(within(article).getByText('Raw events')).toBeInTheDocument();
   });
 
   it('collapses Bash tool result output by default', () => {
@@ -245,11 +245,11 @@ describe('ConversationBlockList', () => {
       }
     ];
 
-    renderConversation(blocks);
+    renderConversation(blocks, 'debug');
 
     const article = screen.getByRole('article');
     expect(within(article).getAllByText('Result collapsed (11 chars)')).toHaveLength(2);
-    expect(within(article).queryByText('Raw events')).not.toBeInTheDocument();
+    expect(within(article).getByText('Raw events')).toBeInTheDocument();
     const details = within(article).getByText('long stdout').closest('details');
     expect(details).not.toBeNull();
     expect(details).not.toHaveAttribute('open');
@@ -273,13 +273,119 @@ describe('ConversationBlockList', () => {
       }
     ];
 
-    renderConversation(blocks);
+    renderConversation(blocks, 'debug');
 
     const article = screen.getByRole('article');
     expect(article).toHaveClass('tool-block', 'failed', 'result-text');
     expect(within(article).getByText('Failure').closest('section')).toHaveClass('tool-result-detail');
     expect(within(article).getByText('Command failed with exit code 1').closest('pre')).toHaveClass('tool-result-pre', 'text');
     expect(within(article).getByRole('button', { name: 'Copy code' })).toHaveClass('copy-button');
+  });
+
+  it('renders completed tools in chat mode as compact closed summaries', () => {
+    const blocks: ConversationBlock[] = [
+      {
+        id: 'tool-summary-complete',
+        type: 'tool',
+        name: 'Bash',
+        status: 'completed',
+        inputSummary: '$ npm test',
+        resultSummary: 'All tests passed',
+        resultKind: 'text',
+        resultDisplay: 'visible',
+        resultLabel: 'Result shown (16 chars)',
+        eventIds: [30, 31],
+        rawEvents: [rawEvent(30, { name: 'Bash' }), rawEvent(31, { content: 'All tests passed' })]
+      }
+    ];
+
+    renderConversation(blocks, 'chat');
+
+    const details = screen.getByText('▸ Ran npm test').closest('details');
+    expect(details).toHaveClass('tool-summary-details');
+    expect(details).not.toHaveAttribute('open');
+    expect(screen.getByText('▸ Ran npm test')).toHaveClass('tool-summary-chip');
+    expect(screen.queryByText('Raw events')).not.toBeInTheDocument();
+  });
+
+  it('renders failed tools in chat mode as expanded failure summaries', () => {
+    const blocks: ConversationBlock[] = [
+      {
+        id: 'tool-summary-failed',
+        type: 'tool',
+        name: 'Bash',
+        status: 'failed',
+        inputSummary: '$ npm test',
+        resultSummary: 'stderr: test suite failed',
+        resultKind: 'text',
+        resultDisplay: 'visible',
+        resultLabel: 'Failed result shown (25 chars)',
+        eventIds: [32, 33],
+        rawEvents: [rawEvent(32, { name: 'Bash' }), rawEvent(33, { content: 'stderr: test suite failed' })]
+      }
+    ];
+
+    renderConversation(blocks, 'chat');
+
+    const details = screen.getByText('▾ Failed npm test').closest('details');
+    expect(details).toHaveClass('tool-summary-details');
+    expect(details).toHaveAttribute('open');
+    expect(screen.getByText('stderr: test suite failed')).toBeInTheDocument();
+    expect(screen.queryByText('Raw events')).not.toBeInTheDocument();
+  });
+
+  it('shows raw events for message, tool, task, error, and raw blocks in debug mode', () => {
+    const blocks: ConversationBlock[] = [
+      {
+        id: 'message-debug-raw',
+        type: 'message',
+        role: 'assistant',
+        text: 'hello',
+        eventIds: [40],
+        rawEvents: [rawEvent(40, { messageNested: { ok: true } })]
+      },
+      {
+        id: 'tool-debug-raw',
+        type: 'tool',
+        name: 'Read',
+        status: 'running',
+        inputSummary: 'file_path: /tmp/example.txt',
+        resultSummary: '',
+        resultKind: 'text',
+        resultDisplay: 'visible',
+        resultLabel: 'Waiting for result',
+        eventIds: [41],
+        rawEvents: [rawEvent(41, { toolNested: { path: '/tmp/example.txt' } })]
+      },
+      {
+        id: 'task-debug-raw',
+        type: 'task',
+        title: 'Run tests',
+        source: 'Bash',
+        status: 'completed',
+        summary: 'Tests passed',
+        eventIds: [42],
+        rawEvents: [rawEvent(42, { taskNested: { exitCode: 0 } })]
+      },
+      {
+        id: 'error-debug-raw',
+        type: 'error',
+        message: 'Boom',
+        eventIds: [43],
+        rawEvents: [rawEvent(43, { errorNested: { message: 'Boom' } })]
+      },
+      {
+        id: 'raw-debug-raw',
+        type: 'raw',
+        label: 'unknown_event',
+        eventIds: [44],
+        rawEvents: [rawEvent(44, { rawNested: { preserved: true } })]
+      }
+    ];
+
+    renderConversation(blocks, 'debug');
+
+    expect(screen.getAllByText('Raw events')).toHaveLength(5);
   });
 
   it('renders diff, code, and path tool results with semantic containers', () => {
@@ -327,7 +433,7 @@ describe('ConversationBlockList', () => {
       }
     ];
 
-    renderConversation(blocks);
+    renderConversation(blocks, 'debug');
 
     const articles = screen.getAllByRole('article');
     expect(within(articles[0]).getByText('Diff')).toBeInTheDocument();
@@ -392,11 +498,11 @@ describe('ConversationBlockList', () => {
       }
     ];
 
-    renderConversation(blocks);
+    renderConversation(blocks, 'debug');
 
     const articles = screen.getAllByRole('article');
     articles.forEach((article) => {
-      expect(within(article).queryByText('Raw events')).not.toBeInTheDocument();
+      expect(within(article).getByText('Raw events')).toBeInTheDocument();
     });
 
     fireEvent.click(within(articles[0]).getByRole('button', { name: 'Copy code' }));
@@ -466,7 +572,7 @@ describe('ConversationBlockList', () => {
       }
     ];
 
-    renderConversation(blocks);
+    renderConversation(blocks, 'debug');
 
     const article = screen.getByRole('article');
     expect(article).toHaveClass('conversation-block', 'task-block', 'running');
@@ -583,7 +689,7 @@ describe('ConversationBlockList', () => {
     expect(within(articles[1]).getByText('unknown_event').closest('header')).toHaveClass('block-header');
   });
 
-  it('keeps technical raw details only on error and raw fallback blocks', () => {
+  it('keeps technical raw details out of chat mode for all block types', () => {
     const blocks: ConversationBlock[] = [
       {
         id: 'message-raw',
@@ -632,23 +738,9 @@ describe('ConversationBlockList', () => {
       }
     ];
 
-    renderConversation(blocks);
+    const { container } = renderConversation(blocks, 'chat');
 
-    const articles = screen.getAllByRole('article');
-    expect(within(articles[0]).queryByText('Raw events')).not.toBeInTheDocument();
-    expect(within(articles[1]).queryByText('Raw events')).not.toBeInTheDocument();
-    expect(within(articles[2]).queryByText('Raw events')).not.toBeInTheDocument();
-
-    const errorDetails = within(articles[3]).getByText('Raw events').closest('details');
-    expect(errorDetails).toHaveClass('raw-event-details');
-    expect(errorDetails).not.toHaveAttribute('open');
-    expect(errorDetails).toHaveTextContent('"errorNested": {');
-    expect(errorDetails).toHaveTextContent('"message": "Boom"');
-
-    const rawDetails = within(articles[4]).getByText('Raw events').closest('details');
-    expect(rawDetails).toHaveClass('raw-event-details');
-    expect(rawDetails).not.toHaveAttribute('open');
-    expect(rawDetails).toHaveTextContent('"rawNested": {');
-    expect(rawDetails).toHaveTextContent('"preserved": true');
+    expect(container.querySelectorAll('.raw-event-details')).toHaveLength(0);
+    expect(screen.queryByText('Raw events')).not.toBeInTheDocument();
   });
 });
