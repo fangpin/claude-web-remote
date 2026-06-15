@@ -331,6 +331,35 @@ beforeEach(() => {
         limitBytes: 200000
       });
     }
+    if (url === '/api/session-groups' && !init) {
+      return jsonResponse({ groups: sessionGroups });
+    }
+    if (url === '/api/session-groups' && init?.method === 'POST') {
+      const body = JSON.parse(String(init.body));
+      const group = {
+        id: `g${sessionGroups.length + 1}`,
+        name: body.name,
+        sortOrder: sessionGroups.length,
+        createdAt: '2026-06-12T00:00:00Z',
+        updatedAt: '2026-06-12T00:00:00Z'
+      };
+      sessionGroups = [...sessionGroups, group];
+      return jsonResponse(group);
+    }
+    const sessionGroupMatch = url.match(/^\/api\/session-groups\/([^/?]+)$/);
+    if (sessionGroupMatch && init?.method === 'PATCH') {
+      const body = JSON.parse(String(init.body));
+      const group = sessionGroups.find((item) => item.id === sessionGroupMatch[1]) ?? sessionGroups[0];
+      const updated = { ...group, ...body, updatedAt: '2026-06-12T00:00:00Z' };
+      sessionGroups = sessionGroups.map((item) => item.id === updated.id ? updated : item);
+      return jsonResponse(updated);
+    }
+    if (sessionGroupMatch && init?.method === 'DELETE') {
+      const groupId = sessionGroupMatch[1];
+      sessionGroups = sessionGroups.filter((item) => item.id !== groupId);
+      sessions = sessions.map((session) => session.groupId === groupId ? { ...session, groupId: null } : session);
+      return jsonResponse({ ok: true });
+    }
     if (url === '/api/sessions' && !init) {
       return jsonResponse({ sessions });
     }
