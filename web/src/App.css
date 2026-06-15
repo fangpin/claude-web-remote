@@ -887,10 +887,12 @@ button.danger:hover {
   display: grid;
   min-width: 0;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 10px;
+  transition: background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
 }
 
-.session-row:hover {
+.session-row:hover,
+.session-row:focus-within {
   border-color: transparent;
   background: var(--surface-hover);
 }
@@ -903,8 +905,9 @@ button.danger:hover {
 
 .session {
   display: grid;
-  gap: 5px;
+  gap: 4px;
   width: 100%;
+  min-height: 56px;
   border-color: transparent;
   text-align: left;
   color: var(--text);
@@ -923,12 +926,9 @@ button.danger:hover {
   box-shadow: none;
 }
 
-.session-title-row,
-.session-path-row,
-.session-detail-row {
+.session-title-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   min-width: 0;
 }
@@ -942,8 +942,8 @@ button.danger:hover {
 
 .session-attention-dot {
   flex: 0 0 auto;
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 999px;
   background: var(--muted-soft);
 }
@@ -970,66 +970,75 @@ button.danger:hover {
   line-height: 1.35;
 }
 
-.session-resume-cue,
-.session-path-row,
-.session-detail-row,
-.session em {
+.session-subtitle,
+.session-expanded-details {
+  min-width: 0;
   color: var(--muted);
   font-size: 12px;
-}
-
-.session-resume-cue {
-  min-width: 0;
-  line-height: 1.35;
-  overflow-wrap: anywhere;
-}
-
-.session-path-row,
-.session-detail-row {
   line-height: 1.35;
 }
 
-.session-project,
-.session-parent,
-.session-branch {
-  min-width: 0;
-  line-height: 1.35;
+.session-subtitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.session-project,
-.session-parent,
-.session-branch {
-  overflow-wrap: anywhere;
+.session-expanded-details {
+  display: grid;
+  gap: 5px;
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: max-height 160ms ease, opacity 140ms ease, transform 140ms ease;
 }
 
-.session-project {
-  color: var(--text-soft);
-  font-weight: 650;
+.session-row:hover .session-expanded-details,
+.session-row:focus-within .session-expanded-details,
+.session-row.active .session-expanded-details {
+  max-height: 64px;
+  opacity: 1;
+  transform: translateY(0);
 }
 
-.session-parent {
-  flex: 1 1 auto;
+.session-cwd {
+  overflow: hidden;
   color: var(--muted-soft);
-  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.session-detail-row {
-  color: var(--muted-soft);
+.session-detail-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
 }
 
-.session-branch {
-  flex: 1 1 auto;
+.session-detail-chip {
+  max-width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 999px;
   color: var(--muted);
+  background: rgb(255 253 250 / 0.64);
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .session-move-select {
   position: absolute;
   right: 37px;
-  bottom: 8px;
+  bottom: 9px;
   max-width: 112px;
   min-height: 24px;
   border-radius: 7px;
-  background: rgb(255 253 250 / 0.88);
+  background: rgb(255 253 250 / 0.9);
   padding: 2px 6px;
   color: var(--muted);
   font-size: 11px;
@@ -1037,6 +1046,8 @@ button.danger:hover {
 }
 
 .session-row:hover .session-move-select,
+.session-row:focus-within .session-move-select,
+.session-row.active .session-move-select,
 .session-move-select:focus-visible {
   opacity: 1;
 }
@@ -1058,6 +1069,8 @@ button.danger:hover {
 }
 
 .session-row:hover .session-pin-button,
+.session-row:focus-within .session-pin-button,
+.session-row.active .session-pin-button,
 .session-pin-button:focus-visible,
 .session-pin-button.pinned {
   opacity: 1;
