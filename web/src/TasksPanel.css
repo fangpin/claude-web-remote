@@ -382,6 +382,80 @@
 }
 
 @media (prefers-color-scheme: dark) {
+  .tasks-panel.task-center {
+    border-color: var(--border-subtle);
+    background: var(--surface-raised);
+  }
+
+  .task-filter,
+  .task-section-count,
+  .task-status-pill,
+  .task-card-jump {
+    border-color: var(--border-subtle);
+    color: var(--text-soft);
+    background: var(--surface-2);
+  }
+
+  .task-filter button {
+    color: var(--muted);
+  }
+
+  .task-filter button.selected,
+  .task-filter button:hover,
+  .tasks-panel.task-center .task-card:hover,
+  .tasks-panel.task-center .task-card:hover .task-card-jump,
+  .tasks-panel.task-center .task-card:focus-visible .task-card-jump {
+    border-color: var(--border-subtle);
+    color: var(--text);
+    background: var(--surface-hover);
+  }
+
+  .tasks-panel.task-center .task-card {
+    border-color: var(--border-subtle);
+    color: var(--text);
+    background: var(--surface-raised);
+  }
+
+  .tasks-panel.task-center .task-card.background .task-status-pill,
+  .task-section-background .task-section-count {
+    border-color: color-mix(in srgb, var(--info) 34%, transparent);
+    color: var(--info);
+    background: var(--info-soft);
+  }
+
+  .tasks-panel.task-center .task-card.completed .task-status-pill,
+  .task-section-finished .task-section-count {
+    border-color: color-mix(in srgb, var(--success) 34%, transparent);
+    color: var(--success);
+    background: var(--success-soft);
+  }
+
+  .tasks-panel.task-center .task-card.failed,
+  .tasks-panel.task-center .task-card.failed .task-status-pill,
+  .task-error {
+    border-color: color-mix(in srgb, var(--danger) 34%, transparent);
+    color: var(--text-soft);
+    background: var(--danger-soft);
+  }
+
+  .task-error-title,
+  .tasks-panel.task-center .task-card.failed .task-status-pill {
+    color: var(--danger);
+  }
+
+  .tasks-panel.task-center .task-card.interrupted,
+  .tasks-panel.task-center .task-card.interrupted .task-status-pill,
+  .task-limit-note {
+    border-color: color-mix(in srgb, var(--warning) 34%, transparent);
+    color: var(--text-soft);
+    background: var(--warning-soft);
+  }
+
+  .tasks-panel.task-center .task-card.interrupted .task-status-pill,
+  .task-limit-note {
+    color: var(--warning);
+  }
+
   .task-panel-empty,
   .task-section-empty {
     border-color: var(--border-subtle);
@@ -389,7 +463,10 @@
     background: var(--surface-raised);
   }
 
-  .task-panel-empty-title {
+  .task-panel-empty-title,
+  .tasks-panel.task-center h3,
+  .tasks-panel.task-center h4,
+  .tasks-panel.task-center .task-card-title {
     color: var(--text);
   }
 }

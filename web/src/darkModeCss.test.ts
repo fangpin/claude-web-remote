@@ -6,8 +6,10 @@ import { describe, expect, it } from 'vitest';
 const dir = dirname(fileURLToPath(import.meta.url));
 const appCss = readFileSync(join(dir, 'App.css'), 'utf8');
 const tasksCss = readFileSync(join(dir, 'TasksPanel.css'), 'utf8');
+const configCss = readFileSync(join(dir, 'ConfigView.css'), 'utf8');
 const finalDarkOverrides = appCss.slice(appCss.lastIndexOf('@media (prefers-color-scheme: dark)'));
 const tasksDarkOverrides = tasksCss.slice(tasksCss.lastIndexOf('@media (prefers-color-scheme: dark)'));
+const configDarkOverrides = configCss.slice(configCss.lastIndexOf('@media (prefers-color-scheme: dark)'));
 
 describe('dark mode CSS', () => {
   it('overrides light-only alert and empty-state surfaces with dark tokens', () => {
@@ -40,5 +42,31 @@ describe('dark mode CSS', () => {
     expect(finalDarkOverrides).toMatch(/\.project-cwd-row \.field-stack > span:first-child,[\s\S]*color: var\(--accent-strong\)/);
     expect(finalDarkOverrides).toMatch(/\.advanced-session-options summary[\s\S]*color: var\(--text-soft\)[\s\S]*background: var\(--surface-2\)/);
     expect(finalDarkOverrides).toMatch(/\.advanced-session-options \.field-stack > span:first-child[\s\S]*color: var\(--accent-strong\)/);
+    expect(tasksDarkOverrides).toContain('.tasks-panel.task-center');
+    expect(tasksDarkOverrides).toContain('.task-filter');
+    expect(tasksDarkOverrides).toContain('.task-section-count');
+    expect(tasksDarkOverrides).toContain('.task-status-pill');
+    expect(tasksDarkOverrides).toContain('.task-card-jump');
+    expect(tasksDarkOverrides).toContain('.task-error');
+    expect(tasksDarkOverrides).toContain('.task-limit-note');
+    expect(tasksDarkOverrides).toMatch(/\.tasks-panel\.task-center[\s\S]*background: var\(--surface-raised\)/);
+    expect(tasksDarkOverrides).toMatch(/\.task-filter[\s\S]*background: var\(--surface-2\)/);
+    expect(tasksDarkOverrides).toMatch(/\.task-section-count[\s\S]*background: var\(--surface-2\)/);
+    expect(tasksDarkOverrides).toMatch(/\.task-status-pill[\s\S]*background: var\(--surface-2\)/);
+    expect(tasksDarkOverrides).toMatch(/\.task-card-jump[\s\S]*background: var\(--surface-2\)/);
+    expect(tasksDarkOverrides).toMatch(/\.task-error[\s\S]*background: var\(--danger-soft\)/);
+    expect(tasksDarkOverrides).toMatch(/\.task-limit-note[\s\S]*background: var\(--warning-soft\)/);
+    expect(configDarkOverrides).toContain('.settings-panel');
+    expect(configDarkOverrides).toContain('.settings-status-card');
+    expect(configDarkOverrides).toContain('.settings-notice');
+    expect(configDarkOverrides).toContain('.settings-field');
+    expect(configDarkOverrides).toContain('.settings-chip');
+    expect(configDarkOverrides).toContain('.settings-value-pair div');
+    expect(configDarkOverrides).toMatch(/\.settings-panel[\s\S]*background: var\(--surface-raised\)/);
+    expect(configDarkOverrides).toMatch(/\.settings-status-card[\s\S]*background: var\(--surface-raised\)/);
+    expect(configDarkOverrides).toMatch(/\.settings-notice[\s\S]*background: var\(--surface-raised\)/);
+    expect(configDarkOverrides).toMatch(/\.settings-field[\s\S]*background: var\(--surface-2\)/);
+    expect(configDarkOverrides).toMatch(/\.settings-chip[\s\S]*background: var\(--surface-2\)/);
+    expect(configDarkOverrides).toMatch(/\.settings-value-pair div[\s\S]*background: var\(--surface-2\)/);
   });
 });
