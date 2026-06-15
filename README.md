@@ -185,13 +185,9 @@ If accessing from another machine, run the printed SSH tunnel command on your lo
 
 ## Create a session
 
-Open the Web UI and click **New chat**. The start screen asks what Claude can help with, then lets you choose a recent project or enter a devbox workspace context:
+Open the Web UI and click **New chat**. The start screen asks what Claude can help with first, then shows the selected project, worktree, and permission mode as Project context. Use **Change** to choose a recent project, enter a devbox workspace path, toggle git worktree creation, or adjust permission mode.
 
-```text
-Workspace context: /path/to/remote/repo
-```
-
-Permission mode and git worktree creation live under **Advanced options**. The daemon starts the configured launcher in the selected workspace context, streams events back to the browser, and names the session from the first user message. Chat titles can be renamed later from the conversation header.
+The daemon starts the configured launcher in the selected project context, streams events back to the browser, and sends the first prompt from the start screen into the new session. Chat titles can be renamed later from the conversation header.
 
 Use **New group** in the session sidebar to create custom chat groups. Drag chats onto a group heading/list, or use a chat row's **Move** control, to persist the session's group membership on the daemon.
 

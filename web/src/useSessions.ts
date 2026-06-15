@@ -10,6 +10,7 @@ import {
   listSessions,
   restartSession,
   resumeSession,
+  sendInput,
   stopAndRemoveWorktree,
   stopSession,
   unarchiveSession,
@@ -39,6 +40,13 @@ function projectCwdForSession(session: SessionInfo): string {
 
 function isLiveRuntime(session: SessionInfo): boolean {
   return ['starting', 'running', 'waiting'].includes(session.runtimeStatus ?? session.status);
+}
+
+function defaultStartCwd(recentSessions: SessionInfo[], recentProjects: RecentProject[]): string {
+  const waitingSession = recentSessions.find((session) => (session.runtimeStatus ?? session.status) === 'waiting');
+  const runningSession = recentSessions.find((session) => !session.worktree && (session.runtimeStatus ?? session.status) === 'running');
+  const directSession = recentSessions.find((session) => !session.worktree);
+  return waitingSession ? projectCwdForSession(waitingSession) : runningSession?.cwd ?? directSession?.cwd ?? recentProjects[0]?.cwd ?? '';
 }
 
 export function useSessions({
@@ -189,8 +197,8 @@ export function useSessions({
     setListModeState('active');
     setActiveId(null);
     setIsStartSurfaceOpen(true);
-    setCwd((currentCwd) => defaultCwd ?? (currentCwd || recentProjects[0]?.cwd || ''));
-  }, [recentProjects]);
+    setCwd((currentCwd) => defaultCwd ?? (currentCwd || defaultStartCwd(recentSessions, recentProjects)));
+  }, [recentProjects, recentSessions]);
 
   const removeSessionFromCurrentList = useCallback((removedId: string) => {
     setSessions((current) => {
@@ -252,6 +260,23 @@ export function useSessions({
     return () => window.clearInterval(intervalId);
   }, [listModeState, refreshActiveWorktreeStatus, refreshSessions]);
 
+  function openCreatedSession(created: SessionInfo) {
+    if (listModeState === 'archived') {
+      skipNextListRefresh.current = true;
+      setListModeState('active');
+      setSessions([created]);
+    } else {
+      setSessions((current) => [created, ...current]);
+    }
+    isStartSurfaceOpenRef.current = false;
+    setActiveId(created.id);
+    setIsStartSurfaceOpen(false);
+    setCwd('');
+    setUseWorktree(true);
+    callbacksRef.current.onTasksChanged?.();
+    callbacksRef.current.onSessionTasksChanged?.(created.id);
+  }
+
   async function onCreateSession(event: FormEvent) {
     event.preventDefault();
     setError(null);
@@ -261,20 +286,32 @@ export function useSessions({
         permissionMode,
         worktree: useWorktree ? { enabled: true } : undefined
       });
-      if (listModeState === 'archived') {
-        skipNextListRefresh.current = true;
-        setListModeState('active');
-        setSessions([created]);
-      } else {
-        setSessions((current) => [created, ...current]);
+      openCreatedSession(created);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function onStartSession(initialPrompt: string) {
+    const launchCwd = cwd.trim();
+    const prompt = initialPrompt.trim();
+    if (!launchCwd || !prompt) return;
+    setError(null);
+    try {
+      const created = await createSession({
+        cwd: launchCwd,
+        permissionMode,
+        worktree: useWorktree ? { enabled: true } : undefined
+      });
+      openCreatedSession(created);
+      try {
+        const updated = await sendInput(created.id, initialPrompt);
+        if (updated) {
+          setSessions((current) => current.map((session) => session.id === updated.id ? updated : session));
+        }
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : String(err));
       }
-      isStartSurfaceOpenRef.current = false;
-      setActiveId(created.id);
-      setIsStartSurfaceOpen(false);
-      setCwd('');
-      setUseWorktree(true);
-      callbacksRef.current.onTasksChanged?.();
-      callbacksRef.current.onSessionTasksChanged?.(created.id);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -458,6 +495,7 @@ export function useSessions({
     visibleSessions,
     onArchive,
     onCreateSession,
+    onStartSession,
     onCreateGroup,
     onDelete,
     onDeleteGroup,

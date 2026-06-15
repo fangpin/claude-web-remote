@@ -1,4 +1,4 @@
-import { FormEvent, KeyboardEvent, PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { KeyboardEvent, PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from 'react';
 import AppShell, { type AppView } from './AppShell';
 import { buildActivityTimeline, latestReviewActivity, reviewSurface, waitingCopy, type ActivityItem } from './activityTimeline';
 import ConversationWorkspace from './ConversationWorkspace';
@@ -313,9 +313,9 @@ function focusFallbackAfterSidebarClose() {
     focusSessionButton(nextSession.id);
   }
 
-  async function onCreateSession(event: FormEvent) {
+  async function onStartSession(initialPrompt: string) {
     shouldFocusComposerAfterCreateRef.current = true;
-    await sessionState.onCreateSession(event);
+    await sessionState.onStartSession(initialPrompt);
   }
 
   function onSelectTask(task: TaskInfo) {
@@ -679,7 +679,7 @@ function focusFallbackAfterSidebarClose() {
               recentProjects={sessionState.recentProjects}
               recentSessions={sessionState.recentSessions}
               useWorktree={sessionState.useWorktree}
-              onCreateSession={onCreateSession}
+              onStartSession={onStartSession}
               onSelectSession={sessionState.selectSession}
               onSetCwd={sessionState.setCwd}
               onSetPermissionMode={sessionState.setPermissionMode}
