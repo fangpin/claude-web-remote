@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { getWorktreeDiff } from './api';
 import ConfigView from './ConfigView';
 import ConversationBlockList from './ConversationBlockList';
@@ -330,6 +330,10 @@ function SessionAttentionSummary({ session, listMode }: { session: SessionInfo; 
 function SessionContextPopover({ session, status, listMode }: { session: SessionInfo; status: WorktreeStatus | null; listMode: SessionListMode }) {
   const [isOpen, setIsOpen] = useState(false);
   const runtimeLabel = getSessionRuntimeLabel(session, listMode);
+
+  useEffect(() => {
+    setIsOpen(false);
+  }, [session.id]);
   const branch = status?.branch ?? session.worktree?.branch;
 
   return (
@@ -404,15 +408,35 @@ function SessionMoreMenu({
 }) {
   const [isOpen, setIsOpen] = useState(false);
 
+  useEffect(() => {
+    setIsOpen(false);
+  }, [session.id]);
+
+  function selectAction(action: () => void) {
+    setIsOpen(false);
+    action();
+  }
+
   return (
     <div className="action-menu conversation-more-menu">
       <button type="button" aria-label="More session actions" aria-expanded={isOpen} onClick={() => setIsOpen((open) => !open)}>•••</button>
       {isOpen && (
         <div>
-          <button type="button" onClick={onRename}>Rename</button>
-          <button type="button" onClick={onCopySessionId}>Copy session ID{copyStatus ? ` · ${copyStatus}` : ''}</button>
-          {onOpenWorktreeDiff && <button type="button" onClick={onOpenWorktreeDiff}>Open worktree diff</button>}
-          {actions.map((action) => <HeaderActionButton key={`${session.id}:${action.id}`} action={action} />)}
+          <button type="button" onClick={() => selectAction(onRename)}>Rename</button>
+          <button type="button" onClick={() => selectAction(onCopySessionId)}>Copy session ID{copyStatus ? ` · ${copyStatus}` : ''}</button>
+          {onOpenWorktreeDiff && <button type="button" onClick={() => selectAction(onOpenWorktreeDiff)}>Open worktree diff</button>}
+          {actions.map((action) => (
+            <button
+              key={`${session.id}:${action.id}`}
+              type="button"
+              className={action.variant === 'primary' ? 'primary-action' : action.variant === 'danger' ? 'danger' : undefined}
+              disabled={action.disabled}
+              title={action.title}
+              onClick={() => selectAction(action.onClick)}
+            >
+              {action.label}
+            </button>
+          ))}
         </div>
       )}
     </div>
@@ -509,6 +533,7 @@ export default function ConversationWorkspace({
   const [headerDiff, setHeaderDiff] = useState<string | null>(null);
   const [headerDiffError, setHeaderDiffError] = useState<string | null>(null);
   const [isHeaderDiffLoading, setIsHeaderDiffLoading] = useState(false);
+  const headerDiffRequestRef = useRef(0);
 
   function startRename(session: SessionInfo) {
     setRenamingSessionId(session.id);
@@ -534,21 +559,28 @@ export default function ConversationWorkspace({
   }
 
   async function openHeaderWorktreeDiff(sessionId: string) {
+    const requestId = headerDiffRequestRef.current + 1;
+    headerDiffRequestRef.current = requestId;
     setHeaderDiffSessionId(sessionId);
     setHeaderDiff(null);
     setHeaderDiffError(null);
     setIsHeaderDiffLoading(true);
     try {
       const result = await getWorktreeDiff(sessionId);
+      if (headerDiffRequestRef.current !== requestId) return;
       setHeaderDiff(result.diff || 'No unstaged diff.');
     } catch (err: unknown) {
+      if (headerDiffRequestRef.current !== requestId) return;
       setHeaderDiffError(err instanceof Error ? err.message : String(err));
     } finally {
-      setIsHeaderDiffLoading(false);
+      if (headerDiffRequestRef.current === requestId) {
+        setIsHeaderDiffLoading(false);
+      }
     }
   }
 
   function closeHeaderWorktreeDiff() {
+    headerDiffRequestRef.current += 1;
     setHeaderDiffSessionId(null);
     setHeaderDiff(null);
     setHeaderDiffError(null);
