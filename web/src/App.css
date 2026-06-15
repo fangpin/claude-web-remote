@@ -2018,6 +2018,13 @@ button.danger:hover {
   margin-top: -1px;
 }
 
+.session-branch {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
 @media (max-width: 900px) {
   .conversation-header {
     grid-template-columns: 1fr;
