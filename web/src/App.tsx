@@ -539,27 +539,6 @@ function focusFallbackAfterSidebarClose() {
     }
   }, [inspectorTab, isDeveloperMode]);
 
-  function onResizeInspectorStart(event: ReactPointerEvent<HTMLButtonElement>) {
-    if (!isInspectorOpen) return;
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    const pointerStartX = event.clientX;
-    const widthStart = inspectorWidth;
-
-    function onPointerMove(moveEvent: PointerEvent) {
-      const nextWidth = widthStart + pointerStartX - moveEvent.clientX;
-      setInspectorWidth(Math.min(INSPECTOR_MAX_WIDTH, Math.max(INSPECTOR_MIN_WIDTH, nextWidth)));
-    }
-
-    function onPointerUp() {
-      window.removeEventListener('pointermove', onPointerMove);
-      window.removeEventListener('pointerup', onPointerUp);
-    }
-
-    window.addEventListener('pointermove', onPointerMove);
-    window.addEventListener('pointerup', onPointerUp, { once: true });
-  }
-
   function renderRemoveWorktreeButton() {
     const status = sessionState.activeWorktreeStatus;
     const unavailable = sessionState.isWorktreeStatusLoading || sessionState.activeWorktreeStatusError || !status;
