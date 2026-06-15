@@ -1707,6 +1707,52 @@ describe('App', () => {
     expect(screen.getByText('Stop only')).toBeInTheDocument();
   });
 
+  it('shows Preview as the second inspector tab and loads worktree diff', async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByText('Worktree Repo'));
+    const inspector = openInspector();
+    const tabs = within(inspector).getAllByRole('tab').map((tab) => tab.textContent);
+    expect(tabs).toEqual(['Activity', 'Preview', 'Session tasks', 'All tasks', 'Plan', 'Diagnostics']);
+
+    fireEvent.click(within(inspector).getByRole('tab', { name: 'Preview' }));
+    const previewPanel = within(inspector).getByRole('tabpanel', { name: 'Preview' });
+
+    expect(await within(previewPanel).findByText('Worktree diff')).toBeInTheDocument();
+    expect(within(previewPanel).getByText(/diff --git a\/web\/src\/App\.tsx/)).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s4/worktree-diff', undefined);
+  });
+
+  it('keeps Preview available for non-worktree transcript snippets without fetching diff', async () => {
+    eventsBySession = {
+      s1: [
+        {
+          id: 1,
+          sessionId: 's1',
+          time: '2026-06-14T00:00:00Z',
+          kind: 'tool',
+          payload: { type: 'tool_use', id: 'toolu_read', name: 'Read', input: { file_path: 'web/src/App.tsx' } }
+        },
+        {
+          id: 2,
+          sessionId: 's1',
+          time: '2026-06-14T00:00:00Z',
+          kind: 'tool',
+          payload: { type: 'tool_result', tool_use_id: 'toolu_read', content: 'const app = true;' }
+        }
+      ]
+    };
+    render(<App />);
+
+    const inspector = openInspector();
+    fireEvent.click(within(inspector).getByRole('tab', { name: 'Preview' }));
+    const previewPanel = within(inspector).getByRole('tabpanel', { name: 'Preview' });
+
+    expect(await within(previewPanel).findByText('Preview is available for worktree sessions.')).toBeInTheDocument();
+    expect(await within(previewPanel).findByText('const app = true;')).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/worktree-diff'))).toBe(false);
+  });
+
   it('shows session tasks in the inspector and can switch to all tasks and plan', async () => {
     render(<App />);
 

@@ -51,6 +51,7 @@ export default function App() {
   const [notifiedAttentionKey, setNotifiedAttentionKey] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('session');
+  const [selectedPreviewPath, setSelectedPreviewPath] = useState<string | null>(null);
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const isDiagnosticsVisible = view === 'sessions' && isInspectorOpen && inspectorTab === 'diagnostics';
   const taskActionsRef = useRef<TaskActions>({
@@ -506,7 +507,7 @@ function focusFallbackAfterSidebarClose() {
   }
 
   function onInspectorTabKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
-    const tabs: Array<typeof inspectorTab> = ['activity', 'session', 'global', 'plan', 'diagnostics'];
+    const tabs: Array<typeof inspectorTab> = ['activity', 'preview', 'session', 'global', 'plan', 'diagnostics'];
     const currentIndex = tabs.indexOf(inspectorTab);
     let nextIndex = currentIndex;
 
@@ -706,6 +707,7 @@ function focusFallbackAfterSidebarClose() {
       }
       inspector={
         <InspectorPanel
+          activeEvents={eventState.activeEvents}
           activities={activities}
           activePlan={eventState.activePlan}
           activeSession={sessionState.activeSession}
@@ -715,6 +717,7 @@ function focusFallbackAfterSidebarClose() {
           isActiveSessionMode={sessionState.isActiveSessionMode}
           isDiagnosticsLoading={diagnosticsState.isLoading}
           isInspectorOpen={isInspectorOpen}
+          selectedPreviewPath={selectedPreviewPath}
           sessionDiagnostics={diagnosticsState.sessionDiagnostics}
           sessionTaskError={taskState.sessionTaskError}
           sessionTasks={taskState.sessionTasks}
