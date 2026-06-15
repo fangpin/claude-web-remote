@@ -529,7 +529,8 @@ describe('App', () => {
     expectSessionStatus('Repo One', 'Waiting for you');
     expectSessionStatus('Worktree Repo', 'Running');
     expectSessionStatus('Stopped Repo', 'Ended');
-    expect(screen.getByText('Chat')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Chat view' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Debug view' })).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByLabelText('Claude: Claude is waiting')).toBeInTheDocument();
     expect(screen.getByLabelText('Claude attention notification')).toHaveTextContent('Claude is waiting');
     expect(screen.queryByLabelText('Claude needs attention')).not.toBeInTheDocument();
@@ -727,9 +728,9 @@ describe('App', () => {
     expect(await screen.findAllByText('Claude requested an action that may be destructive or affect shared state.')).toHaveLength(1);
     expect(screen.getAllByRole('button', { name: 'Review' }).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: 'Copy review' })).not.toBeInTheDocument();
-    expect(screen.getAllByText('Bash').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Remove dist · $ rm -rf dist').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Run tests · $ npm test').length).toBeGreaterThan(0);
+    expect(screen.getByText('▾ Ran rm -rf dist')).toBeInTheDocument();
+    expect(screen.getByText('Remove dist · $ rm -rf dist')).toBeInTheDocument();
+    expect(screen.getByText('▸ Ran npm test')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Allow' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Deny' })).not.toBeInTheDocument();
   });
@@ -766,7 +767,7 @@ describe('App', () => {
     expect(screen.getByText('Unknown event')).toBeInTheDocument();
     expect(screen.queryByText('raw event should stay hidden')).not.toBeInTheDocument();
     expect(screen.queryByText('system event should stay hidden')).not.toBeInTheDocument();
-    expect(screen.getAllByText('Raw events')).toHaveLength(2);
+    expect(screen.queryByText('Raw events')).not.toBeInTheDocument();
   });
 
   it('creates a session from the form and can include worktree request data', async () => {
