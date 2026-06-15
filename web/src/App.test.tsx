@@ -1361,7 +1361,7 @@ describe('App', () => {
 
     fireEvent.click(within(header as HTMLElement).getByRole('button', { name: 'one · workspace' }));
 
-    expect(within(header as HTMLElement).getByText('cwd')).toBeInTheDocument();
+    expect(await within(header as HTMLElement).findByText('cwd')).toBeInTheDocument();
     expect(within(header as HTMLElement).getByText('/repo/one')).toBeInTheDocument();
     expect(within(header as HTMLElement).getByText('permission mode')).toBeInTheDocument();
     expect(within(header as HTMLElement).getByText('acceptEdits')).toBeInTheDocument();
