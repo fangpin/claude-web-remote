@@ -5180,17 +5180,17 @@ textarea {
   .primary-action,
   .send-button,
   .sidebar-header .primary-action {
-    border-color: #e8d1bd;
-    color: #231d16;
-    background: linear-gradient(180deg, #f2d8c2, #d7a77e);
+    border-color: #7b5947;
+    color: #fffaf2;
+    background: linear-gradient(180deg, #5a3f31, #3f2d23);
   }
 
   .primary-action:hover,
   .send-button:hover,
   .sidebar-header .primary-action:hover {
-    border-color: #f1dfcf;
-    color: #181510;
-    background: linear-gradient(180deg, #ffe4cf, #e3b087);
+    border-color: #9a7058;
+    color: #fffaf2;
+    background: linear-gradient(180deg, #6a4b3b, #4a3429);
   }
 
   .primary-rail button,

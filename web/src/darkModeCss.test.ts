@@ -15,5 +15,7 @@ describe('dark mode CSS', () => {
     expect(finalDarkOverrides).toMatch(/\.deleted-note[\s\S]*background: var\(--warning-soft\)/);
     expect(finalDarkOverrides).toMatch(/\.message-text code[\s\S]*background: var\(--surface-3\)/);
     expect(finalDarkOverrides).toMatch(/\.primary-rail button,[\s\S]*\.session-list-toolbar h2[\s\S]*color: var\(--muted\)/);
+    expect(finalDarkOverrides).toMatch(/\.primary-action,[\s\S]*\.send-button[\s\S]*color: #fffaf2[\s\S]*background: linear-gradient\(180deg, #5a3f31, #3f2d23\)/);
+    expect(finalDarkOverrides).toMatch(/\.primary-action:hover,[\s\S]*\.send-button:hover[\s\S]*color: #fffaf2[\s\S]*background: linear-gradient\(180deg, #6a4b3b, #4a3429\)/);
   });
 });
