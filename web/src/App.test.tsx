@@ -494,6 +494,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe('App', () => {
@@ -1766,13 +1767,13 @@ describe('App', () => {
     expect(within(planPanel).getByText('From ExitPlanMode')).toBeInTheDocument();
   });
 
-  it('shows runtime diagnostics in the inspector', async () => {
+  it('shows runtime diagnostics from the Activity drawer advanced section in dev mode', async () => {
     render(<App />);
 
-    const inspector = openInspector();
-    fireEvent.click(within(inspector).getByRole('tab', { name: 'Diagnostics' }));
+    const drawer = await openActivityDrawer();
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Diagnostics' }));
 
-    const diagnosticsPanel = within(inspector).getByRole('tabpanel', { name: 'Diagnostics' });
+    const diagnosticsPanel = within(drawer).getByRole('tabpanel', { name: 'Diagnostics' });
     expect(await within(diagnosticsPanel).findByText('Daemon health checks are passing.')).toBeInTheDocument();
     expect(within(diagnosticsPanel).getByText('Data directory exists and is writable.')).toBeInTheDocument();
     expect(within(diagnosticsPanel).getByText('claude --print --input-format stream-json --output-format stream-json --include-partial-messages --permission-mode bypassPermissions --verbose')).toBeInTheDocument();
@@ -1781,12 +1782,20 @@ describe('App', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/diagnostics', undefined);
   });
 
+  it('hides Diagnostics from the Activity drawer advanced section outside dev mode', async () => {
+    vi.stubEnv('DEV', false);
+    render(<App />);
+
+    const drawer = await openActivityDrawer();
+    expect(within(drawer).queryByRole('button', { name: 'Diagnostics' })).not.toBeInTheDocument();
+  });
+
   it('selects the owning session and refreshes tasks when a task is clicked', async () => {
     render(<App />);
 
-    const inspector = openInspector();
-    fireEvent.click(within(inspector).getByRole('tab', { name: 'All tasks' }));
-    const allTasksPanel = within(inspector).getByRole('tabpanel', { name: 'All tasks' });
+    const drawer = await openActivityDrawer();
+    fireEvent.click(within(drawer).getByRole('button', { name: 'All tasks' }));
+    const allTasksPanel = within(drawer).getByRole('tabpanel', { name: 'All tasks' });
     const task = await within(allTasksPanel).findByText('Agent: Check stopped repo');
     const taskListCallsBeforeSelection = fetchMock.mock.calls.filter(([url]) => url === '/api/tasks').length;
 
@@ -1818,9 +1827,9 @@ describe('App', () => {
 
     render(<App />);
 
-    const inspector = openInspector();
-    fireEvent.click(within(inspector).getByRole('tab', { name: 'All tasks' }));
-    const allTasksPanel = within(inspector).getByRole('tabpanel', { name: 'All tasks' });
+    const drawer = await openActivityDrawer();
+    fireEvent.click(within(drawer).getByRole('button', { name: 'All tasks' }));
+    const allTasksPanel = within(drawer).getByRole('tabpanel', { name: 'All tasks' });
 
     await waitFor(() => expect(taskRequests.length).toBeGreaterThanOrEqual(2));
 
