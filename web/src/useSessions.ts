@@ -42,6 +42,13 @@ function isLiveRuntime(session: SessionInfo): boolean {
   return ['starting', 'running', 'waiting'].includes(session.runtimeStatus ?? session.status);
 }
 
+function defaultStartCwd(recentSessions: SessionInfo[], recentProjects: RecentProject[]): string {
+  const waitingSession = recentSessions.find((session) => (session.runtimeStatus ?? session.status) === 'waiting');
+  const runningSession = recentSessions.find((session) => !session.worktree && (session.runtimeStatus ?? session.status) === 'running');
+  const directSession = recentSessions.find((session) => !session.worktree);
+  return waitingSession ? projectCwdForSession(waitingSession) : runningSession?.cwd ?? directSession?.cwd ?? recentProjects[0]?.cwd ?? '';
+}
+
 export function useSessions({
   setError,
   onTasksChanged,
@@ -190,8 +197,8 @@ export function useSessions({
     setListModeState('active');
     setActiveId(null);
     setIsStartSurfaceOpen(true);
-    setCwd((currentCwd) => defaultCwd ?? (currentCwd || recentProjects[0]?.cwd || ''));
-  }, [recentProjects]);
+    setCwd((currentCwd) => defaultCwd ?? (currentCwd || defaultStartCwd(recentSessions, recentProjects)));
+  }, [recentProjects, recentSessions]);
 
   const removeSessionFromCurrentList = useCallback((removedId: string) => {
     setSessions((current) => {

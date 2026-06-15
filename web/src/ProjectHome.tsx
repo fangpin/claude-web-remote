@@ -57,13 +57,6 @@ function sessionTitle(session: SessionInfo): string {
   return session.name || pathBasename(sessionProjectCwd(session));
 }
 
-function defaultProjectCwd(recentSessions: SessionInfo[], recentProjects: RecentProject[]): string {
-  const waitingSession = recentSessions.find((session) => (session.runtimeStatus ?? session.status) === 'waiting');
-  const runningSession = recentSessions.find((session) => !session.worktree && (session.runtimeStatus ?? session.status) === 'running');
-  const directSession = recentSessions.find((session) => !session.worktree);
-  return waitingSession ? sessionProjectCwd(waitingSession) : runningSession?.cwd ?? directSession?.cwd ?? recentProjects[0]?.cwd ?? '';
-}
-
 export default function ProjectHome({
   cwd,
   permissionMode,
@@ -78,10 +71,7 @@ export default function ProjectHome({
 }: Props) {
   const [initialPrompt, setInitialPrompt] = useState('');
   const [isContextOpen, setIsContextOpen] = useState(false);
-  const [hasEditedContext, setHasEditedContext] = useState(false);
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
-  const hasInitializedContextRef = useRef(false);
-  const fallbackCwd = defaultProjectCwd(recentSessions, recentProjects);
   const launchCwd = cwd.trim();
   const canStart = Boolean(launchCwd && initialPrompt.trim());
   const projectLabel = launchCwd ? pathBasename(launchCwd) : 'Choose project';
@@ -91,12 +81,8 @@ export default function ProjectHome({
   }, []);
 
   useEffect(() => {
-    const currentCwd = cwd.trim();
-    const shouldInitializeContext = !currentCwd || currentCwd === recentProjects[0]?.cwd;
-    if (hasInitializedContextRef.current || hasEditedContext || !fallbackCwd || !shouldInitializeContext) return;
-    hasInitializedContextRef.current = true;
-    onSetCwd(fallbackCwd);
-  }, [cwd, fallbackCwd, hasEditedContext, onSetCwd, recentProjects]);
+    if (initialPrompt.trim() && !launchCwd) setIsContextOpen(true);
+  }, [initialPrompt, launchCwd]);
 
   function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -168,10 +154,7 @@ export default function ProjectHome({
                   <input
                     id="project-home-cwd"
                     value={cwd}
-                    onChange={(event) => {
-                      setHasEditedContext(true);
-                      onSetCwd(event.target.value);
-                    }}
+                    onChange={(event) => onSetCwd(event.target.value)}
                     placeholder="Choose a repo path on the devbox"
                     required
                   />
@@ -189,10 +172,7 @@ export default function ProjectHome({
                           key={project.cwd}
                           type="button"
                           className="project-card"
-                          onClick={() => {
-                            setHasEditedContext(true);
-                            onSetCwd(project.cwd);
-                          }}
+                          onClick={() => onSetCwd(project.cwd)}
                           aria-label={`Use ${project.cwd} as project context`}
                         >
                           <strong>{pathBasename(project.cwd)}</strong>
