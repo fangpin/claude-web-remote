@@ -522,7 +522,9 @@ describe('App', () => {
     expect(within(sessionButton('Worktree Repo')).getByText(/one · running ·/)).toBeInTheDocument();
     expect(within(sessionButton('Stopped Repo')).getByText(/stopped ·/)).toBeInTheDocument();
     expect(within(sessionButton('Repo One')).queryByText('Ready for your reply')).not.toBeInTheDocument();
+    expect(within(sessionButton('Repo One')).queryByText('Waiting for you')).not.toBeInTheDocument();
     expect(within(sessionButton('Worktree Repo')).queryByText('Claude is working')).not.toBeInTheDocument();
+    expect(within(sessionButton('Worktree Repo')).queryByText('Running')).not.toBeInTheDocument();
     expect(within(sessionButton('Stopped Repo')).queryByText('Ended')).not.toBeInTheDocument();
     expect(within(sessionButton('Repo One')).getByText('/repo/one')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'one' })).toBeInTheDocument();
