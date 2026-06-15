@@ -2112,7 +2112,7 @@ button.danger:hover {
     align-items: start;
   }
 
-  .session-context-popover summary {
+  .session-context-popover button {
     max-width: 46vw;
     overflow: hidden;
     text-overflow: ellipsis;
