@@ -50,9 +50,10 @@ export default function App() {
   const [dismissedAttentionKey, setDismissedAttentionKey] = useState<string | null>(null);
   const [notifiedAttentionKey, setNotifiedAttentionKey] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [inspectorTab, setInspectorTab] = useState<InspectorTab>('session');
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>('activity');
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
-  const isDiagnosticsVisible = view === 'sessions' && isInspectorOpen && inspectorTab === 'diagnostics';
+  const isDeveloperMode = import.meta.env.DEV;
+  const isDiagnosticsVisible = isDeveloperMode && view === 'sessions' && isInspectorOpen && inspectorTab === 'diagnostics';
   const taskActionsRef = useRef<TaskActions>({
     refreshTasks: async () => undefined,
     refreshSessionTasks: async (_sessionId: string) => undefined
@@ -398,7 +399,7 @@ function focusFallbackAfterSidebarClose() {
     { id: 'archived-sessions', title: 'Show archived chats', hint: 'Browse archived conversations', kind: 'Command', run: showArchivedSessions },
     { id: 'settings', title: 'Open settings', hint: 'View app and runtime configuration', kind: 'Command', run: () => setView('config') },
     { id: 'toggle-sidebar', title: isSidebarOpen ? 'Hide sidebar' : 'Show sidebar', hint: 'Toggle project and chat navigation', kind: 'Command', shortcut: '⌘B', run: toggleSidebar },
-    { id: 'toggle-inspector', title: isInspectorOpen ? 'Hide inspector' : 'Show inspector', hint: 'Toggle activity, tasks, plan, and diagnostics', kind: 'Command', shortcut: '⌘I', run: () => setIsInspectorOpen((open) => !open) }
+    { id: 'toggle-inspector', title: isInspectorOpen ? 'Hide activity' : 'Show activity', hint: 'Toggle Claude activity, tasks, and plan', kind: 'Command', shortcut: '⌘I', run: () => setIsInspectorOpen((open) => !open) }
   ];
 
   useEffect(() => {
@@ -484,6 +485,10 @@ function focusFallbackAfterSidebarClose() {
     return () => window.removeEventListener('keydown', onGlobalKeyDown);
   });
 
+  function visibleInspectorTabs(): InspectorTab[] {
+    return isDeveloperMode ? ['activity', 'session', 'plan', 'global', 'diagnostics'] : ['activity', 'session', 'plan', 'global'];
+  }
+
   function onResizeInspectorStart(event: ReactPointerEvent<HTMLButtonElement>) {
     if (!isInspectorOpen) return;
     event.preventDefault();
@@ -506,8 +511,9 @@ function focusFallbackAfterSidebarClose() {
   }
 
   function onInspectorTabKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
-    const tabs: Array<typeof inspectorTab> = ['activity', 'session', 'global', 'plan', 'diagnostics'];
+    const tabs: InspectorTab[] = visibleInspectorTabs().filter((tab) => tab !== 'global' && tab !== 'diagnostics');
     const currentIndex = tabs.indexOf(inspectorTab);
+    if (currentIndex === -1) return;
     let nextIndex = currentIndex;
 
     if (event.key === 'ArrowRight') {
@@ -525,6 +531,33 @@ function focusFallbackAfterSidebarClose() {
     event.preventDefault();
     setInspectorTab(tabs[nextIndex]);
     document.getElementById(`inspector-tab-${tabs[nextIndex]}`)?.focus();
+  }
+
+  useEffect(() => {
+    if (!isDeveloperMode && inspectorTab === 'diagnostics') {
+      setInspectorTab('activity');
+    }
+  }, [inspectorTab, isDeveloperMode]);
+
+  function onResizeInspectorStart(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (!isInspectorOpen) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const pointerStartX = event.clientX;
+    const widthStart = inspectorWidth;
+
+    function onPointerMove(moveEvent: PointerEvent) {
+      const nextWidth = widthStart + pointerStartX - moveEvent.clientX;
+      setInspectorWidth(Math.min(INSPECTOR_MAX_WIDTH, Math.max(INSPECTOR_MIN_WIDTH, nextWidth)));
+    }
+
+    function onPointerUp() {
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+    }
+
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp, { once: true });
   }
 
   function renderRemoveWorktreeButton() {
@@ -718,6 +751,7 @@ function focusFallbackAfterSidebarClose() {
           diagnosticsError={diagnosticsState.error}
           inspectorTab={inspectorTab}
           isActiveSessionMode={sessionState.isActiveSessionMode}
+          isDeveloperMode={isDeveloperMode}
           isDiagnosticsLoading={diagnosticsState.isLoading}
           isInspectorOpen={isInspectorOpen}
           sessionDiagnostics={diagnosticsState.sessionDiagnostics}
@@ -732,7 +766,6 @@ function focusFallbackAfterSidebarClose() {
           onSelectActivity={onSelectActivity}
           onSelectTask={onSelectTask}
           onResizeInspectorStart={onResizeInspectorStart}
-          onSetInspectorOpen={setIsInspectorOpen}
           onSetInspectorTab={setInspectorTab}
           onToggleInspector={() => setIsInspectorOpen((open) => !open)}
         />

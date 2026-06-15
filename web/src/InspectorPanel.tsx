@@ -23,6 +23,7 @@ type Props = {
   diagnosticsError: string | null;
   inspectorTab: InspectorTab;
   isActiveSessionMode: boolean;
+  isDeveloperMode: boolean;
   isDiagnosticsLoading: boolean;
   isInspectorOpen: boolean;
   sessionDiagnostics: SessionDiagnosticsResponse | null;
@@ -37,7 +38,6 @@ type Props = {
   onSelectActivity: (activity: ActivityItem) => void;
   onSelectTask: (task: TaskInfo) => void;
   onResizeInspectorStart: (event: PointerEvent<HTMLButtonElement>) => void;
-  onSetInspectorOpen: (isOpen: boolean) => void;
   onSetInspectorTab: (tab: InspectorTab) => void;
   onToggleInspector: () => void;
 };
@@ -50,6 +50,7 @@ export default function InspectorPanel({
   diagnosticsError,
   inspectorTab,
   isActiveSessionMode,
+  isDeveloperMode,
   isDiagnosticsLoading,
   isInspectorOpen,
   sessionDiagnostics,
@@ -67,87 +68,76 @@ export default function InspectorPanel({
   onSetInspectorTab,
   onToggleInspector
 }: Props) {
+  if (!isInspectorOpen) return null;
+
   return (
     <>
-      {!isInspectorOpen && (
+      <button
+        type="button"
+        className="activity-drawer-backdrop"
+        aria-label="Close activity drawer"
+        onClick={onToggleInspector}
+      />
+      <aside className="inspector activity-drawer" aria-label="Activity drawer">
         <button
           type="button"
-          className="inspector-floating-toggle"
-          aria-label="Show inspector"
-          title="Show inspector (⌘/Ctrl+I)"
-          onClick={onToggleInspector}
-        >
-          ‹
-        </button>
-      )}
-      <aside className="inspector" aria-label="Session inspector">
-        {isInspectorOpen && (
-          <button
-            type="button"
-            className="inspector-resize-handle"
-            aria-label="Resize inspector"
-            title="Drag to resize inspector"
-            onPointerDown={onResizeInspectorStart}
-          />
-        )}
-        {isInspectorOpen && (
-          <button
-            type="button"
-            className="inspector-edge-toggle"
-            aria-label="Hide inspector"
-            title="Hide inspector (⌘/Ctrl+I)"
-            onClick={onToggleInspector}
-          >
-            ›
-          </button>
-        )}
-      <header className="inspector-header">
-        <div>
-          <h2>Inspector</h2>
-          <p>{activeSession ? activeSession.name || activeSession.cwd : 'No session selected'}</p>
+          className="inspector-resize-handle"
+          aria-label="Resize activity drawer"
+          title="Drag to resize activity drawer"
+          onPointerDown={onResizeInspectorStart}
+        />
+        <header className="inspector-header activity-drawer-header">
+          <div>
+            <h2>Activity</h2>
+            <p>{activeSession ? activeSession.name || activeSession.cwd : 'No session selected'}</p>
+          </div>
+          <button type="button" className="activity-drawer-close" aria-label="Close activity drawer" onClick={onToggleInspector}>Close</button>
+        </header>
+        <div className="inspector-tabs" role="tablist" aria-label="Activity drawer sections">
+          <button type="button" id="inspector-tab-activity" role="tab" aria-selected={inspectorTab === 'activity'} aria-controls="inspector-panel-activity" tabIndex={inspectorTab === 'activity' ? 0 : -1} onClick={() => onSetInspectorTab('activity')} onKeyDown={onInspectorTabKeyDown}>Activity</button>
+          <button type="button" id="inspector-tab-session" role="tab" aria-selected={inspectorTab === 'session'} aria-controls="inspector-panel-session" tabIndex={inspectorTab === 'session' ? 0 : -1} onClick={() => onSetInspectorTab('session')} onKeyDown={onInspectorTabKeyDown}>Tasks</button>
+          <button type="button" id="inspector-tab-plan" role="tab" aria-selected={inspectorTab === 'plan'} aria-controls="inspector-panel-plan" tabIndex={inspectorTab === 'plan' ? 0 : -1} onClick={() => onSetInspectorTab('plan')} onKeyDown={onInspectorTabKeyDown}>Plan</button>
         </div>
-      </header>
-      {isInspectorOpen && (
-        <>
-          <div className="inspector-tabs" role="tablist" aria-label="Inspector sections">
-            <button type="button" id="inspector-tab-activity" role="tab" aria-selected={inspectorTab === 'activity'} aria-controls="inspector-panel-activity" tabIndex={inspectorTab === 'activity' ? 0 : -1} onClick={() => onSetInspectorTab('activity')} onKeyDown={onInspectorTabKeyDown}>Activity</button>
-            <button type="button" id="inspector-tab-session" role="tab" aria-selected={inspectorTab === 'session'} aria-controls="inspector-panel-session" tabIndex={inspectorTab === 'session' ? 0 : -1} onClick={() => onSetInspectorTab('session')} onKeyDown={onInspectorTabKeyDown}>Session tasks</button>
-            <button type="button" id="inspector-tab-global" role="tab" aria-selected={inspectorTab === 'global'} aria-controls="inspector-panel-global" tabIndex={inspectorTab === 'global' ? 0 : -1} onClick={() => onSetInspectorTab('global')} onKeyDown={onInspectorTabKeyDown}>All tasks</button>
-            <button type="button" id="inspector-tab-plan" role="tab" aria-selected={inspectorTab === 'plan'} aria-controls="inspector-panel-plan" tabIndex={inspectorTab === 'plan' ? 0 : -1} onClick={() => onSetInspectorTab('plan')} onKeyDown={onInspectorTabKeyDown}>Plan</button>
-            <button type="button" id="inspector-tab-diagnostics" role="tab" aria-selected={inspectorTab === 'diagnostics'} aria-controls="inspector-panel-diagnostics" tabIndex={inspectorTab === 'diagnostics' ? 0 : -1} onClick={() => onSetInspectorTab('diagnostics')} onKeyDown={onInspectorTabKeyDown}>Diagnostics</button>
+        <div id="inspector-panel-activity" role="tabpanel" aria-labelledby="inspector-tab-activity" hidden={inspectorTab !== 'activity'}>
+          <ActivityPanel
+            activities={activities}
+            activeSession={activeSession}
+            waitingMessage={waitingMessage}
+            onSelectActivity={onSelectActivity}
+          />
+        </div>
+        <div id="inspector-panel-session" role="tabpanel" aria-labelledby="inspector-tab-session" hidden={inspectorTab !== 'session'}>
+          {isActiveSessionMode ? (
+            <TasksPanel title="Tasks" tasks={sessionTasks} error={sessionTaskError} compact onSelectTask={onSelectTask} />
+          ) : (
+            <p className="inspector-empty">No active session tasks.</p>
+          )}
+        </div>
+        <section id="inspector-panel-plan" role="tabpanel" aria-labelledby="inspector-tab-plan" className="session-plan" hidden={inspectorTab !== 'plan'}>
+          {!activeSession ? (
+            <p className="inspector-empty">No session selected.</p>
+          ) : activePlan ? (
+            <>
+              <h3>Session plan</h3>
+              <p className="plan-source">From {activePlan.source === 'ExitPlanMode' ? 'ExitPlanMode' : 'plan file'}</p>
+              <pre className="plan-content">{activePlan.markdown}</pre>
+            </>
+          ) : (
+            <p className="inspector-empty">No plan available for this session.</p>
+          )}
+        </section>
+        <section className="activity-drawer-advanced" aria-label="Advanced activity sections">
+          <h3>Advanced</h3>
+          <div className="activity-drawer-advanced-actions">
+            <button type="button" aria-pressed={inspectorTab === 'global'} onClick={() => onSetInspectorTab('global')}>All tasks</button>
+            {isDeveloperMode && <button type="button" aria-pressed={inspectorTab === 'diagnostics'} onClick={() => onSetInspectorTab('diagnostics')}>Diagnostics</button>}
           </div>
-          <div id="inspector-panel-activity" role="tabpanel" aria-labelledby="inspector-tab-activity" hidden={inspectorTab !== 'activity'}>
-            <ActivityPanel
-              activities={activities}
-              activeSession={activeSession}
-              waitingMessage={waitingMessage}
-              onSelectActivity={onSelectActivity}
-            />
-          </div>
-          <div id="inspector-panel-session" role="tabpanel" aria-labelledby="inspector-tab-session" hidden={inspectorTab !== 'session'}>
-            {isActiveSessionMode ? (
-              <TasksPanel title="Session tasks" tasks={sessionTasks} error={sessionTaskError} compact onSelectTask={onSelectTask} />
-            ) : (
-              <p className="inspector-empty">No active session tasks.</p>
-            )}
-          </div>
-          <div id="inspector-panel-global" role="tabpanel" aria-labelledby="inspector-tab-global" hidden={inspectorTab !== 'global'}>
-            <TasksPanel title="All tasks" tasks={tasks} error={taskError} compact onSelectTask={onSelectTask} />
-          </div>
-          <section id="inspector-panel-plan" role="tabpanel" aria-labelledby="inspector-tab-plan" className="session-plan" hidden={inspectorTab !== 'plan'}>
-            {!activeSession ? (
-              <p className="inspector-empty">No session selected.</p>
-            ) : activePlan ? (
-              <>
-                <h3>Session plan</h3>
-                <p className="plan-source">From {activePlan.source === 'ExitPlanMode' ? 'ExitPlanMode' : 'plan file'}</p>
-                <pre className="plan-content">{activePlan.markdown}</pre>
-              </>
-            ) : (
-              <p className="inspector-empty">No plan available for this session.</p>
-            )}
-          </section>
-          <section id="inspector-panel-diagnostics" role="tabpanel" aria-labelledby="inspector-tab-diagnostics" className="diagnostics-panel" hidden={inspectorTab !== 'diagnostics'}>
+        </section>
+        <div id="inspector-panel-global" role="tabpanel" aria-label="All tasks" hidden={inspectorTab !== 'global'}>
+          <TasksPanel title="All tasks" tasks={tasks} error={taskError} compact onSelectTask={onSelectTask} />
+        </div>
+        {isDeveloperMode && (
+          <section id="inspector-panel-diagnostics" role="tabpanel" aria-label="Diagnostics" className="diagnostics-panel" hidden={inspectorTab !== 'diagnostics'}>
             <DiagnosticsPanel
               activeSession={activeSession}
               diagnostics={diagnostics}
@@ -157,8 +147,7 @@ export default function InspectorPanel({
               onRefresh={onRefreshDiagnostics}
             />
           </section>
-        </>
-      )}
+        )}
       </aside>
     </>
   );
