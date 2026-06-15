@@ -279,8 +279,8 @@ function openInspector(): HTMLElement {
   return inspector;
 }
 
-function openActivityDrawer(): HTMLElement {
-  const button = screen.getByRole('button', { name: 'Open activity drawer' });
+async function openActivityDrawer(): Promise<HTMLElement> {
+  const button = await screen.findByRole('button', { name: 'Open activity drawer' });
   fireEvent.click(button);
   return screen.getByRole('complementary', { name: 'Activity drawer' });
 }
@@ -1715,7 +1715,7 @@ describe('App', () => {
     expect(screen.queryByRole('complementary', { name: 'Activity drawer' })).not.toBeInTheDocument();
     expect(screen.queryByRole('complementary', { name: 'Session inspector' })).not.toBeInTheDocument();
 
-    const drawer = openActivityDrawer();
+    const drawer = await openActivityDrawer();
     expect(within(drawer).getByRole('heading', { name: 'Activity' })).toBeInTheDocument();
     expect(within(drawer).getByRole('tab', { name: 'Activity' })).toHaveAttribute('aria-selected', 'true');
     expect(within(drawer).getByText('Current run')).toBeInTheDocument();
@@ -1728,7 +1728,7 @@ describe('App', () => {
   it('shows current tasks, advanced all tasks, and plan inside the Activity drawer', async () => {
     render(<App />);
 
-    const drawer = openActivityDrawer();
+    const drawer = await openActivityDrawer();
     fireEvent.click(within(drawer).getByRole('tab', { name: 'Tasks' }));
     const tasksPanel = within(drawer).getByRole('tabpanel', { name: 'Tasks' });
     expect(within(tasksPanel).getByRole('heading', { name: 'Tasks' })).toBeInTheDocument();
