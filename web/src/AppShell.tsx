@@ -105,7 +105,7 @@ export default function AppShell({
                 <div><dt>⌘/Ctrl K</dt><dd>Focus composer</dd></div>
                 <div><dt>/</dt><dd>Focus composer</dd></div>
                 <div><dt>⌘/Ctrl B</dt><dd>Toggle sidebar</dd></div>
-                <div><dt>⌘/Ctrl I</dt><dd>Toggle inspector</dd></div>
+                <div><dt>⌘/Ctrl I</dt><dd>Toggle Activity</dd></div>
                 <div><dt>⌥ Up/Down</dt><dd>Switch sessions</dd></div>
                 <div><dt>Esc</dt><dd>Close popovers</dd></div>
               </dl>
