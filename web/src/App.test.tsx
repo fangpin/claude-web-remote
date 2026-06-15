@@ -1738,7 +1738,12 @@ describe('App', () => {
     const activeHeaderBeforeStop = screen.getByRole('heading', { name: 'Worktree Repo' }).closest('header');
     expect(activeHeaderBeforeStop).not.toBeNull();
     expect(activeHeaderBeforeStop).not.toHaveTextContent('/repo/one');
-    expect(within(activeHeaderBeforeStop as HTMLElement).getByRole('button', { name: 'one · worktree' })).toBeInTheDocument();
+    const worktreeChip = within(activeHeaderBeforeStop as HTMLElement).getByRole('button', { name: 'one · worktree' });
+    expect(worktreeChip).toBeInTheDocument();
+    fireEvent.click(worktreeChip);
+    expect(await within(activeHeaderBeforeStop as HTMLElement).findByText('/repo/one')).toBeInTheDocument();
+    expect(within(activeHeaderBeforeStop as HTMLElement).getAllByText('/repo/one/.claude/worktrees/abc123').length).toBeGreaterThan(0);
+    expect(within(activeHeaderBeforeStop as HTMLElement).getByText('pin/abc123')).toBeInTheDocument();
 
     const worktreeStatus = await screen.findByLabelText('Worktree status');
     expect(within(worktreeStatus).getByText('Clean')).toBeInTheDocument();
@@ -1754,7 +1759,6 @@ describe('App', () => {
     await waitFor(() => expect(screen.queryByText('pin/abc123')).not.toBeInTheDocument());
     const activeHeader = screen.getByRole('heading', { name: 'Worktree Repo' }).closest('header');
     expect(activeHeader).not.toBeNull();
-    expect(activeHeader).not.toHaveTextContent('/repo/one');
     expect(within(activeHeader as HTMLElement).getByRole('button', { name: 'one · workspace' })).toBeInTheDocument();
   });
 
@@ -1776,6 +1780,10 @@ describe('App', () => {
     expect(screen.getByText(/diff --git a\/web\/src\/App\.tsx/)).toBeInTheDocument();
     expect(screen.getByText(/cleanup is blocked until you commit, stash, or clean/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Review dirty worktree first' })).toBeDisabled();
+    const header = screen.getByRole('heading', { name: 'Worktree Repo' }).closest('header');
+    expect(header).not.toBeNull();
+    fireEvent.click(within(header as HTMLElement).getByRole('button', { name: 'More session actions' }));
+    expect(within(header as HTMLElement).getByRole('button', { name: 'Review dirty worktree first' })).toBeDisabled();
     expect(screen.getByText('Stop only')).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/sessions/s4/stop-and-remove-worktree')).toBe(false);
   });
