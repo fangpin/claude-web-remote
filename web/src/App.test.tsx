@@ -324,7 +324,12 @@ beforeEach(() => {
     }
     const worktreeDiffMatch = url.match(/^\/api\/sessions\/([^/?]+)\/worktree-diff$/);
     if (worktreeDiffMatch && !init) {
-      return jsonResponse({ diff: 'diff --git a/web/src/App.tsx b/web/src/App.tsx\n+changed' });
+      return jsonResponse({
+        diff: 'diff --git a/web/src/App.tsx b/web/src/App.tsx\n+changed',
+        files: [{ path: 'web/src/App.tsx', status: 'modified', additions: 1, deletions: 0 }],
+        truncated: false,
+        limitBytes: 200000
+      });
     }
     if (url === '/api/session-groups' && !init) {
       return jsonResponse({ groups: sessionGroups });
