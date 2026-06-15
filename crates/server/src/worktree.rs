@@ -152,13 +152,22 @@ impl WorktreeManager {
         .await?;
         let numstat = run_git(
             &meta.worktree_cwd,
-            ["diff", "--numstat", "--find-renames", base_ref, "--", "."],
+            [
+                "diff",
+                "--no-ext-diff",
+                "--numstat",
+                "--find-renames",
+                base_ref,
+                "--",
+                ".",
+            ],
         )
         .await?;
         let name_status = run_git(
             &meta.worktree_cwd,
             [
                 "diff",
+                "--no-ext-diff",
                 "--name-status",
                 "--find-renames",
                 base_ref,
