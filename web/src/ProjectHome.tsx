@@ -102,7 +102,20 @@ export default function ProjectHome({
   }
 
   function onPromptKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
+    const nativeEvent = event.nativeEvent as unknown as {
+      isComposing?: boolean;
+      nativeEvent?: { isComposing?: boolean };
+      keyCode?: number;
+      which?: number;
+    };
+    const isComposing =
+      nativeEvent.isComposing === true ||
+      nativeEvent.nativeEvent?.isComposing === true ||
+      (event as unknown as { isComposing?: boolean }).isComposing === true ||
+      nativeEvent.keyCode === 229 ||
+      nativeEvent.which === 229;
+
+    if (event.key !== 'Enter' || event.shiftKey || isComposing) return;
     event.preventDefault();
     if (canStart) void onStartSession(initialPrompt);
   }
