@@ -381,6 +381,19 @@
   overflow-wrap: anywhere;
 }
 
+@media (prefers-color-scheme: dark) {
+  .task-panel-empty,
+  .task-section-empty {
+    border-color: var(--border-subtle);
+    color: var(--text-soft);
+    background: var(--surface-raised);
+  }
+
+  .task-panel-empty-title {
+    color: var(--text);
+  }
+}
+
 @media (max-width: 680px) {
   .tasks-panel.task-center .task-card {
     grid-template-columns: minmax(0, 1fr);
