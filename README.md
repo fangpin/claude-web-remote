@@ -12,7 +12,7 @@ The code, files, git repositories, Claude CLI, and model gateway all stay on the
 - Session rename/update support
 - Custom session groups with drag-and-drop organization
 - Optional git worktree sessions with branch, dirty state, and changed-file visibility
-- Compact chat-first transcript display from `claude --output-format stream-json`, with detailed tool activity available in the Inspector
+- Compact chat-first transcript display from `claude --output-format stream-json`, with detailed tool activity available in the Activity drawer
 - User input forwarding to the remote Claude process
 - Claude-like composer with slash commands, context hints, context reference attachments, and inline stop/send controls
 - Read-only action review cards for waiting sessions, permission-like events, risky commands, and failed actions
@@ -208,9 +208,9 @@ The Web UI supports app-level shortcuts for keyboard-first navigation:
 | --- | --- |
 | `Cmd/Ctrl+K` | Focus the composer and open slash commands when the draft is empty |
 | `/` | Focus the composer from outside text fields |
-| `Esc` | Close shortcut help, slash autocomplete, new-session setup, or the inspector |
+| `Esc` | Close shortcut help, slash autocomplete, the Activity drawer, or the command palette |
 | `Cmd/Ctrl+B` | Toggle the session sidebar |
-| `Cmd/Ctrl+I` | Toggle the inspector |
+| `Cmd/Ctrl+I` | Toggle the Activity drawer |
 | `Alt/Option+Up` / `Alt/Option+Down` | Switch between visible sessions |
 
 `Cmd/Ctrl+L` is intentionally left to the browser address bar; use `Cmd/Ctrl+K` or `/` to return to Claude input.
@@ -259,7 +259,7 @@ This returns persisted append-only UI events as `{ "events": [...] }` for active
 
 ## Diagnostics
 
-The Inspector has a Diagnostics tab for startup and runtime health. It shows the resolved config summary, a secret-redacted launcher argv preview with the native Claude args appended, web asset status, data directory writability, recent failed sessions, and the selected session's recent stderr/error/system event summaries.
+The Activity drawer includes a dev-only Diagnostics section for startup and runtime health. It shows the resolved config summary, a secret-redacted launcher argv preview with the native Claude args appended, web asset status, data directory writability, recent failed sessions, and the selected session's recent stderr/error/system event summaries.
 
 The same data is available through:
 

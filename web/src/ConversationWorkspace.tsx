@@ -38,6 +38,7 @@ type Props = {
   canLoadOlderEvents: boolean;
   hiddenEventCount: number;
   reviewSurface: ReviewSurface | null;
+  isActivityDrawerOpen: boolean;
   isAwaitingClaude: boolean;
   isComposerSession: boolean;
   isSending: boolean;
@@ -60,6 +61,7 @@ type Props = {
   onRemoveContextAttachment: (id: string) => void;
   onSend: (event: FormEvent) => void;
   onSetActiveSuggestionIndex: (index: number) => void;
+  onToggleActivityDrawer: () => void;
   onUsePrompt: (prompt: string) => void;
   onDismissError: () => void;
   onRetryEvents: () => void;
@@ -297,6 +299,7 @@ export default function ConversationWorkspace({
   canLoadOlderEvents,
   hiddenEventCount,
   reviewSurface,
+  isActivityDrawerOpen,
   isAwaitingClaude,
   isComposerSession,
   isSending,
@@ -319,6 +322,7 @@ export default function ConversationWorkspace({
   onRemoveContextAttachment,
   onSend,
   onSetActiveSuggestionIndex,
+  onToggleActivityDrawer,
   onUsePrompt,
   onDismissError,
   onRetryEvents,
@@ -381,6 +385,15 @@ export default function ConversationWorkspace({
               </div>
               <p title={workspacePathForSession(activeSession)}>{workspacePathForSession(activeSession)}</p>
             </div>
+            <button
+              type="button"
+              className="activity-drawer-trigger"
+              aria-label={isActivityDrawerOpen ? 'Close activity drawer' : 'Open activity drawer'}
+              aria-expanded={isActivityDrawerOpen}
+              onClick={onToggleActivityDrawer}
+            >
+              Activity
+            </button>
           </header>
           {listMode === 'archived' && (
             <p className="deleted-note">This session is archived and read-only. Unarchive it before resuming work or sending messages.</p>

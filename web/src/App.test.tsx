@@ -267,12 +267,14 @@ function querySessionButton(name: string): HTMLElement | null {
   return (matches.find((element) => element.closest('button.session'))?.closest('button') as HTMLElement | null) ?? null;
 }
 
-function openInspector(): HTMLElement {
-  const inspector = screen.getByRole('complementary', { name: 'Session inspector' });
-  if (!within(inspector).queryByRole('tab', { name: 'Session tasks' })) {
-    fireEvent.click(screen.getByRole('button', { name: 'Show inspector' }));
-  }
-  return inspector;
+function expectSessionStatus(name: string, status: string) {
+  expect(within(sessionButton(name)).getByText(status)).toBeInTheDocument();
+}
+
+async function openActivityDrawer(): Promise<HTMLElement> {
+  const button = await screen.findByRole('button', { name: 'Open activity drawer' });
+  fireEvent.click(button);
+  return screen.getByRole('complementary', { name: 'Activity drawer' });
 }
 
 class FakeWebSocket {
@@ -484,10 +486,11 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe('App', () => {
-  it('renders a chat-first shell without persistent console navigation', async () => {
+  it('renders the Claude-like shell regions with conversation and activity drawer entry', async () => {
     render(<App />);
 
     const sidebar = await screen.findByRole('complementary', { name: 'Session navigation' });
@@ -496,12 +499,8 @@ describe('App', () => {
     expect(within(sidebar).getByRole('button', { name: 'New chat' })).toBeInTheDocument();
     expect(within(sidebar).getByRole('button', { name: 'Open app menu' })).toBeInTheDocument();
     expect(screen.getByRole('main', { name: 'Conversation workspace' })).toBeInTheDocument();
-    expect(screen.getByRole('complementary', { name: 'Session inspector' })).toBeInTheDocument();
-
-    expect(screen.queryByRole('navigation', { name: 'Primary navigation' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Chats' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Side' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Keys' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('complementary', { name: 'Activity drawer' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'New chat' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Working directory')).not.toBeInTheDocument();
   });
 
@@ -539,10 +538,10 @@ describe('App', () => {
     expect(screen.queryByRole('button', { name: 'Copy review' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Allow' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Deny' })).not.toBeInTheDocument();
-    const inspector = openInspector();
-    expect(within(inspector).getByRole('tab', { name: 'Session tasks' })).toBeInTheDocument();
-    fireEvent.click(within(inspector).getByRole('tab', { name: 'Session tasks' }));
-    const sessionPanel = within(inspector).getByRole('tabpanel', { name: 'Session tasks' });
+    const drawer = await openActivityDrawer();
+    expect(within(drawer).getByRole('tab', { name: 'Tasks' })).toBeInTheDocument();
+    fireEvent.click(within(drawer).getByRole('tab', { name: 'Tasks' }));
+    const sessionPanel = within(drawer).getByRole('tabpanel', { name: 'Tasks' });
     expect(await within(sessionPanel).findByText('Agent: Review branch')).toBeInTheDocument();
 
     await waitFor(() => expect(FakeWebSocket.instances.length).toBe(1));
@@ -1094,14 +1093,14 @@ describe('App', () => {
     expect(palette).toHaveTextContent('Open slash commands');
     expect(palette).toHaveTextContent('Repo One');
     expect(palette).toHaveTextContent('Open settings');
-    expect(palette).toHaveTextContent('Show inspector');
+    expect(palette).toHaveTextContent('Show activity');
   });
 
   it('toggles panels and cycles sessions with app-level shortcuts', async () => {
     render(<App />);
 
     expect(await screen.findByRole('complementary', { name: 'Session navigation' })).toBeVisible();
-    expect(screen.getByRole('complementary', { name: 'Session inspector' })).toBeInTheDocument();
+    expect(screen.queryByRole('complementary', { name: 'Activity drawer' })).not.toBeInTheDocument();
 
     const shell = document.querySelector('.app-shell');
     expect(shell).not.toBeNull();
@@ -1113,10 +1112,12 @@ describe('App', () => {
     expect(shell).toHaveClass('sidebar-open');
 
     fireEvent.keyDown(window, { key: 'i', ctrlKey: true });
-    expect(screen.getByRole('button', { name: 'Hide inspector' })).toBeInTheDocument();
+    const drawer = screen.getByRole('complementary', { name: 'Activity drawer' });
+    expect(drawer).toBeInTheDocument();
+    expect(within(drawer).getByRole('button', { name: 'Close activity drawer' })).toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: 'i', ctrlKey: true });
-    expect(screen.getByRole('button', { name: 'Show inspector' })).toBeInTheDocument();
+    expect(screen.queryByRole('complementary', { name: 'Activity drawer' })).not.toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: 'ArrowDown', altKey: true });
     expect(await screen.findByRole('heading', { name: 'Stopped Repo' })).toBeInTheDocument();
@@ -1127,18 +1128,18 @@ describe('App', () => {
     expect(screen.getByRole('heading', { name: 'Stopped Repo' })).toBeInTheDocument();
   });
 
-  it('toggles the inspector from the visible edge controls on the first click', async () => {
+  it('toggles the Activity drawer from the header trigger and close button on the first click', async () => {
     render(<App />);
 
-    await screen.findByRole('complementary', { name: 'Session inspector' });
+    const trigger = await screen.findByRole('button', { name: 'Open activity drawer' });
+    fireEvent.click(trigger);
+    const drawer = screen.getByRole('complementary', { name: 'Activity drawer' });
+    expect(drawer).toBeInTheDocument();
+    const closeButton = within(drawer).getByRole('button', { name: 'Close activity drawer' });
+    expect(closeButton).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Show inspector' }));
-    expect(screen.getByRole('button', { name: 'Hide inspector' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Show inspector' })).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Hide inspector' }));
-    expect(screen.getByRole('button', { name: 'Show inspector' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Hide inspector' })).not.toBeInTheDocument();
+    fireEvent.click(closeButton);
+    expect(screen.queryByRole('complementary', { name: 'Activity drawer' })).not.toBeInTheDocument();
   });
 
   it('closes app popovers with Escape and focuses composer after creating a session', async () => {
@@ -1151,13 +1152,13 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
     expect(await screen.findByRole('heading', { name: 'What would you like Claude to do?' })).toBeInTheDocument();
     fireEvent.keyDown(window, { key: 'Escape' });
-    expect(screen.getByRole('heading', { name: 'What would you like Claude to do?' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Show inspector' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Where should Claude work?' })).toBeInTheDocument();
+    expect(screen.queryByRole('complementary', { name: 'Activity drawer' })).not.toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: 'i', ctrlKey: true });
-    expect(screen.getByRole('button', { name: 'Hide inspector' })).toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: 'Activity drawer' })).toBeInTheDocument();
     fireEvent.keyDown(window, { key: 'Escape' });
-    expect(screen.getByRole('button', { name: 'Show inspector' })).toBeInTheDocument();
+    expect(screen.queryByRole('complementary', { name: 'Activity drawer' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Change project context' }));
@@ -1612,9 +1613,9 @@ describe('App', () => {
     expect(await screen.findByText('archived session history')).toBeInTheDocument();
     expect(screen.getByText('This session is archived and read-only. Unarchive it before resuming work or sending messages.')).toBeInTheDocument();
     expect(screen.getByLabelText('Message')).toBeDisabled();
-    const inspector = openInspector();
-    fireEvent.click(within(inspector).getByRole('tab', { name: 'Session tasks' }));
-    const sessionPanel = within(inspector).getByRole('tabpanel', { name: 'Session tasks' });
+    const drawer = await openActivityDrawer();
+    fireEvent.click(within(drawer).getByRole('tab', { name: 'Tasks' }));
+    const sessionPanel = within(drawer).getByRole('tabpanel', { name: 'Tasks' });
     expect(within(sessionPanel).queryByText('Agent: Review branch')).not.toBeInTheDocument();
     expect(FakeWebSocket.instances.every((socket) => !socket.url.includes('/api/sessions/s3/events'))).toBe(true);
 
@@ -1819,30 +1820,44 @@ describe('App', () => {
     expect(screen.getByText('Stop only')).toBeInTheDocument();
   });
 
-  it('shows session tasks in the inspector and can switch to all tasks and plan', async () => {
+  it('opens the Activity drawer from the conversation header and defaults to activity', async () => {
     render(<App />);
 
-    const inspector = openInspector();
-    fireEvent.click(within(inspector).getByRole('tab', { name: 'Session tasks' }));
-    const sessionPanel = within(inspector).getByRole('tabpanel', { name: 'Session tasks' });
-    expect(within(sessionPanel).getByRole('heading', { name: 'Session tasks' })).toBeInTheDocument();
-    expect(await within(sessionPanel).findByText('Agent: Review branch')).toBeInTheDocument();
-    expect(within(inspector).queryByRole('tab', { name: 'Details' })).not.toBeInTheDocument();
-    expect(within(inspector).getByRole('tab', { name: 'Session tasks' })).toHaveAttribute('tabIndex', '0');
-    expect(within(inspector).getByRole('tab', { name: 'All tasks' })).toHaveAttribute('tabIndex', '-1');
-    expect(within(inspector).getByRole('tab', { name: 'Plan' })).toHaveAttribute('tabIndex', '-1');
+    await screen.findByRole('heading', { name: 'Repo One' });
+    expect(screen.queryByRole('complementary', { name: 'Activity drawer' })).not.toBeInTheDocument();
 
-    fireEvent.keyDown(within(inspector).getByRole('tab', { name: 'Session tasks' }), { key: 'ArrowRight' });
-    expect(within(inspector).getByRole('tab', { name: 'All tasks' })).toHaveAttribute('aria-selected', 'true');
-    expect(within(inspector).getByRole('tab', { name: 'All tasks' })).toHaveFocus();
-    expect(within(inspector).getByRole('tab', { name: 'Session tasks' })).toHaveAttribute('tabIndex', '-1');
+    const drawer = await openActivityDrawer();
+    expect(within(drawer).getByRole('heading', { name: 'Activity' })).toBeInTheDocument();
+    expect(within(drawer).getByRole('tab', { name: 'Activity' })).toHaveAttribute('aria-selected', 'true');
+    expect(within(drawer).getByText('Current run')).toBeInTheDocument();
+    expect(within(drawer).getAllByText(/Claude is waiting/i).length).toBeGreaterThan(0);
+    expect(within(drawer).getByRole('tab', { name: 'Tasks' })).toHaveAttribute('tabIndex', '-1');
+    expect(within(drawer).getByRole('tab', { name: 'Plan' })).toHaveAttribute('tabIndex', '-1');
+    expect(within(drawer).queryByRole('tab', { name: 'Session tasks' })).not.toBeInTheDocument();
+  });
 
-    fireEvent.click(within(inspector).getByRole('tab', { name: 'All tasks' }));
-    const allTasksPanel = within(inspector).getByRole('tabpanel', { name: 'All tasks' });
+  it('shows current tasks, advanced all tasks, and plan inside the Activity drawer', async () => {
+    render(<App />);
+
+    const drawer = await openActivityDrawer();
+    fireEvent.click(within(drawer).getByRole('tab', { name: 'Tasks' }));
+    const tasksPanel = within(drawer).getByRole('tabpanel', { name: 'Tasks' });
+    expect(within(tasksPanel).getByRole('heading', { name: 'Tasks' })).toBeInTheDocument();
+    expect(await within(tasksPanel).findByText('Agent: Review branch')).toBeInTheDocument();
+    expect(within(drawer).getByRole('tab', { name: 'Tasks' })).toHaveAttribute('tabIndex', '0');
+    expect(within(drawer).getByRole('tab', { name: 'Plan' })).toHaveAttribute('tabIndex', '-1');
+
+    fireEvent.keyDown(within(drawer).getByRole('tab', { name: 'Tasks' }), { key: 'ArrowRight' });
+    expect(within(drawer).getByRole('tab', { name: 'Plan' })).toHaveAttribute('aria-selected', 'true');
+    expect(within(drawer).getByRole('tab', { name: 'Plan' })).toHaveFocus();
+    expect(within(drawer).getByRole('tab', { name: 'Tasks' })).toHaveAttribute('tabIndex', '-1');
+
+    fireEvent.click(within(drawer).getByRole('button', { name: 'All tasks' }));
+    const allTasksPanel = within(drawer).getByRole('tabpanel', { name: 'All tasks' });
     expect(await within(allTasksPanel).findByText('Agent: Check stopped repo')).toBeInTheDocument();
 
-    fireEvent.click(within(inspector).getByRole('tab', { name: 'Plan' }));
-    const planPanel = within(inspector).getByRole('tabpanel', { name: 'Plan' });
+    fireEvent.click(within(drawer).getByRole('tab', { name: 'Plan' }));
+    const planPanel = within(drawer).getByRole('tabpanel', { name: 'Plan' });
     expect(within(planPanel).getByText('No plan available for this session.')).toBeInTheDocument();
 
     await waitFor(() => expect(FakeWebSocket.instances.length).toBe(1));
@@ -1862,13 +1877,13 @@ describe('App', () => {
     expect(within(planPanel).getByText('From ExitPlanMode')).toBeInTheDocument();
   });
 
-  it('shows runtime diagnostics in the inspector', async () => {
+  it('shows runtime diagnostics from the Activity drawer advanced section in dev mode', async () => {
     render(<App />);
 
-    const inspector = openInspector();
-    fireEvent.click(within(inspector).getByRole('tab', { name: 'Diagnostics' }));
+    const drawer = await openActivityDrawer();
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Diagnostics' }));
 
-    const diagnosticsPanel = within(inspector).getByRole('tabpanel', { name: 'Diagnostics' });
+    const diagnosticsPanel = within(drawer).getByRole('tabpanel', { name: 'Diagnostics' });
     expect(await within(diagnosticsPanel).findByText('Daemon health checks are passing.')).toBeInTheDocument();
     expect(within(diagnosticsPanel).getByText('Data directory exists and is writable.')).toBeInTheDocument();
     expect(within(diagnosticsPanel).getByText('claude --print --input-format stream-json --output-format stream-json --include-partial-messages --permission-mode bypassPermissions --verbose')).toBeInTheDocument();
@@ -1877,12 +1892,20 @@ describe('App', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/diagnostics', undefined);
   });
 
+  it('hides Diagnostics from the Activity drawer advanced section outside dev mode', async () => {
+    vi.stubEnv('DEV', false);
+    render(<App />);
+
+    const drawer = await openActivityDrawer();
+    expect(within(drawer).queryByRole('button', { name: 'Diagnostics' })).not.toBeInTheDocument();
+  });
+
   it('selects the owning session and refreshes tasks when a task is clicked', async () => {
     render(<App />);
 
-    const inspector = openInspector();
-    fireEvent.click(within(inspector).getByRole('tab', { name: 'All tasks' }));
-    const allTasksPanel = within(inspector).getByRole('tabpanel', { name: 'All tasks' });
+    const drawer = await openActivityDrawer();
+    fireEvent.click(within(drawer).getByRole('button', { name: 'All tasks' }));
+    const allTasksPanel = within(drawer).getByRole('tabpanel', { name: 'All tasks' });
     const task = await within(allTasksPanel).findByText('Agent: Check stopped repo');
     const taskListCallsBeforeSelection = fetchMock.mock.calls.filter(([url]) => url === '/api/tasks').length;
 
@@ -1914,9 +1937,9 @@ describe('App', () => {
 
     render(<App />);
 
-    const inspector = openInspector();
-    fireEvent.click(within(inspector).getByRole('tab', { name: 'All tasks' }));
-    const allTasksPanel = within(inspector).getByRole('tabpanel', { name: 'All tasks' });
+    const drawer = await openActivityDrawer();
+    fireEvent.click(within(drawer).getByRole('button', { name: 'All tasks' }));
+    const allTasksPanel = within(drawer).getByRole('tabpanel', { name: 'All tasks' });
 
     await waitFor(() => expect(taskRequests.length).toBeGreaterThanOrEqual(2));
 
