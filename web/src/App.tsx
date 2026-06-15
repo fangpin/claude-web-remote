@@ -290,7 +290,7 @@ function focusFallbackAfterSidebarClose() {
         focusComposer(false);
         return;
       }
-      document.querySelector<HTMLButtonElement>('.primary-rail button')?.focus();
+      document.querySelector<HTMLElement>('.conversation-workspace, .config-workspace')?.focus();
     });
   }
 
@@ -355,8 +355,6 @@ function focusFallbackAfterSidebarClose() {
     sessionState.openStartSurface();
   }
 
-  const attentionState = currentReviewSurface ? 'review' : eventState.isAwaitingClaude ? 'working' : 'idle';
-  const attentionLabel = currentReviewSurface?.title ?? (eventState.isAwaitingClaude ? 'Claude is working' : null);
   const attentionKey = currentReviewSurface
     ? `${sessionState.activeSession?.id ?? 'session'}:${currentReviewSurface.activity?.id ?? currentReviewSurface.title}`
     : null;
@@ -601,17 +599,9 @@ function focusFallbackAfterSidebarClose() {
     <>
     <AppShell
       view={view}
-      listMode={sessionState.listMode}
       isInspectorOpen={isInspectorOpen}
       inspectorWidth={inspectorWidth}
-      isShortcutHelpOpen={isShortcutHelpOpen}
       isSidebarOpen={isSidebarOpen}
-      attentionState={attentionState}
-      attentionLabel={attentionLabel}
-      onSetShortcutHelpOpen={setIsShortcutHelpOpen}
-      onShowActiveSessions={showActiveSessions}
-      onShowArchivedSessions={showArchivedSessions}
-      onToggleSidebar={toggleSidebar}
       sidebar={
         <SessionSidebar
           activeId={sessionState.activeId}
