@@ -11,6 +11,10 @@ const appCss = () => {
   const appCssPath = './App.css';
   return readFileSync(new URL(appCssPath, import.meta.url), 'utf8');
 };
+const blockListCss = () => {
+  const blockListCssPath = './ConversationBlockList.css';
+  return readFileSync(new URL(blockListCssPath, import.meta.url), 'utf8');
+};
 
 describe('ConversationBlockList', () => {
   beforeEach(() => cleanup());
@@ -659,6 +663,36 @@ describe('ConversationBlockList', () => {
     expect(css).not.toMatch(/\.task-header\s*>\s*div/);
     expect(css).not.toMatch(/\.block-section\s+strong/);
     expect(css).toMatch(/\.output-(path|value)\b/);
+    expect(css).toMatch(/\.conversation-display-mode\b/);
+  });
+
+  it('keeps ConversationBlockList.css aligned with compact summary DOM', () => {
+    const css = blockListCss();
+
+    expect(css).toMatch(/\.tool-summary-details\b/);
+    expect(css).toMatch(/\.tool-summary-chip\b/);
+    expect(css).toMatch(/\.tool-summary-body\b/);
+  });
+
+  it('renders task activity as a compact summary in chat mode', () => {
+    const blocks: ConversationBlock[] = [
+      {
+        id: 'task-chat-summary',
+        type: 'task',
+        title: 'Explore rendering',
+        source: 'Agent',
+        status: 'completed',
+        summary: 'Completed.',
+        eventIds: [23],
+        rawEvents: [rawEvent(23, { summary: 'Completed.' })]
+      }
+    ];
+
+    renderConversation(blocks, 'chat');
+
+    const summary = screen.getByText('▸ Explore rendering');
+    expect(summary.closest('summary')).toHaveClass('tool-summary-chip', 'task-summary-chip');
+    expect(summary.closest('details')).toHaveClass('task-summary-details', 'completed');
   });
 
   it('renders error and raw fallback blocks', () => {
