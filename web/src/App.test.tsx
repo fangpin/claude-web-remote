@@ -1680,9 +1680,11 @@ describe('App', () => {
     fireEvent.click(screen.getByText('Changed files (1)'));
     expect(screen.getByText('web/src/App.tsx')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Attach' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'View diff' }));
-    expect(await screen.findByText('Worktree diff')).toBeInTheDocument();
-    expect(screen.getByText(/diff --git a\/web\/src\/App\.tsx/)).toBeInTheDocument();
+    const inspector = openInspector();
+    fireEvent.click(within(inspector).getByRole('tab', { name: 'Preview' }));
+    const previewPanel = within(inspector).getByRole('tabpanel', { name: 'Preview' });
+    expect(await within(previewPanel).findByText('Worktree diff')).toBeInTheDocument();
+    expect(within(previewPanel).getByText(/diff --git a\/web\/src\/App\.tsx/)).toBeInTheDocument();
     expect(screen.getByText(/cleanup is blocked until you commit, stash, or clean/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Review dirty worktree first' })).toBeDisabled();
     expect(screen.getByText('Stop only')).toBeInTheDocument();

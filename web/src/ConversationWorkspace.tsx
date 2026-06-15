@@ -1,5 +1,4 @@
-import { useState, type FormEvent, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
-import { getWorktreeDiff } from './api';
+import { type FormEvent, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import ConfigView from './ConfigView';
 import ConversationBlockList from './ConversationBlockList';
 import Composer from './Composer';
@@ -121,27 +120,10 @@ function WorktreeStatusPanel({
   error: string | null;
   isLoading: boolean;
 }) {
-  const [diff, setDiff] = useState<string | null>(null);
-  const [diffError, setDiffError] = useState<string | null>(null);
-  const [isDiffLoading, setIsDiffLoading] = useState(false);
-
   if (!session.worktree) return null;
   const files = status?.files ?? [];
   const branch = status?.branch ?? session.worktree.branch;
   const baseRef = status?.baseRef ?? session.worktree.baseRef;
-
-  async function loadDiff() {
-    setIsDiffLoading(true);
-    setDiffError(null);
-    try {
-      const result = await getWorktreeDiff(session.id);
-      setDiff(result.diff || 'No unstaged diff.');
-    } catch (err: unknown) {
-      setDiffError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setIsDiffLoading(false);
-    }
-  }
 
   function copyDeliveryContext() {
     const changedFiles = status?.files.map((file) => `${file.indexStatus}${file.worktreeStatus} ${file.path}`).join('\n') || 'No changed files';
@@ -183,7 +165,6 @@ function WorktreeStatusPanel({
             </div>
           </dl>
         </details>
-        {status?.dirty && <button type="button" onClick={loadDiff} disabled={isDiffLoading}>{isDiffLoading ? 'Loading diff...' : 'View diff'}</button>}
         {session.worktree && <button type="button" onClick={copyDeliveryContext}>Copy delivery context</button>}
       </div>
       {error && <p className="worktree-warning">Unable to read worktree status: {error}</p>}
@@ -204,13 +185,6 @@ function WorktreeStatusPanel({
               </li>
             ))}
           </ul>
-        </details>
-      )}
-      {diffError && <p className="worktree-warning">Unable to load diff: {diffError}</p>}
-      {diff && (
-        <details className="worktree-diff-viewer" open>
-          <summary>Worktree diff</summary>
-          <pre>{diff}</pre>
         </details>
       )}
     </section>
