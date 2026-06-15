@@ -600,6 +600,20 @@ describe('App', () => {
     await waitFor(() => expect(screen.getAllByText('Ready for your reply').length).toBeGreaterThan(0));
   });
 
+  it('keeps transcript display mode scoped to the selected session', async () => {
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'Repo One' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Debug view' }));
+    expect(screen.getByRole('button', { name: 'Debug view' })).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(sessionButton('Stopped Repo'));
+
+    expect(await screen.findByRole('heading', { name: 'Stopped Repo' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Chat view' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Debug view' })).toHaveAttribute('aria-pressed', 'false');
+  });
+
   it('filters sessions locally by name, cwd, status, and worktree branch', async () => {
     render(<App />);
 

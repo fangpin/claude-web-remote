@@ -52,7 +52,7 @@ export default function App() {
   const [notifiedAttentionKey, setNotifiedAttentionKey] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('session');
-  const [conversationDisplayMode, setConversationDisplayMode] = useState<ConversationDisplayMode>('chat');
+  const [conversationDisplayModes, setConversationDisplayModes] = useState<Record<string, ConversationDisplayMode>>({});
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const isDiagnosticsVisible = view === 'sessions' && isInspectorOpen && inspectorTab === 'diagnostics';
   const taskActionsRef = useRef<TaskActions>({
@@ -95,6 +95,15 @@ export default function App() {
     refreshTasks: taskState.refreshTasks,
     refreshSessionTasks: taskState.refreshSessionTasks
   };
+  const conversationDisplayMode = sessionState.activeId ? (conversationDisplayModes[sessionState.activeId] ?? 'chat') : 'chat';
+  const setConversationDisplayMode = useCallback((mode: ConversationDisplayMode) => {
+    const sessionId = sessionState.activeId;
+    if (!sessionId) return;
+    setConversationDisplayModes((current) => ({
+      ...current,
+      [sessionId]: mode
+    }));
+  }, [sessionState.activeId]);
 
   const eventState = useSessionEvents({
     activeId: sessionState.activeId,
