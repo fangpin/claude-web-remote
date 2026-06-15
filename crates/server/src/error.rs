@@ -14,6 +14,8 @@ pub enum AppError {
     NotFound(String),
     #[error("invalid request: {0}")]
     InvalidRequest(String),
+    #[error("conflict: {0}")]
+    Conflict(String),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     #[error("json error: {0}")]
@@ -27,6 +29,7 @@ impl IntoResponse for AppError {
         let status = match self {
             AppError::NotFound(_) => StatusCode::NOT_FOUND,
             AppError::InvalidRequest(_) => StatusCode::BAD_REQUEST,
+            AppError::Conflict(_) => StatusCode::CONFLICT,
             AppError::Io(_) | AppError::Json(_) | AppError::Process(_) => {
                 StatusCode::INTERNAL_SERVER_ERROR
             }

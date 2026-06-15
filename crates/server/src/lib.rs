@@ -4,6 +4,7 @@ pub mod diagnostics;
 pub mod embedded_assets;
 pub mod error;
 pub mod event;
+pub mod permission;
 pub mod process;
 pub mod session;
 pub mod store;
@@ -17,6 +18,11 @@ pub use config::{
 pub use diagnostics::{DiagnosticsResponse, SessionDiagnosticsResponse};
 pub use error::{AppError, AppResult};
 pub use event::{EventKind, UiEvent, extract_claude_session_id, normalize_claude_stdout};
+pub use permission::{
+    AllowPermissionRequest, DenyPermissionRequest, HookPermissionRequest, PendingPermissionRequest,
+    PendingPermissionsResponse, PermissionBridge, PermissionCapability, PermissionCapabilityStatus,
+    PermissionDecision, PermissionEditable, PermissionStatus, hook_stdout_for_decision,
+};
 pub use process::{ClaudeProcess, ClaudeProcessConfig, ProcessEvent};
 pub use session::{CreateSessionRequest, SessionInfo, SessionManager, WorktreeRequest};
 pub use store::{EventStore, SessionGroup, SessionListFilter, SessionMeta, SessionStatus};
