@@ -1274,9 +1274,9 @@ describe('App', () => {
   it('keeps end session in the sidebar actions instead of the composer', async () => {
     render(<App />);
 
+    expect(await screen.findByRole('heading', { name: 'Repo One' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Stop session' })).not.toBeInTheDocument();
-    const sidebar = await screen.findByRole('complementary', { name: 'Session navigation' });
-    fireEvent.click(within(sidebar).getByRole('button', { name: 'End session' }));
+    fireEvent.click(within(sidebarSelectedActions()).getByRole('button', { name: 'End session' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s1/stop', expect.objectContaining({ method: 'POST' })));
   });
