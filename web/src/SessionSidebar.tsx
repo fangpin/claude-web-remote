@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState, type DragEvent, type ReactNode } from 'react';
-import { runtimeStatusLabels, type SessionListMode } from './AppShell';
-import { getContinuityLabel, getRuntimeStatus } from './sessionContinuity';
-import type { SessionGroup, SessionInfo } from './types';
+import { type SessionListMode } from './AppShell';
+import { getRuntimeStatus } from './sessionContinuity';
+import type { SessionGroup, SessionInfo, SessionRuntimeStatus, SessionStatus } from './types';
 
-type RuntimeStatusKey = keyof typeof runtimeStatusLabels;
+type RuntimeStatusKey = SessionRuntimeStatus | SessionStatus;
 
 const PINNED_SESSION_STORAGE_KEY = 'claude-remote-web:pinned-session-ids';
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -193,21 +193,42 @@ function formatRelativeUpdatedAt(value: string): string {
   return `Updated ${new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric' }).format(new Date(timestamp))}`;
 }
 
-function resumeCueForSession(session: SessionInfo, listMode: SessionListMode): string {
-  if (listMode === 'archived' || session.deletedAt) return 'Archived. Unarchive to continue.';
-
-  const runtimeStatus = getRuntimeStatus(session);
-  if (runtimeStatus === 'waiting') return 'Ready for your reply';
-  if (runtimeStatus === 'starting') return 'Starting Claude';
-  if (runtimeStatus === 'running') return 'Claude is working';
-  if (runtimeStatus === 'failed') return session.claudeSessionId ? 'Resume or restart from saved context' : 'Review the failed run';
-  if (session.claudeSessionId) return 'Resume this chat';
-  return 'Continue from this project';
-}
-
 function branchLabel(session: SessionInfo): string | null {
   if (!session.worktree?.branch) return null;
   return `Branch: ${session.worktree.branch}`;
+}
+
+type SessionListItemProps = {
+  activeId: string | null;
+  listMode: SessionListMode;
+  pinnedSessionIds: Set<string>;
+  session: SessionInfo;
+  sessionGroups: SessionGroup[];
+  onMoveSessionToGroup: (sessionId: string, groupId: string | null) => void;
+  onSelectSession: (sessionId: string) => void;
+  onSessionDragStart: (event: DragEvent<HTMLDivElement>, sessionId: string) => void;
+  onTogglePinned: (sessionId: string) => void;
+};
+
+function compactRelativeUpdatedAt(value: string): string {
+  return formatRelativeUpdatedAt(value).replace(/^Updated\s+/u, '');
+}
+
+function compactRuntimeLabel(session: SessionInfo, listMode: SessionListMode): string | null {
+  if (listMode === 'archived' || session.deletedAt) return null;
+  const runtimeStatus = getRuntimeStatus(session);
+  if (runtimeStatus === 'running') return 'running';
+  if (runtimeStatus === 'starting') return 'starting';
+  if (runtimeStatus === 'waiting') return 'waiting';
+  if (runtimeStatus === 'failed') return 'failed';
+  return null;
+}
+
+function compactSubtitleForSession(session: SessionInfo, listMode: SessionListMode): string {
+  const projectName = pathBasename(projectPathForSession(session));
+  const runtimeLabel = compactRuntimeLabel(session, listMode);
+  const timeLabel = compactRelativeUpdatedAt(session.updatedAt);
+  return runtimeLabel ? `${projectName} · ${runtimeLabel} · ${timeLabel}` : `${projectName} · ${timeLabel}`;
 }
 
 function PinIcon({ filled }: { filled: boolean }) {
@@ -220,6 +241,81 @@ function PinIcon({ filled }: { filled: boolean }) {
         strokeLinejoin="round"
       />
     </svg>
+  );
+}
+
+function SessionListItem({
+  activeId,
+  listMode,
+  pinnedSessionIds,
+  session,
+  sessionGroups,
+  onMoveSessionToGroup,
+  onSelectSession,
+  onSessionDragStart,
+  onTogglePinned
+}: SessionListItemProps) {
+  const runtimeStatus = getSidebarRuntimeStatus(session);
+  const statusClass = listMode === 'archived' ? 'archived' : runtimeStatus;
+  const sessionTitle = session.name || pathBasename(projectPathForSession(session));
+  const projectPath = projectPathForSession(session);
+  const isPinned = pinnedSessionIds.has(session.id);
+  const branch = branchLabel(session);
+  const isActive = session.id === activeId;
+  const worktreeLabel = session.worktree ? 'worktree' : null;
+
+  return (
+    <div
+      className={isActive ? 'session-row active' : 'session-row'}
+      key={session.id}
+      draggable
+      onDragStart={(event) => onSessionDragStart(event, session.id)}
+    >
+      <button
+        className={isActive ? 'session active' : 'session'}
+        aria-current={isActive ? 'page' : undefined}
+        data-session-id={session.id}
+        title="Select session (⌥ Up/Down switches sessions)"
+        onClick={() => onSelectSession(session.id)}
+      >
+        <span className="session-title-row">
+          <span className="session-title-main">
+            <span className={`session-attention-dot ${runtimeStatus}`} aria-hidden="true" />
+            <strong>{sessionTitle}</strong>
+          </span>
+        </span>
+        <span className="session-subtitle">{compactSubtitleForSession(session, listMode)}</span>
+        <span className="session-expanded-details" aria-label={`Details for ${sessionTitle}`}>
+          <span className="session-cwd" title={projectPath}>{projectPath}</span>
+          <span className="session-detail-chips">
+            {branch && <span className="session-detail-chip" title={branch}>{branch}</span>}
+            {worktreeLabel && <span className="session-detail-chip">{worktreeLabel}</span>}
+            <span className="session-detail-chip">{session.permissionMode}</span>
+            {listMode === 'archived' && <span className={`session-detail-chip status-${statusClass}`}>archived</span>}
+          </span>
+        </span>
+      </button>
+      <select
+        className="session-move-select"
+        aria-label={`Move ${sessionTitle} to group`}
+        value={session.groupId ?? ''}
+        onChange={(event) => onMoveSessionToGroup(session.id, event.target.value || null)}
+        title="Move conversation to group"
+      >
+        <option value="">Ungrouped</option>
+        {sessionGroups.map((group) => <option value={group.id} key={group.id}>{group.name}</option>)}
+      </select>
+      <button
+        type="button"
+        className={isPinned ? 'session-pin-button pinned' : 'session-pin-button'}
+        aria-label={`${isPinned ? 'Unpin' : 'Pin'} ${sessionTitle}`}
+        aria-pressed={isPinned}
+        title={isPinned ? 'Unpin conversation' : 'Pin conversation'}
+        onClick={() => onTogglePinned(session.id)}
+      >
+        <PinIcon filled={isPinned} />
+      </button>
+    </div>
   );
 }
 
@@ -427,69 +523,19 @@ export default function SessionSidebar({
                 >
                   {section.isCustomGroup && section.sessions.length === 0 && <p className="session-group-empty">Drop a chat here or use Move.</p>}
                   {section.sessions.map((session) => {
-                    const runtimeStatus = getSidebarRuntimeStatus(session);
-                    const statusClass = listMode === 'archived' ? 'archived' : runtimeStatus;
-                    const statusLabel = runtimeStatusLabels[runtimeStatus];
-                    const continuityLabel = getContinuityLabel(session, listMode);
-                    const sessionTitle = session.name || pathBasename(projectPathForSession(session));
-                    const projectPath = projectPathForSession(session);
-                    const projectName = pathBasename(projectPath);
-                    const projectParent = parentPath(projectPath);
-                    const isPinned = pinnedSessionIds.has(session.id);
-                    const branch = branchLabel(session);
-
                     return (
-                      <div
-                        className={session.id === activeId ? 'session-row active' : 'session-row'}
+                      <SessionListItem
+                        activeId={activeId}
                         key={session.id}
-                        draggable
-                        onDragStart={(event) => onSessionDragStart(event, session.id)}
-                      >
-                        <button
-                          className={session.id === activeId ? 'session active' : 'session'}
-                          aria-current={session.id === activeId ? 'page' : undefined}
-                          data-session-id={session.id}
-                          title="Select session (⌥ Up/Down switches sessions)"
-                          onClick={() => onSelectSession(session.id)}
-                        >
-                          <span className="session-title-row">
-                            <span className="session-title-main">
-                              <span className={`session-attention-dot ${runtimeStatus}`} aria-hidden="true" />
-                              <strong>{sessionTitle}</strong>
-                            </span>
-                            <em className={`status status-${statusClass}`}>{statusLabel}</em>
-                          </span>
-                          <span className="session-resume-cue">{continuityLabel ?? resumeCueForSession(session, listMode)}</span>
-                          <span className="session-path-row">
-                            <span className="session-project" title={projectPath}>{projectName}</span>
-                            <span className="session-parent" title={projectPath}>{projectParent}</span>
-                          </span>
-                          <span className="session-detail-row">
-                            {branch && <span className="session-branch" title={branch}>{branch}</span>}
-                            <span>{formatRelativeUpdatedAt(session.updatedAt)}</span>
-                          </span>
-                        </button>
-                        <select
-                          className="session-move-select"
-                          aria-label={`Move ${sessionTitle} to group`}
-                          value={session.groupId ?? ''}
-                          onChange={(event) => onMoveSessionToGroup(session.id, event.target.value || null)}
-                          title="Move conversation to group"
-                        >
-                          <option value="">Ungrouped</option>
-                          {sessionGroups.map((group) => <option value={group.id} key={group.id}>{group.name}</option>)}
-                        </select>
-                        <button
-                          type="button"
-                          className={isPinned ? 'session-pin-button pinned' : 'session-pin-button'}
-                          aria-label={`${isPinned ? 'Unpin' : 'Pin'} ${sessionTitle}`}
-                          aria-pressed={isPinned}
-                          title={isPinned ? 'Unpin conversation' : 'Pin conversation'}
-                          onClick={() => onTogglePinned(session.id)}
-                        >
-                          <PinIcon filled={isPinned} />
-                        </button>
-                      </div>
+                        listMode={listMode}
+                        pinnedSessionIds={pinnedSessionIds}
+                        session={session}
+                        sessionGroups={sessionGroups}
+                        onMoveSessionToGroup={onMoveSessionToGroup}
+                        onSelectSession={onSelectSession}
+                        onSessionDragStart={onSessionDragStart}
+                        onTogglePinned={onTogglePinned}
+                      />
                     );
                   })}
                 </div>
