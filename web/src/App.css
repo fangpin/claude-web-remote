@@ -534,36 +534,6 @@ label {
   justify-content: center;
 }
 
-.sidebar-title-row {
-  display: flex;
-  align-items: start;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.sidebar-menu-button {
-  flex: 0 0 auto;
-  width: 34px;
-  height: 34px;
-  border-color: transparent;
-  background: transparent;
-  padding: 0;
-  font-size: 20px;
-  line-height: 1;
-}
-
-.sidebar-new-chat {
-  width: 100%;
-}
-
-.app-shortcut-help-popover {
-  position: fixed;
-  top: 18px;
-  left: auto;
-  right: 18px;
-  z-index: 90;
-}
-
 .sidebar-header h1,
 .sidebar-header p,
 .new-session-panel h2,
