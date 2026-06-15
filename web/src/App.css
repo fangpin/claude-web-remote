@@ -4402,9 +4402,7 @@ button.danger:hover {
     background: transparent;
   }
 
-  .session-section-heading p,
-  .session-detail-row,
-  .session-parent {
+  .session-section-heading p {
     display: none;
   }
 
@@ -4774,16 +4772,6 @@ body {
   font-weight: 650;
 }
 
-.session-resume-cue,
-.session-path-row,
-.session-detail-row,
-.session em {
-  font-size: 11px;
-}
-
-.session-detail-row {
-  opacity: 0.82;
-}
 
 .status {
   border-color: transparent;
