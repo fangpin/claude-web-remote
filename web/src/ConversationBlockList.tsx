@@ -477,7 +477,7 @@ function TaskBlockView({ block, displayMode }: { block: TaskBlock; displayMode: 
   return (
     <details
       id={blockElementId(block)}
-      className={`conversation-block task-block ${block.status}${block.density === 'compact' ? ' compact' : ''} tool-summary-details`}
+      className={`conversation-block task-block ${block.status}${block.density === 'compact' ? ' compact' : ''} tool-summary-details task-summary-details`}
       open={isOpenByDefault}
     >
       <summary className="tool-summary-chip task-summary-chip">{summaryCaret(isOpenByDefault)} {label}</summary>
@@ -544,7 +544,7 @@ function ConversationDisplayModeSwitch({
   onDisplayModeChange: (mode: ConversationDisplayMode) => void;
 }) {
   return (
-    <div className="conversation-display-mode-switch" role="group" aria-label="Conversation display mode">
+    <div className="conversation-display-mode" role="group" aria-label="Conversation display mode">
       <button
         type="button"
         className={displayMode === 'chat' ? 'selected' : undefined}

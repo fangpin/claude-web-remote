@@ -1827,7 +1827,6 @@ button.danger:hover {
   min-height: 0;
 }
 
-.conversation-display-mode-switch,
 .conversation-display-mode {
   display: flex;
   justify-content: flex-end;
@@ -1835,7 +1834,6 @@ button.danger:hover {
   margin: 0 0 14px;
 }
 
-.conversation-display-mode-switch button,
 .conversation-display-mode button {
   border-color: transparent;
   border-radius: 999px;
@@ -1846,7 +1844,6 @@ button.danger:hover {
   font-weight: 680;
 }
 
-.conversation-display-mode-switch button.selected,
 .conversation-display-mode button.selected {
   border-color: var(--border);
   color: var(--text-soft);
