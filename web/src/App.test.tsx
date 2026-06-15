@@ -1719,7 +1719,7 @@ describe('App', () => {
     expect(within(drawer).getByRole('heading', { name: 'Activity' })).toBeInTheDocument();
     expect(within(drawer).getByRole('tab', { name: 'Activity' })).toHaveAttribute('aria-selected', 'true');
     expect(within(drawer).getByText('Current run')).toBeInTheDocument();
-    expect(within(drawer).getByText(/Claude is waiting/i)).toBeInTheDocument();
+    expect(within(drawer).getAllByText(/Claude is waiting/i).length).toBeGreaterThan(0);
     expect(within(drawer).getByRole('tab', { name: 'Tasks' })).toHaveAttribute('tabIndex', '-1');
     expect(within(drawer).getByRole('tab', { name: 'Plan' })).toHaveAttribute('tabIndex', '-1');
     expect(within(drawer).queryByRole('tab', { name: 'Session tasks' })).not.toBeInTheDocument();

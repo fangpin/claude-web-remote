@@ -98,7 +98,7 @@ export default function ActivityPanel({ activities = [], activeSession, waitingM
       </header>
       {waitingMessage && (
         <section className={`waiting-surface ${latestPermissionActivity ? 'permission-like' : ''}`} aria-label="Waiting status">
-          <h4>Waiting for you</h4>
+          <h4>Claude is waiting</h4>
           <p>{waitingMessage}</p>
           {latestPermissionActivity && (
             <button type="button" onClick={() => onSelectActivity(latestPermissionActivity)}>
