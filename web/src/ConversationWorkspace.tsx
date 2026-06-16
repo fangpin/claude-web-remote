@@ -78,7 +78,6 @@ type Props = {
   onAllowPermission: (permission: PendingPermissionRequest, updatedInput?: unknown) => void;
   onDenyPermission: (permission: PendingPermissionRequest, message: string) => void;
   onOpenPreviewPath: (path: string) => void;
-  onRenameSession: (sessionId: string, name: string | null) => void;
   onUseEmptyStatePrompt: (prompt: string) => void;
 };
 
@@ -126,7 +125,7 @@ function runtimeLabelForHeader(session: SessionInfo, listMode: SessionListMode):
 }
 
 function projectChipLabel(session: SessionInfo): string {
-  return `${shortWorkspaceName(session)} · ${session.worktree ? 'worktree' : 'workspace'}`;
+  return shortWorkspaceName(session);
 }
 
 function WorktreeStatusPanel({
@@ -232,55 +231,6 @@ function ApiErrorBanner({
         </details>
       )}
     </section>
-  );
-}
-
-function EditableSessionTitle({
-  session,
-  isRenaming,
-  value,
-  onValueChange,
-  onStartRename,
-  onFinishRename,
-  onCancelRename
-}: {
-  session: SessionInfo;
-  isRenaming: boolean;
-  value: string;
-  onValueChange: (value: string) => void;
-  onStartRename: () => void;
-  onFinishRename: () => void;
-  onCancelRename: () => void;
-}) {
-  const title = session.name || shortWorkspaceName(session);
-
-  if (isRenaming) {
-    return (
-      <input
-        className="editable-session-title-input"
-        autoFocus
-        value={value}
-        aria-label="Chat title"
-        onChange={(event) => onValueChange(event.target.value)}
-        onBlur={onFinishRename}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter') {
-            event.preventDefault();
-            onFinishRename();
-          }
-          if (event.key === 'Escape') {
-            event.preventDefault();
-            onCancelRename();
-          }
-        }}
-      />
-    );
-  }
-
-  return (
-    <button type="button" className="editable-session-title" onClick={onStartRename} aria-label="Rename chat">
-      <h2>{title}</h2>
-    </button>
   );
 }
 
@@ -410,28 +360,8 @@ export default function ConversationWorkspace({
   onAllowPermission,
   onDenyPermission,
   onOpenPreviewPath,
-  onRenameSession,
   onUseEmptyStatePrompt
 }: Props) {
-  const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
-  const [renameValue, setRenameValue] = useState('');
-
-  function startRename(session: SessionInfo) {
-    setRenamingSessionId(session.id);
-    setRenameValue(session.name || shortWorkspaceName(session));
-  }
-
-  function finishRename(session: SessionInfo) {
-    const trimmed = renameValue.trim();
-    setRenamingSessionId(null);
-    onRenameSession(session.id, trimmed || null);
-  }
-
-  function cancelRename() {
-    setRenamingSessionId(null);
-    setRenameValue('');
-  }
-
   if (view === 'config') {
     return (
       <main className="workspace config-workspace" aria-label="Configuration workspace" tabIndex={-1}>
@@ -459,15 +389,7 @@ export default function ConversationWorkspace({
             </button>
             <div className="conversation-title-group">
               <div className="conversation-title-row">
-                <EditableSessionTitle
-                  session={activeSession}
-                  isRenaming={renamingSessionId === activeSession.id}
-                  value={renameValue}
-                  onValueChange={setRenameValue}
-                  onStartRename={() => startRename(activeSession)}
-                  onFinishRename={() => finishRename(activeSession)}
-                  onCancelRename={cancelRename}
-                />
+                <h2 title={activeSession.name || shortWorkspaceName(activeSession)}>{activeSession.name || shortWorkspaceName(activeSession)}</h2>
                 <SessionAttentionSummary session={activeSession} listMode={listMode} />
               </div>
               <SessionContextPopover

@@ -641,21 +641,43 @@ async function expectComposerPinnedBelowEvents(page: Page) {
 }
 
 async function showInspectorIfNeeded(page: Page) {
-  const inspector = page.getByRole('complementary', { name: 'Session inspector' });
-  const showInspector = inspector.getByRole('button', { name: 'Show inspector' });
-  if (await showInspector.isVisible()) {
-    await showInspector.click();
+  const drawer = page.getByRole('complementary', { name: 'Activity drawer' });
+  if (await drawer.count() === 0) {
+    await page.getByRole('button', { name: 'Open activity drawer' }).click();
   }
-  await expect(inspector.getByRole('button', { name: 'Hide', exact: true })).toBeVisible();
-  return inspector;
+  await expect(drawer.getByRole('button', { name: 'Close activity drawer' })).toBeVisible();
+  return drawer;
 }
 
 async function expectCompactInspector(page: Page, name: string) {
-  const inspector = page.getByRole('complementary', { name: 'Session inspector' });
-  await boxFor(inspector, name);
-  await expectViewportContains(inspector, name);
-  await expect(inspector.getByRole('button', { name: 'Hide inspector' })).toBeVisible();
-  return inspector;
+  return showInspectorIfNeeded(page);
+}
+
+async function openSessionTasks(page: Page) {
+  const drawer = await showInspectorIfNeeded(page);
+  await drawer.getByRole('tab', { name: 'Tasks' }).click();
+  const panel = drawer.getByRole('tabpanel', { name: 'Tasks' });
+  await expect(panel).toBeVisible();
+  return { drawer, panel };
+}
+
+async function openAllTasks(page: Page) {
+  const drawer = await showInspectorIfNeeded(page);
+  await drawer.getByRole('button', { name: 'All tasks' }).click();
+  const panel = drawer.getByRole('tabpanel', { name: 'All tasks' });
+  await expect(panel).toBeVisible();
+  return { drawer, panel };
+}
+
+async function openSettingsFromCommandPalette(page: Page) {
+  await page.getByRole('button', { name: 'Open app menu' }).click();
+  const palette = page.getByRole('dialog', { name: 'Command palette' });
+  await expect(palette).toBeVisible();
+  await palette.getByRole('button', { name: 'Open settings' }).click();
+}
+
+async function openArchivedChats(page: Page) {
+  await page.getByRole('button', { name: 'Archived chats' }).click();
 }
 
 async function prepareForScreenshot(page: Page) {
@@ -673,6 +695,20 @@ async function prepareForScreenshot(page: Page) {
 async function expectVisualSnapshot(page: Page, name: string) {
   await prepareForScreenshot(page);
   await expect(page).toHaveScreenshot(name);
+}
+
+async function expectConversationTopVisualSnapshot(page: Page, name: string) {
+  await prepareForScreenshot(page);
+  await resetConversationScrollToTop(page);
+  await expect(page).toHaveScreenshot(name);
+}
+
+async function resetConversationScrollToTop(page: Page) {
+  await page.locator('.events').evaluate((element) => {
+    element.style.scrollBehavior = 'auto';
+    element.scrollTop = 0;
+  });
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
 }
 
 async function selectSession(page: Page, name: RegExp | string) {
@@ -777,6 +813,17 @@ test('session actions live in the session row overflow menu', async ({ page }) =
   await expect(row.getByRole('menuitem', { name: 'Archive' })).toBeVisible();
 });
 
+test('conversation header stays minimal', async ({ page }) => {
+  const header = page.locator('.conversation-header');
+  await expect(header).toBeVisible();
+  await expect(header.getByRole('button', { name: 'More session actions' })).toHaveCount(0);
+  await expect(header.getByRole('button', { name: 'Archive' })).toHaveCount(0);
+  await expect(header.getByRole('button', { name: 'Restart' })).toHaveCount(0);
+  await expect(header.getByRole('button', { name: 'Rename chat' })).toHaveCount(0);
+  await expect(header.getByText('permission mode')).toHaveCount(0);
+  await expect(header.getByText('workspace')).toHaveCount(0);
+});
+
 test('conversation content can scroll to the final block without composer obstruction', async ({ page }) => {
   const events = page.locator('.events');
   const finalMessage = page.locator('.message-block.assistant').last();
@@ -806,6 +853,7 @@ test('autocomplete remains within the composer and viewport', async ({ page }) =
   await expectNoHorizontalPageOverflow(page);
 
   const composerBox = await boxFor(page.getByRole('form', { name: 'Message composer' }), 'composer');
+  const textareaBox = await boxFor(message, 'composer textarea');
   const autocompleteBox = await boxFor(autocomplete, 'autocomplete');
   expect(autocompleteBox.x, 'autocomplete should align with composer left edge').toBeGreaterThanOrEqual(composerBox.x - 1);
   expect(
@@ -815,7 +863,7 @@ test('autocomplete remains within the composer and viewport', async ({ page }) =
   expect(
     autocompleteBox.y + autocompleteBox.height,
     'autocomplete should stay above the textarea instead of covering typed text'
-  ).toBeLessThanOrEqual(composerBox.y + composerBox.height);
+  ).toBeLessThanOrEqual(textareaBox.y + 1);
 });
 
 test('empty conversation starter stays visible without colliding with composer', async ({ page }) => {
@@ -836,21 +884,26 @@ test('empty conversation starter stays visible without colliding with composer',
 });
 
 test('archived session view stays readable and read-only', async ({ page }) => {
-  await page.getByRole('button', { name: 'Archived sessions' }).click();
+  await openArchivedChats(page);
 
   const sidebar = page.getByRole('complementary', { name: 'Session navigation' });
   const workspace = page.getByRole('main', { name: 'Conversation workspace' });
+  const archivedRow = page.locator('.session-row', { hasText: 'Archived Visual Session' }).first();
   const archivedSession = sessionRow(page, 'Archived Visual Session');
   const composer = page.getByRole('form', { name: 'Message composer' });
 
   await expect(archivedSession).toBeVisible();
-  await expect(archivedSession).toContainText('Stopped');
-  await expect(workspace).toContainText('Archived Claude session');
+  await expect(archivedSession).toContainText('archived-project');
+  await expect(workspace).toContainText('Archived Visual Session With A Long Name');
+  await expect(workspace).toContainText('Cannot resume');
   await expect(workspace).toContainText('This session is archived and read-only. Unarchive it before resuming work or sending messages.');
   await expect(composer.getByRole('textbox', { name: 'Message' })).toBeDisabled();
   await expect(composer).toContainText('Archived sessions are read-only. Unarchive to continue.');
-  await expect(page.getByRole('button', { name: 'Unarchive', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Delete', exact: true })).toBeVisible();
+  await archivedRow.getByRole('button', { name: 'More session actions' }).click();
+  const archivedMenu = archivedRow.getByRole('menu', { name: 'Session actions' });
+  await expect(archivedMenu.getByRole('menuitem', { name: 'Unarchive' })).toBeVisible();
+  await expect(archivedMenu.getByRole('menuitem', { name: 'Delete' })).toBeVisible();
+  await page.keyboard.press('Escape');
 
   await boxFor(sidebar, 'archived session sidebar');
   await boxFor(workspace, 'archived conversation workspace');
@@ -860,7 +913,7 @@ test('archived session view stays readable and read-only', async ({ page }) => {
 });
 
 test('config view fits without chat composer or inspector collisions', async ({ page }) => {
-  await page.getByRole('button', { name: 'Config' }).click();
+  await openSettingsFromCommandPalette(page);
 
   const workspace = page.getByRole('main', { name: 'Configuration workspace' });
   const configPanel = page.locator('.settings-panel');
@@ -882,7 +935,7 @@ test('config view fits without chat composer or inspector collisions', async ({ 
   await expectNoHorizontalPageOverflow(page);
   await expectNoHorizontalElementOverflow(workspace, 'config workspace');
   await expect(page.getByRole('form', { name: 'Message composer' })).toHaveCount(0);
-  await expect(page.getByRole('complementary', { name: 'Session inspector' })).toHaveCount(0);
+  await expect(page.getByRole('complementary', { name: 'Activity drawer' })).toHaveCount(0);
 });
 
 test('failed tool output stays diagnosable without widening layout', async ({ page }) => {
@@ -893,17 +946,17 @@ test('failed tool output stays diagnosable without widening layout', async ({ pa
   const failedTool = page.locator('.tool-block.failed');
   const events = page.locator('.events');
 
-  await expect(failedTool).toContainText('Bash');
+  await expect(failedTool).toContainText('npm run build');
   await expect(failedTool).toContainText('failed');
   await expect(failedTool).toContainText('exit code 1');
-  await expect(failedTool.locator('.visible-result')).toContainText('missing file');
+  await expect(failedTool.locator('.tool-result-detail')).toContainText('missing file');
 
   const viewport = test.info().project.use.viewport!;
   const inspector = viewport.width > 760
     ? await showInspectorIfNeeded(page)
     : await expectCompactInspector(page, 'failed compact inspector');
   if (viewport.width > 760) {
-    const sessionTasks = page.getByRole('tabpanel', { name: 'Session tasks' });
+    const { panel: sessionTasks } = await openSessionTasks(page);
     await expect(sessionTasks.locator('.task-card.failed')).toContainText('Command failed with exit code 1');
     await expect(sessionTasks).toContainText('failed');
   }
@@ -956,16 +1009,16 @@ test.describe('screenshot baselines', () => {
 
   test('session list grouping, worktree pin branch, and archived mode have stable baselines', async ({ page }) => {
     const sidebar = page.getByRole('complementary', { name: 'Session navigation' });
-    await expect(sidebar).toContainText('Waiting');
-    await expect(sidebar).toContainText('Running');
+    await expect(sidebar).toContainText('waiting');
+    await expect(sidebar).toContainText('running');
     await expect(sidebar).toContainText('Recent chats');
     await expect(sidebar).toContainText('pin/visual-responsive-layout-validation-with-long-branch-name');
-    await expect(sidebar).toContainText('Failed');
+    await expect(sidebar).toContainText('failed');
     await expectVisualSnapshot(page, 'session-list-active-worktree-pin.png');
 
-    await page.getByRole('button', { name: 'Archived sessions' }).click();
+    await openArchivedChats(page);
     await expect(sessionRow(page, 'Archived Visual Session')).toBeVisible();
-    await expect(page.getByRole('main', { name: 'Conversation workspace' })).toContainText('Archived Claude session');
+    await expect(page.getByRole('main', { name: 'Conversation workspace' })).toContainText('Archived Visual Session With A Long Name');
     await expectVisualSnapshot(page, 'session-list-archived-readonly.png');
   });
 
@@ -975,12 +1028,13 @@ test.describe('screenshot baselines', () => {
     await selectSession(page, /Markdown Diff Review/);
     await expect(page.getByRole('heading', { name: 'Visual baseline review' })).toBeVisible();
     await expect(page.locator('.message-code')).toContainText('BaselineCard');
-    const diffDetails = page.locator('.tool-block.result-diff details.collapsed-result');
+    const diffDetails = page.locator('.tool-block.result-diff.tool-summary-details');
+    await expect(diffDetails).toBeVisible();
     await diffDetails.evaluate((element) => {
       (element as HTMLDetailsElement).open = true;
     });
     await expect(page.locator('.tool-result-pre.diff')).toContainText('native-shadow');
-    await expectVisualSnapshot(page, 'active-chat-markdown-code-diff.png');
+    await expectConversationTopVisualSnapshot(page, 'active-chat-markdown-code-diff.png');
   });
 
   test('tool activity and inspector timelines have stable baselines', async ({ page }) => {
@@ -994,10 +1048,8 @@ test.describe('screenshot baselines', () => {
     await expect(page.getByRole('tabpanel', { name: 'Activity' })).toContainText('Agent');
     await expectVisualSnapshot(page, 'tool-activity-inspector-timeline.png');
 
-    await page.getByRole('tab', { name: 'All tasks' }).evaluate((element) => {
-      (element as HTMLButtonElement).click();
-    });
-    await expect(page.getByRole('tabpanel', { name: 'All tasks' })).toContainText('Running visual smoke checks');
+    const { panel: allTasks } = await openAllTasks(page);
+    await expect(allTasks).toContainText('Running visual smoke checks');
     await expectViewportContains(inspector, 'all-tasks inspector');
     await expectVisualSnapshot(page, 'tool-activity-inspector-all-tasks.png');
   });
@@ -1076,13 +1128,13 @@ test('empty search results and no-task inspector states stay stable', async ({ p
     ? await showInspectorIfNeeded(page)
     : await expectCompactInspector(page, 'no-task compact inspector');
   if (viewport.width > 760) {
-    const sessionTasks = page.getByRole('tabpanel', { name: 'Session tasks' });
+    const { panel: sessionTasks } = await openSessionTasks(page);
     await expect(sessionTasks).toContainText('No agent activity yet');
     await expect(sessionTasks).toContainText('This session is quiet.');
     await boxFor(sessionTasks, 'empty session tasks panel');
 
-    await page.getByRole('tab', { name: 'All tasks' }).click();
-    await expect(page.getByRole('tabpanel', { name: 'All tasks' })).toContainText('Running visual smoke checks');
+    const { panel: allTasks } = await openAllTasks(page);
+    await expect(allTasks).toContainText('Running visual smoke checks');
   }
 
   await expectViewportContains(inspector, 'no-task inspector');

@@ -187,9 +187,9 @@ If accessing from another machine, run the printed SSH tunnel command on your lo
 
 Open the Web UI and click **New chat**. The start screen asks what Claude can help with first, then shows the selected project, worktree, and permission mode as Project context. Use **Change** to choose a recent project, enter a devbox workspace path, toggle git worktree creation, or adjust permission mode.
 
-The daemon starts the configured launcher in the selected project context, streams events back to the browser, and sends the first prompt from the start screen into the new session. Chat titles can be renamed later from the conversation header.
+The daemon starts the configured launcher in the selected project context, streams events back to the browser, and sends the first prompt from the start screen into the new session. Chat titles can be renamed later from each chat row's `...` menu.
 
-Use **New group** in the session sidebar to create custom chat groups. Drag chats onto a group heading/list, or use a chat row's **Move** control, to persist the session's group membership on the daemon.
+Use **New group** in the session sidebar to create custom chat groups. Drag chats onto a group heading/list, or use a chat row's `...` menu to choose **Move to <group>**, to persist the session's group membership on the daemon.
 
 ## Add context to a prompt
 

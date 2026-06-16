@@ -568,7 +568,7 @@ describe('App', () => {
     expect(conversationHeader).not.toBeNull();
     expect(within(conversationHeader as HTMLElement).queryByText('Chat')).not.toBeInTheDocument();
     expect(within(conversationHeader as HTMLElement).queryByText('/repo/one')).not.toBeInTheDocument();
-    expect(within(conversationHeader as HTMLElement).getByRole('button', { name: 'one · workspace' })).toBeInTheDocument();
+    expect(within(conversationHeader as HTMLElement).getByRole('button', { name: 'one' })).toBeInTheDocument();
     expect(within(conversationHeader as HTMLElement).queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument();
     expect(within(conversationHeader as HTMLElement).getByRole('button', { name: 'Activity' })).toBeInTheDocument();
     expect(within(conversationHeader as HTMLElement).queryByRole('button', { name: 'More session actions' })).not.toBeInTheDocument();
@@ -699,12 +699,13 @@ describe('App', () => {
     expect(within(openSessionRowMenu('Stopped Repo')).getByRole('menuitem', { name: 'Unpin' })).toBeInTheDocument();
   });
 
-  it('creates custom groups and moves sessions with the accessible move control', async () => {
+  it('creates custom groups and moves sessions from the session row menu', async () => {
     sessionGroups = [{ id: 'g1', name: 'Launch work', sortOrder: 0, createdAt: '2026-06-11T00:00:00Z', updatedAt: '2026-06-11T00:00:00Z' }];
     render(<App />);
 
     expect(await screen.findByRole('heading', { name: 'Launch work' })).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Move Stopped Repo to group'), { target: { value: 'g1' } });
+    expect(screen.queryByLabelText('Move Stopped Repo to group')).not.toBeInTheDocument();
+    fireEvent.click(within(openSessionRowMenu('Stopped Repo')).getByRole('menuitem', { name: 'Move to Launch work' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/sessions/s2', expect.objectContaining({ method: 'PATCH' })));
     const moveCall = fetchMock.mock.calls.find(([url, init]) => url === '/api/sessions/s2' && init?.method === 'PATCH');
@@ -745,7 +746,7 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByRole('heading', { name: 'Launch work' })).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Move Stopped Repo to group'), { target: { value: 'g1' } });
+    fireEvent.click(within(openSessionRowMenu('Stopped Repo')).getByRole('menuitem', { name: 'Move to Launch work' }));
 
     expect(await screen.findByText('move failed')).toBeInTheDocument();
     const groupSection = screen.getByRole('heading', { name: 'Launch work' }).closest('.session-section');
@@ -1539,7 +1540,7 @@ describe('App', () => {
     expect(header).not.toBeNull();
     expect(within(header as HTMLElement).queryByText('/repo/one')).not.toBeInTheDocument();
 
-    fireEvent.click(within(header as HTMLElement).getByRole('button', { name: 'one · workspace' }));
+    fireEvent.click(within(header as HTMLElement).getByRole('button', { name: 'one' }));
 
     expect(await within(header as HTMLElement).findByText('cwd')).toBeInTheDocument();
     expect(within(header as HTMLElement).getByText('/repo/one')).toBeInTheDocument();
@@ -1930,7 +1931,7 @@ describe('App', () => {
     const activeHeaderBeforeStop = screen.getByRole('heading', { name: 'Worktree Repo' }).closest('header');
     expect(activeHeaderBeforeStop).not.toBeNull();
     expect(activeHeaderBeforeStop).not.toHaveTextContent('/repo/one');
-    const worktreeChip = within(activeHeaderBeforeStop as HTMLElement).getByRole('button', { name: 'one · worktree' });
+    const worktreeChip = within(activeHeaderBeforeStop as HTMLElement).getByRole('button', { name: 'one' });
     expect(worktreeChip).toBeInTheDocument();
     fireEvent.click(worktreeChip);
     expect(await within(activeHeaderBeforeStop as HTMLElement).findByText('/repo/one')).toBeInTheDocument();
@@ -1951,7 +1952,7 @@ describe('App', () => {
     await waitFor(() => expect(screen.queryByText('pin/abc123')).not.toBeInTheDocument());
     const activeHeader = screen.getByRole('heading', { name: 'Worktree Repo' }).closest('header');
     expect(activeHeader).not.toBeNull();
-    expect(within(activeHeader as HTMLElement).getByRole('button', { name: 'one · workspace' })).toBeInTheDocument();
+    expect(within(activeHeader as HTMLElement).getByRole('button', { name: 'one' })).toBeInTheDocument();
   });
 
   it('shows dirty worktree files and blocks destructive cleanup by default', async () => {

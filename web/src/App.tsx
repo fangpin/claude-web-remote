@@ -824,7 +824,6 @@ function focusFallbackAfterSidebarClose() {
           onAllowPermission={onAllowPermission}
           onDenyPermission={onDenyPermission}
           onOpenPreviewPath={onOpenPreviewPath}
-          onRenameSession={sessionState.onRename}
           onUseEmptyStatePrompt={composerState.useEmptyStatePrompt}
         />
       }

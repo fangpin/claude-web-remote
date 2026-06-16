@@ -307,6 +307,7 @@ label {
   inset: 0;
   z-index: 80;
   display: grid;
+  overflow: auto;
   place-items: start center;
   background: rgb(45 42 38 / 0.24);
   padding: min(12vh, 86px) 18px 18px;
@@ -315,8 +316,10 @@ label {
 
 .command-palette {
   display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   gap: 12px;
   width: min(620px, 100%);
+  max-height: calc(100dvh - min(12vh, 86px) - 18px);
   border: 1px solid rgb(255 253 250 / 0.58);
   border-radius: 20px;
   background: linear-gradient(145deg, rgb(255 253 250 / 0.96), rgb(247 241 232 / 0.94));
@@ -348,6 +351,8 @@ label {
 .command-palette-list {
   display: grid;
   gap: 5px;
+  min-height: 0;
+  overflow: auto;
 }
 
 .command-palette-list button {
@@ -1054,27 +1059,6 @@ button.danger:hover,
   white-space: nowrap;
 }
 
-.session-move-select {
-  position: absolute;
-  right: 37px;
-  bottom: 9px;
-  max-width: 112px;
-  min-height: 24px;
-  border-radius: 7px;
-  background: rgb(255 253 250 / 0.9);
-  padding: 2px 6px;
-  color: var(--muted);
-  font-size: 11px;
-  opacity: 0;
-}
-
-.session-row:hover .session-move-select,
-.session-row:focus-within .session-move-select,
-.session-row.active .session-move-select,
-.session-move-select:focus-visible {
-  opacity: 1;
-}
-
 .session-action-menu {
   position: absolute;
   top: 8px;
@@ -1137,6 +1121,14 @@ button.danger:hover,
 .session-action-menu-popover button:focus-visible {
   border-color: var(--border);
   background: var(--surface-hover);
+}
+
+.session-action-menu-group {
+  display: grid;
+  gap: 3px;
+  margin: 3px 0;
+  border-block: 1px solid var(--border);
+  padding: 4px 0;
 }
 
 .status {
@@ -1385,29 +1377,6 @@ button.danger:hover,
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.editable-session-title {
-  display: grid;
-  min-width: 0;
-  border-color: transparent;
-  background: transparent;
-  padding: 0;
-  text-align: left;
-}
-
-.editable-session-title:hover {
-  border-color: transparent;
-  background: transparent;
-}
-
-.editable-session-title-input {
-  min-width: min(360px, 42vw);
-  height: 30px;
-  border-radius: 8px;
-  background: var(--surface);
-  font-size: 14px;
-  font-weight: 700;
 }
 
 .conversation-header-actions {
@@ -3570,7 +3539,7 @@ button.danger:hover,
 .activity-drawer-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 55;
+  z-index: 71;
   width: auto;
   height: auto;
   border: 0;
@@ -3591,7 +3560,7 @@ button.danger:hover,
   top: 0;
   right: 0;
   bottom: 0;
-  z-index: 60;
+  z-index: 72;
   display: grid;
   grid-template-rows: auto auto minmax(0, auto) minmax(0, 1fr);
   width: min(var(--inspector-width, 360px), calc(100vw - 72px));
@@ -4871,12 +4840,6 @@ textarea {
   letter-spacing: 0.075em;
 }
 
-.editable-session-title button {
-  border-color: transparent;
-  border-radius: 999px;
-  background: rgb(255 250 242 / 0.72);
-}
-
 .session-continuity-summary {
   margin-top: 7px;
 }
@@ -5248,7 +5211,6 @@ textarea {
   .session-section-heading > span,
   .session-section-heading-actions > span,
   .session-group-empty,
-  .session-move-select,
   .session-continuity-summary span,
   .session-context-badge,
   .session-context-popover summary,

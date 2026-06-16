@@ -243,19 +243,24 @@ function SessionActionMenu({
   session,
   actions,
   isPinned,
+  sessionGroups,
   onCopySessionId,
+  onMoveSessionToGroup,
   onRenameSession,
   onTogglePinned
 }: {
   session: SessionInfo;
   actions: SessionRowAction[];
   isPinned: boolean;
+  sessionGroups: SessionGroup[];
   onCopySessionId: (sessionId: string) => void;
+  onMoveSessionToGroup: (sessionId: string, groupId: string | null) => void;
   onRenameSession: (session: SessionInfo) => void;
   onTogglePinned: (sessionId: string) => void;
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const sessionTitle = session.name || pathBasename(projectPathForSession(session));
+  const availableMoveTargets = sessionGroups.filter((group) => group.id !== session.groupId);
 
   function choose(action: () => void) {
     setIsOpen(false);
@@ -280,6 +285,18 @@ function SessionActionMenu({
           <button type="button" role="menuitem" onClick={() => choose(() => onRenameSession(session))}>Rename</button>
           <button type="button" role="menuitem" onClick={() => choose(() => onCopySessionId(session.id))}>Copy session ID</button>
           <button type="button" role="menuitem" onClick={() => choose(() => onTogglePinned(session.id))}>{isPinned ? 'Unpin' : 'Pin'}</button>
+          {(session.groupId || availableMoveTargets.length > 0) && (
+            <div className="session-action-menu-group" role="group" aria-label="Move chat">
+              {session.groupId && (
+                <button type="button" role="menuitem" onClick={() => choose(() => onMoveSessionToGroup(session.id, null))}>Move to Ungrouped</button>
+              )}
+              {availableMoveTargets.map((group) => (
+                <button key={group.id} type="button" role="menuitem" onClick={() => choose(() => onMoveSessionToGroup(session.id, group.id))}>
+                  Move to {group.name}
+                </button>
+              ))}
+            </div>
+          )}
           {actions.map((action) => (
             <button
               key={`${session.id}:${action.id}`}
@@ -354,21 +371,13 @@ function SessionListItem({
           </span>
         </span>
       </button>
-      <select
-        className="session-move-select"
-        aria-label={`Move ${sessionTitle} to group`}
-        value={session.groupId ?? ''}
-        onChange={(event) => onMoveSessionToGroup(session.id, event.target.value || null)}
-        title="Move conversation to group"
-      >
-        <option value="">Ungrouped</option>
-        {sessionGroups.map((group) => <option value={group.id} key={group.id}>{group.name}</option>)}
-      </select>
       <SessionActionMenu
         session={session}
         actions={rowActions}
         isPinned={isPinned}
+        sessionGroups={sessionGroups}
         onCopySessionId={onCopySessionId}
+        onMoveSessionToGroup={onMoveSessionToGroup}
         onRenameSession={onRenameSession}
         onTogglePinned={onTogglePinned}
       />
